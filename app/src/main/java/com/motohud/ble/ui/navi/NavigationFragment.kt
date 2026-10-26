@@ -8,6 +8,7 @@ import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -36,7 +37,9 @@ import com.motohud.ble.ui.common.MotoDialog
 import com.motohud.ble.MotoHudApp
 import com.motohud.ble.R
 import com.motohud.ble.amap.AmapManager
+import com.motohud.ble.data.NaviPrefs
 import com.motohud.ble.data.SavedPlaceEntity
+import com.motohud.ble.data.SearchHistory
 import com.motohud.ble.ble.BleConnectionManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -67,14 +70,22 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
     private lateinit var etSearch: EditText
     private lateinit var btnClear: ImageView
     private lateinit var rvTips: RecyclerView
+    private lateinit var tvTipsState: TextView
     private lateinit var chipsContainer: LinearLayout
     private lateinit var cardKeyMissing: View
     private lateinit var tvBleHint: TextView
     private lateinit var tvLocation: TextView
     private lateinit var fabLocation: View
+    private lateinit var btnTraffic: ImageView
     private lateinit var chipsScroll: View
     private lateinit var cardBottom: View
     private lateinit var searchArea: View
+
+    // ---------- 最近搜索 ----------
+    private lateinit var historyBlock: View
+    private lateinit var rvHistory: RecyclerView
+    private lateinit var historyAdapter: SearchHistoryAdapter
+    private var historyVisible = false
 
     /** 搜索建议列表的高度上限（屏高 62%） */
     private var tipsMaxHeight = 0
@@ -95,15 +106,37 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
         etSearch = view.findViewById(R.id.et_search)
         btnClear = view.findViewById(R.id.btn_search_clear)
         rvTips = view.findViewById(R.id.rv_tips)
+        tvTipsState = view.findViewById(R.id.tv_tips_state)
         chipsContainer = view.findViewById(R.id.chips_container)
         cardKeyMissing = view.findViewById(R.id.card_key_missing)
         tvBleHint = view.findViewById(R.id.tv_ble_hint)
         tvLocation = view.findViewById(R.id.tv_current_location)
         fabLocation = view.findViewById(R.id.fab_location)
+        btnTraffic = view.findViewById(R.id.btn_traffic)
         chipsScroll = view.findViewById(R.id.chips_scroll)
         cardBottom = view.findViewById(R.id.card_bottom)
         searchArea = view.findViewById(R.id.search_area)
         mapView = view.findViewById(R.id.map_view)
+
+        historyBlock = view.findViewById(R.id.search_history_block)
+        rvHistory = view.findViewById(R.id.rv_search_history)
+        historyAdapter = SearchHistoryAdapter(
+            onPick = { item ->
+                hideHistory()
+                etSearch.setText(item.name)
+                openGuidance(item.name, item.lat, item.lng)
+            },
+            onDelete = { item ->
+                SearchHistory.remove(requireContext(), item.name)
+                refreshHistory()
+            }
+        )
+        rvHistory.layoutManager = LinearLayoutManager(requireContext())
+        rvHistory.adapter = historyAdapter
+        view.findViewById<View>(R.id.search_history_clear).setOnClickListener {
+            SearchHistory.clear(requireContext())
+            refreshHistory()
+        }
 
         // 顶部搜索区贴近顶栏（本页已在主界面 banner 之下，状态栏高度由 banner 预留，
         // 这里只留 8dp 间距把搜索框往上提，不再叠加状态栏高度导致黑边/下移）
@@ -129,6 +162,13 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
             )
         ).apply { delay = 0.08f }
 
+        // ---------- 最近搜索 ----------
+        // 只在"点了搜索框、还没开始输入"时展示：
+        // 已经有输入内容时屏幕属于联想结果，两者同时出现会互相挤。
+        etSearch.setOnFocusChangeListener { _, focused ->
+            if (focused && etSearch.text.isNullOrBlank()) refreshHistory() else hideHistory()
+        }
+
         etSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -139,13 +179,31 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
                 if (text.isEmpty()) {
                     vm.clearTips()
                     hideTips()
+                    // 清空后又回到"刚点进搜索框"的状态 → 把历史重新露出来
+                    refreshHistory()
                     return
                 }
+                hideHistory()
                 searchRunnable = Runnable { vm.searchTips(text) }.also {
-                    searchHandler.postDelayed(it, 300L)
+                    // 450ms 而不是 300ms：连续输入时每次多攒一点点字符，
+                    // 一次搜索能覆盖更多已输入的字母，请求数明显下降
+                    searchHandler.postDelayed(it, 450L)
                 }
             }
         })
+
+        // 回车/点搜索：换 PoiSearch 拿更全的召回与真实距离（联想层用 Inputtips，快但召回窄）
+        etSearch.setOnEditorActionListener { _, actionId, event ->
+            val isSearch = actionId == EditorInfo.IME_ACTION_SEARCH ||
+                actionId == EditorInfo.IME_ACTION_DONE ||
+                (event != null && event.keyCode == android.view.KeyEvent.KEYCODE_ENTER)
+            if (!isSearch) return@setOnEditorActionListener false
+            val text = etSearch.text?.toString().orEmpty().trim()
+            if (text.isEmpty()) return@setOnEditorActionListener true
+            searchRunnable?.let { searchHandler.removeCallbacks(it) }
+            vm.searchResults(text)
+            true
+        }
 
         btnClear.setOnClickListener { etSearch.setText("") }
 
@@ -155,9 +213,20 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
         view.findViewById<View>(R.id.btn_refresh_location).setOnClickListener { locateNow() }
         view.findViewById<View>(R.id.btn_manage_places).setOnClickListener { showManagePlaces() }
         view.findViewById<View>(R.id.btn_route_prefs).setOnClickListener { showRoutePrefs() }
-        view.findViewById<View>(R.id.btn_manual_dest).setOnClickListener { showManualDestDialog() }
+        // 「输入坐标」入口已移除：普通用户没有经纬度概念，放着也没人点
         view.findViewById<View>(R.id.btn_navi_history).setOnClickListener {
             com.motohud.ble.ui.navi.NaviHistoryActivity.start(requireContext())
+        }
+        // 车况：底部页签收成两个之后，这里是唯一入口（外加各页空态的「去连接」）
+        view.findViewById<View>(R.id.btn_vehicle).setOnClickListener {
+            com.motohud.ble.ui.vehicle.VehicleActivity.start(requireContext())
+        }
+        // 实时路况开关。默认关：路况瓦片约 30s 刷一次，是地图页最大的流量项之一
+        btnTraffic.setOnClickListener {
+            val on = !NaviPrefs.mapTraffic.value
+            NaviPrefs.setMapTraffic(on)
+            runCatching { aMap?.setTrafficEnabled(on) }
+            renderTrafficButton()
         }
         view.findViewById<View>(R.id.btn_setup_key).setOnClickListener { showKeySetup() }
         fabLocation.setOnClickListener { locateNow() }
@@ -171,6 +240,8 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
                         tipAdapter.submitList(list)
                         val active = list.isNotEmpty()
                         rvTips.visibility = if (active) View.VISIBLE else View.GONE
+                        // 有结果就把状态行收掉，否则"搜索中…"会压在结果列表上方
+                        if (active) tvTipsState.visibility = View.GONE
                         // 搜索建议展开时收起底部地址卡与浮动按钮，避免列表被遮挡
                         chipsScroll.visibility = if (active) View.GONE else View.VISIBLE
                         cardBottom.visibility = if (active) View.GONE else View.VISIBLE
@@ -188,21 +259,24 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
                 }
                 launch {
                     vm.tipsState.collect { state ->
+                        // 状态改为就地显示，不再弹 Toast：
+                        // 打字时每敲几个字就"搜索中/无结果"轮播一次，是最吵的提示
                         when (state) {
-                            NavigationViewModel.TipsState.LOADING ->
-                                Toast.makeText(requireContext(), R.string.navi_tips_searching, Toast.LENGTH_SHORT).show()
-                            NavigationViewModel.TipsState.EMPTY ->
-                                Toast.makeText(requireContext(), R.string.navi_tips_empty, Toast.LENGTH_SHORT).show()
-                            NavigationViewModel.TipsState.ERROR -> {
-                                val code = vm.tipsErrorCode.value
-                                val msg = if (code > 0) {
-                                    getString(R.string.navi_tips_error_code, code)
-                                } else {
-                                    getString(R.string.navi_tips_error)
-                                }
-                                Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
+                            NavigationViewModel.TipsState.LOADING -> {
+                                tvTipsState.visibility = View.VISIBLE
+                                tvTipsState.setText(R.string.navi_tips_searching)
                             }
-                            else -> Unit
+                            NavigationViewModel.TipsState.EMPTY -> {
+                                tvTipsState.visibility = View.VISIBLE
+                                tvTipsState.setText(R.string.navi_tips_empty)
+                            }
+                            NavigationViewModel.TipsState.ERROR -> {
+                                tvTipsState.visibility = View.VISIBLE
+                                // 错误码只进日志：用户看 10009 没有任何意义
+                                android.util.Log.w("NavigationFragment", "搜索失败 code=${vm.tipsErrorCode.value}")
+                                tvTipsState.setText(R.string.navi_tips_error)
+                            }
+                            else -> tvTipsState.visibility = View.GONE
                         }
                     }
                 }
@@ -254,14 +328,28 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
                     isMyLocationButtonEnabled = false
                     isRotateGesturesEnabled = true
                 }
-                runCatching { setTrafficEnabled(true) }
+                // 路况图层跟随设置（默认关）。以前这里写死 true，
+                // 每 30s 一刷的路况瓦片是地图页最大的流量来源。
+                runCatching { setTrafficEnabled(NaviPrefs.mapTraffic.value) }
             }
+            renderTrafficButton()
             // 权限检查放到地图准备好之后：没权限时 SDK 初始化会抛异常
             enableMyLocation()
             moveToMyLocation()
         } catch (e: Exception) {
-            Toast.makeText(requireContext(), R.string.navi_tips_error, Toast.LENGTH_SHORT).show()
+            // 地图没起来时不再弹 Toast（用户看不懂，也关不掉）；
+            // 日志留痕，界面保持"地图空白 + 搜索仍可用"的状态
+            android.util.Log.w("NavigationFragment", "地图初始化失败", e)
         }
+    }
+
+    /** 路况按钮：开=高亮，关=压暗 */
+    private fun renderTrafficButton() {
+        val on = NaviPrefs.mapTraffic.value
+        btnTraffic.alpha = if (on) 1f else 0.5f
+        btnTraffic.setBackgroundResource(
+            if (on) R.drawable.bg_navi_circle_active else R.drawable.bg_navi_circle
+        )
     }
 
     /**
@@ -339,8 +427,8 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
             vm.locating.first { !it }
             val loc = vm.currentLocation
             if (loc == null) {
-                Toast.makeText(requireContext(), R.string.navi_locate_failed, Toast.LENGTH_SHORT)
-                    .show()
+                // 不弹 Toast：定位失败本身就显示在底部定位行里，弹窗只是重复打扰
+                tvLocation.setText(R.string.navi_locate_failed)
             } else {
                 updateMeMarker(loc.first, loc.second, vm.accuracy.value)
                 aMap?.animateCamera(
@@ -453,7 +541,13 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
      */
     private fun openGuidance(name: String, lat: Double, lng: Double) {
         hideTips()
+        hideHistory()
+        // 只在这里写历史：表示"用户确实查过这个地方并进了路线页"。
+        // 输入过程中写，历史里会塞满打了一半和打错的词。
+        SearchHistory.add(requireContext(), name, lat, lng)
         etSearch.setText("")
+        // 交出焦点让键盘收掉，否则输入法会把接下来的路线页顶上去
+        etSearch.clearFocus()
         val loc = vm.currentLocation
         RouteSelectActivity.start(
             requireContext(), name, lat, lng,
@@ -462,46 +556,32 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
         )
     }
 
+    /**
+     * 刷新最近搜索。
+     *
+     * 一条历史都没有时整块收掉 —— 一个空标题加上"清空"按钮，
+     * 对新用户来说是把界面弄乱，而不是给个功能。
+     */
+    private fun refreshHistory() {
+        val items = SearchHistory.recent(requireContext())
+        if (items.isEmpty()) {
+            hideHistory()
+            return
+        }
+        historyAdapter.submit(items)
+        historyBlock.visibility = View.VISIBLE
+        historyVisible = true
+    }
+
+    private fun hideHistory() {
+        historyBlock.visibility = View.GONE
+        historyVisible = false
+    }
+
     private fun hideTips() {
         rvTips.visibility = View.GONE
     }
 
-    private fun showManualDestDialog() {
-        val dialogView = layoutInflater.inflate(R.layout.dialog_manual_dest, null)
-        val etName = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.et_dest_name)
-        val etLat = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.et_dest_lat)
-        val etLng = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.et_dest_lng)
-        val tilLat = dialogView.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.til_dest_lat)
-        val tilLng = dialogView.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.til_dest_lng)
-        // 坐标框只放提示，不预填。
-        // 预填会让用户输入变成"追加"，得到 30.xxxx40.0801 这种拼接值，算出离谱路线。
-        // 注意提示要设在 TextInputLayout 的 helperText 上：
-        // 直接设 EditText.hint 会和 TIL 自己的 floating hint 抢同一块位置，
-        // 叠成「纬度（GCJ02，如 39.9087）42)」这种鬼样子。
-        vm.currentLocation?.let { (lat, lng) ->
-            tilLat.helperText = getString(R.string.manual_dest_use_current, lat)
-            tilLng.helperText = getString(R.string.manual_dest_use_current, lng)
-        }
-        // 「选择导航方式」不再作为中性按钮：导航页底部已有「选择地图」，
-        // 三颗长中文按钮还会被 Material 挤成竖排。这里只留 取消 / 开始导航。
-        MotoDialog.builder(requireContext())
-            .setTitle(R.string.manual_dest_title)
-            .setView(dialogView)
-            .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(R.string.start_navi) { _, _ ->
-                val name = etName.text?.toString()?.trim().orEmpty().ifEmpty { "目的地" }
-                // 坐标留空 = 用当前位置（helperText 里已经给出提示）
-                val cur = vm.currentLocation
-                val lat = etLat.text?.toString()?.trim()?.toDoubleOrNull() ?: cur?.first
-                val lng = etLng.text?.toString()?.trim()?.toDoubleOrNull() ?: cur?.second
-                if (lat == null || lng == null || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-                    Toast.makeText(requireContext(), R.string.place_input_invalid, Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-                openGuidance(name, lat, lng)
-            }
-            .show()
-    }
 
     // ---------- 高德 Key ----------
 

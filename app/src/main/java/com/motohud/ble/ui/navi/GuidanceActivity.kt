@@ -1,12 +1,22 @@
 package com.motohud.ble.ui.navi
 
 import android.Manifest
+import android.app.PendingIntent
+import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.Icon
 import android.location.LocationManager
+import android.os.Build
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
+import android.util.Rational
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
@@ -29,7 +39,6 @@ import com.amap.api.maps.model.Marker
 import com.amap.api.maps.model.MarkerOptions
 import com.amap.api.maps.model.Polyline
 import com.amap.api.maps.model.PolylineOptions
-import com.motohud.ble.ui.common.MotoDialog
 import com.motohud.ble.MotoHudApp
 import com.motohud.ble.R
 import com.motohud.ble.amap.AmapManager
@@ -40,11 +49,13 @@ import com.motohud.ble.amap.formatAccuracy
 import com.motohud.ble.amap.locationTypeLabel
 import com.motohud.ble.ble.BleConnectionManager
 import com.motohud.ble.data.NaviPrefs
+import com.motohud.ble.data.NaviTrack
 import com.motohud.ble.navi.CoordConverter
 import com.motohud.ble.navi.NaviEngine
 import com.motohud.ble.navi.RouteData
 import com.motohud.ble.navi.RouteHandoff
 import com.motohud.ble.navi.RouteNaviEngine
+import com.motohud.ble.ui.common.MotoDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -57,21 +68,19 @@ import kotlin.math.roundToInt
 /**
  * 手机导航页（专业导航软件体验）。
  *
- * 数据流沿用投屏链路，只是把"高德导航 SDK 的 NaviInfo"换成自研 [RouteNaviEngine]：
+ * ## 数据流
+ *   POI/收藏地址 → 路线规划（摩托车/驾车策略）→ [RouteNaviEngine] 每秒推演
+ *     → 手机界面（转向横幅 / 下一步预告 / 已走变灰 / 剩余 / ETA / 地图跟随）
+ *     → [com.motohud.ble.navi.NaviForwarder] → BLE → 车机箭头屏
  *
- *   POI/收藏地址 → 路线规划（摩托车/驾车策略）→ 引擎每秒推演
- *     → 手机界面（转向横幅 / 剩余 / 预计到达 / 地图跟随 / 当前位置点）
- *     → [com.motohud.ble.navi.NaviForwarder] → BLE → 车机屏幕
+ * ## 四种显示形态（并列，互不替代）
+ *  - **本页地图**：手机在支架、屏亮、要看路时的主形态；
+ *  - **投到车机**：一个开关（[NaviPrefs.castEnabled]），开了就往车机发指令，手机可息屏；
+ *  - **通知栏导航条**：息屏 / 兜里也能瞥一眼方向（[com.motohud.ble.service.NaviForegroundService]）；
+ *  - **画中画小窗**：切到微信、音乐时的浮窗（系统 PiP，零权限）。
  *
- * 定位说明（漂移修复）：
- *  - 优先使用高德连续定位（GCJ02，多源融合），回退系统 GPS 时强制做 WGS84→GCJ02 纠偏；
- *  - 所有定位帧经 [com.motohud.ble.navi.LocationFilter] 过滤精度差、跳点与静止抖动；
- *  - 地图上的当前位置点由引擎状态驱动，与路线匹配使用同一份坐标，不再"蓝点与路线各走各的"。
- *
- * 三种使用形态：
- *  - 手机导航（本页）：全屏地图 + 转向横幅 + 底部信息卡；
- *  - 投屏到车机：转 [HudActivity]（横屏大字），共用同一引擎，导航不中断；
- *  - 未连接车机：仅本机显示，连接后自动恢复转发。
+ * 原来的横屏 HUD 页已删除：它画的三项（转向图标 / 本段剩余 / 全程剩余）与车机 100% 重复，
+ * 多出来的 ETA/速度撑不起一个独立页面。
  */
 class GuidanceActivity : AppCompatActivity() {
 
@@ -81,12 +90,21 @@ class GuidanceActivity : AppCompatActivity() {
 
     private var mapView: MapView? = null
     private var aMap: AMap? = null
-    private var routeLine: Polyline? = null
+
+    /** 全程路线（未走部分）与已走路段，两条线叠出"走到哪了"的效果 */
+    private var aheadLine: Polyline? = null
+    private var doneLine: Polyline? = null
     private var destMarker: Marker? = null
     private var meMarker: Marker? = null
 
+    /** 路线展平后的点与累计距离，用于把折线按 traveled 切两段 */
+    private var routePoints: List<LatLng> = emptyList()
+    private var routeCum: DoubleArray = DoubleArray(0)
+    private var lastProgressM = -1
+
     private lateinit var topBar: View
     private lateinit var bottomInfo: View
+    private lateinit var bottomExtra: View
     private lateinit var tvDestName: TextView
     private lateinit var tvDestSub: TextView
     private lateinit var tvModeBadge: TextView
@@ -95,6 +113,7 @@ class GuidanceActivity : AppCompatActivity() {
     private lateinit var ivTurnIcon: ImageView
     private lateinit var tvTurnInstruction: TextView
     private lateinit var tvTurnRoad: TextView
+    private lateinit var tvTurnNext: TextView
     private lateinit var tvTurnDistance: TextView
     private lateinit var tvEta: TextView
     private lateinit var tvRemain: TextView
@@ -103,8 +122,18 @@ class GuidanceActivity : AppCompatActivity() {
     private lateinit var tvGpsQuality: TextView
     private lateinit var tvSignalWarn: View
     private lateinit var tvBleHint: TextView
+    private lateinit var tvLights: TextView
+    private lateinit var tvTolls: TextView
+    private lateinit var tvStepProgress: TextView
+    private lateinit var tvTrafficEstimate: TextView
     private lateinit var planningOverlay: View
     private lateinit var arrivedOverlay: View
+    private lateinit var mapActions: View
+    private lateinit var btnPip: View
+    private lateinit var tvArriveSub: TextView
+    private lateinit var tvArriveDistance: TextView
+    private lateinit var tvArriveDuration: TextView
+    private lateinit var tvArriveAvg: TextView
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
@@ -125,11 +154,23 @@ class GuidanceActivity : AppCompatActivity() {
     /** 导航历史：本次导航对应的记录 id，停止/到达时用它补完用时与车况 */
     private var historyId: Long? = null
 
-    /** 本次导航是否投屏到了车机（记进历史） */
-    private var castToDevice = false
+    /** 已结束但还要能"查看轨迹"的记录 id */
+    private var finishedHistoryId: Long? = null
+
+    /** 本次导航开始时刻（到达卡里算用时/均速） */
+    private var naviStartMs = 0L
 
     /** 用户手动拖动地图后暂停自动跟随，点「回中」恢复 */
     private var userPanned = false
+
+    /** 路口前自动放大：stepRemain < 200m 且是转弯类图标 */
+    private var zoomBoost = false
+
+    /** 底部卡是否展开（默认收起，只显示 ETA/剩余/速度） */
+    private var cardExpanded = false
+
+    /** 是否处于画中画小窗（此时不能 detach 转发） */
+    private var inPip = false
 
     /** 是否已提示过定位精度差（避免反复弹） */
     private var weakGpsToastShown = false
@@ -139,6 +180,16 @@ class GuidanceActivity : AppCompatActivity() {
     private val locationPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { /* 无定位时引擎自动走推算模式 */ }
+
+    /** 画中画里的「结束导航」按钮广播 */
+    private val pipReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_PIP_STOP) {
+                stopNavi(sendFinish = true)
+                finish()
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -168,12 +219,20 @@ class GuidanceActivity : AppCompatActivity() {
         updateVoiceButton()
         observeState()
 
+        // 画中画的「结束导航」按钮：动态注册（不需要 exported 广播）
+        ContextCompat.registerReceiver(
+            this, pipReceiver, IntentFilter(ACTION_PIP_STOP),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        btnPip.visibility = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) View.VISIBLE else View.GONE
+
         planAndStart()
     }
 
     private fun bindViews() {
         topBar = findViewById(R.id.top_bar)
         bottomInfo = findViewById(R.id.bottom_info)
+        bottomExtra = findViewById(R.id.bottom_extra)
         tvDestName = findViewById(R.id.tv_dest_name)
         tvDestSub = findViewById(R.id.tv_dest_sub)
         tvModeBadge = findViewById(R.id.tv_mode_badge)
@@ -182,6 +241,7 @@ class GuidanceActivity : AppCompatActivity() {
         ivTurnIcon = findViewById(R.id.iv_turn_icon)
         tvTurnInstruction = findViewById(R.id.tv_turn_instruction)
         tvTurnRoad = findViewById(R.id.tv_turn_road)
+        tvTurnNext = findViewById(R.id.tv_turn_next)
         tvTurnDistance = findViewById(R.id.tv_turn_distance)
         tvEta = findViewById(R.id.tv_eta)
         tvRemain = findViewById(R.id.tv_remain)
@@ -190,8 +250,18 @@ class GuidanceActivity : AppCompatActivity() {
         tvGpsQuality = findViewById(R.id.tv_gps_quality)
         tvSignalWarn = findViewById(R.id.tv_signal_warn)
         tvBleHint = findViewById(R.id.tv_guidance_ble_hint)
+        tvLights = findViewById(R.id.tv_lights)
+        tvTolls = findViewById(R.id.tv_tolls)
+        tvStepProgress = findViewById(R.id.tv_step_progress)
+        tvTrafficEstimate = findViewById(R.id.tv_traffic_estimate)
         planningOverlay = findViewById(R.id.planning_overlay)
         arrivedOverlay = findViewById(R.id.arrived_overlay)
+        mapActions = findViewById(R.id.map_actions)
+        btnPip = findViewById(R.id.btn_pip)
+        tvArriveSub = findViewById(R.id.tv_arrive_sub)
+        tvArriveDistance = findViewById(R.id.tv_arrive_distance)
+        tvArriveDuration = findViewById(R.id.tv_arrive_duration)
+        tvArriveAvg = findViewById(R.id.tv_arrive_avg)
     }
 
     /**
@@ -216,24 +286,31 @@ class GuidanceActivity : AppCompatActivity() {
 
     private fun bindActions() {
         findViewById<View>(R.id.btn_back).setOnClickListener { confirmExit() }
-        // 顶栏投屏钮 = 显示方式切换（手机导航 / 车机投屏）
-        findViewById<View>(R.id.btn_cast).setOnClickListener { showDisplayModeDialog() }
-        findViewById<View>(R.id.btn_cast_navi).setOnClickListener { showDisplayModeDialog() }
+        // 顶栏投屏钮 = 「投到车机」开关（已不再是跳页面）
+        findViewById<View>(R.id.btn_cast).setOnClickListener { showCastDialog() }
+        findViewById<View>(R.id.btn_cast_navi).setOnClickListener { showCastDialog() }
         findViewById<View>(R.id.btn_stop_navi).setOnClickListener { confirmExit() }
         findViewById<View>(R.id.btn_finish_navi).setOnClickListener {
             stopNavi(sendFinish = true)
             finish()
         }
+        btnPip.setOnClickListener { enterPip() }
+        findViewById<View>(R.id.btn_expand).setOnClickListener { toggleCard() }
+        findViewById<View>(R.id.btn_view_track).setOnClickListener {
+            val id = finishedHistoryId
+            if (id == null || id <= 0) {
+                Toast.makeText(this, R.string.guidance_no_track, Toast.LENGTH_SHORT).show()
+            } else {
+                NaviHistoryDetailActivity.start(this, id)
+            }
+        }
+        findViewById<View>(R.id.btn_navi_again).setOnClickListener { naviAgain() }
+
         btnVoice.setOnClickListener {
             val on = !NaviPrefs.voice.value
             NaviPrefs.setVoice(on)
             updateVoiceButton()
             if (!on) runCatching { tts?.stop() }
-            Toast.makeText(
-                this,
-                if (on) R.string.navi_voice_on else R.string.navi_voice_off,
-                Toast.LENGTH_SHORT
-            ).show()
         }
         tvModeBadge.setOnClickListener { showRoutePrefsDialog() }
         findViewById<View>(R.id.btn_overview).setOnClickListener {
@@ -353,22 +430,24 @@ class GuidanceActivity : AppCompatActivity() {
         // 引擎为全局共享实例，上一次导航的 arrived=true 仍留在 StateFlow 里，
         // 必须先置位再 start，避免首帧按旧状态误判「已到达」。
         started = true
+        stopped = false
+        naviStartMs = System.currentTimeMillis()
         engine.start(destName, destLat, destLng, start, r)
-        // 息屏导航：前台服务 + 唤醒锁，保证熄屏后定时器不被冻结
-        if (NaviPrefs.screenOffNavi.value) {
-            com.motohud.ble.service.NaviForegroundService.start(this)
-        }
-        // 导航历史：先把「开始」记下来，结束时再补用时与车况
+        // 前台服务：**每次导航都启动**，它承载通知栏导航条（息屏/兜里瞥一眼方向）；
+        // 唤醒锁只由「息屏导航」开关决定，见 NaviForegroundService.updateWakeLock
+        com.motohud.ble.service.NaviForegroundService.start(this)
+        // 导航历史 + 轨迹：先把「开始」记下来，结束时压缩写回
         historyId = com.motohud.ble.data.NaviHistory.begin(
             app = app,
             destName = destName,
             destLat = destLat,
             destLng = destLng,
-            startName = start?.let { com.motohud.ble.navi.CoordConverter.formatLatLng(it.first, it.second) } ?: "未知",
+            startName = start?.let { CoordConverter.formatLatLng(it.first, it.second) } ?: "未知",
             startLat = start?.first ?: 0.0,
             startLng = start?.second ?: 0.0,
             distanceM = r?.distanceM?.toDouble() ?: 0.0
         )
+        historyId?.let { NaviTrack.begin(app, it) }
         if (start == null) {
             Toast.makeText(this, R.string.guidance_no_location, Toast.LENGTH_LONG).show()
         }
@@ -413,10 +492,6 @@ class GuidanceActivity : AppCompatActivity() {
 
     // ---------- 路线偏好 ----------
 
-    /**
-     * 打开路线偏好。改变偏好后立即按新策略重算路线，不退出导航页。
-     * 「不走高速 + 躲避拥堵」这组偏好就是骑行场景下对摩托车导航的替代方案。
-     */
     private fun showRoutePrefsDialog() {
         val d = RoutePrefsDialog()
         d.onApplied = {
@@ -476,7 +551,8 @@ class GuidanceActivity : AppCompatActivity() {
                     uiSettings.isTiltGesturesEnabled = false
                     // 关掉 SDK 自带定位：位置统一由导航引擎提供，避免两套定位打架
                     runCatching { isMyLocationEnabled = false }
-                    runCatching { setTrafficEnabled(true) }
+                    // 路况瓦片跟着设置走：开着爽但要付费（流量），默认关
+                    runCatching { setTrafficEnabled(NaviPrefs.mapTraffic.value) }
                     // 用户拖动地图 → 暂停自动跟随（专业导航软件的通行做法）
                     setOnMapTouchListener { userPanned = true }
                     // 首次布局偶尔只出灰底不出瓦片：底图加载完成后重设一次类型强制刷新
@@ -493,19 +569,46 @@ class GuidanceActivity : AppCompatActivity() {
     /** 画出规划路线；fitAll=true 时缩放到全线 */
     private fun drawRoute(r: RouteData, fitAll: Boolean = true) {
         val map = aMap ?: return
-        val points = ArrayList<LatLng>(512)
+        val points = ArrayList<LatLng>(1024)
+        val cum = ArrayList<Double>(1024)
+        var acc = 0.0
+        var prev: LatLng? = null
         r.steps.forEach { step ->
-            step.polyline.forEach { (lat, lng) -> points.add(LatLng(lat, lng)) }
+            step.polyline.forEach { (lat, lng) ->
+                val p = LatLng(lat, lng)
+                if (prev != null && prev!!.latitude == lat && prev!!.longitude == lng) return@forEach
+                prev?.let {
+                    acc += com.motohud.ble.navi.LocationFilter.distanceM(
+                        it.latitude, it.longitude, lat, lng
+                    ).toDouble()
+                }
+                points.add(p)
+                cum.add(acc)
+                prev = p
+            }
         }
         if (points.size < 2) return
-        try {
-            routeLine?.remove()
-            routeLine = map.addPolyline(
+        routePoints = points
+        routeCum = cum.toDoubleArray()
+        lastProgressM = -1
+        safeMap {
+            aheadLine?.remove()
+            doneLine?.remove()
+            // 底层：全程路线（主色，粗）；上层：已走路段（灰，细）——一眼看出走到哪
+            aheadLine = map.addPolyline(
                 PolylineOptions()
                     .addAll(points)
                     .width(18f)
-                    .color(Color.parseColor("#FF9F0A"))
+                    .color(ContextCompat.getColor(this, R.color.track_ahead))
                     .setDottedLine(false)
+            )
+            doneLine = map.addPolyline(
+                PolylineOptions()
+                    .add(points.first(), points.first())
+                    .width(11f)
+                    .color(ContextCompat.getColor(this, R.color.track_done))
+                    .setDottedLine(false)
+                    .zIndex(2f)
             )
             destMarker?.remove()
             destMarker = map.addMarker(
@@ -514,15 +617,41 @@ class GuidanceActivity : AppCompatActivity() {
                     .title(destName)
                     .draggable(false)
             )
-            if (!fitAll) return
+            if (!fitAll) return@safeMap
             val builder = LatLngBounds.Builder()
             points.forEach { builder.include(it) }
             builder.include(LatLng(destLat, destLng))
             map.animateCamera(
                 CameraUpdateFactory.newLatLngBounds(builder.build(), 160), 700, null
             )
-        } catch (_: Exception) {
         }
+    }
+
+    /** 按已行驶距离把折线切成「已走（灰）」与「未走（主色）」两段 */
+    private fun renderProgress(traveled: Int) {
+        if (routePoints.size < 2 || routeCum.isEmpty()) return
+        // 位移不足 20m 不重画：1Hz 每帧重设上千个点会拖慢地图渲染
+        if (lastProgressM >= 0 && kotlin.math.abs(traveled - lastProgressM) < 20) return
+        lastProgressM = traveled
+        val idx = splitIndexFor(traveled.toDouble())
+        val done = routePoints.subList(0, (idx + 1).coerceIn(1, routePoints.size))
+        val ahead = routePoints.subList(idx.coerceIn(0, routePoints.size - 1), routePoints.size)
+        safeMap {
+            doneLine?.points = ArrayList(done)
+            aheadLine?.points = ArrayList(ahead)
+        }
+    }
+
+    /** 累计距离 → 折线下标 */
+    private fun splitIndexFor(dist: Double): Int {
+        if (routeCum.isEmpty()) return 0
+        var lo = 0
+        var hi = routeCum.size - 1
+        while (lo < hi) {
+            val mid = (lo + hi) / 2
+            if (routeCum[mid] < dist) lo = mid + 1 else hi = mid
+        }
+        return lo
     }
 
     /** 当前位置点（与导航数据同源，替代 SDK 自带蓝点） */
@@ -570,6 +699,8 @@ class GuidanceActivity : AppCompatActivity() {
         lastCameraMs = now
         lastFollowLat = s.latitude
         lastFollowLng = s.longitude
+        // 路口前（<200m 且要转弯）自动放大到 18.2，过路口回 17.2 —— 免去手动缩放
+        val zoom = if (zoomBoost) 18.2f else 17.2f
         try {
             val target = LatLng(s.latitude, s.longitude)
             if (s.bearing.isFinite() && s.speedKmh > 8f) {
@@ -577,7 +708,7 @@ class GuidanceActivity : AppCompatActivity() {
                     CameraUpdateFactory.newCameraPosition(
                         com.amap.api.maps.model.CameraPosition.builder()
                             .target(target)
-                            .zoom(17.2f)
+                            .zoom(zoom)
                             .bearing(s.bearing)
                             .tilt(45f)
                             .build()
@@ -585,7 +716,7 @@ class GuidanceActivity : AppCompatActivity() {
                 )
             } else {
                 map.animateCamera(
-                    CameraUpdateFactory.newLatLngZoom(target, 17.2f), 800, null
+                    CameraUpdateFactory.newLatLngZoom(target, zoom), 800, null
                 )
             }
         } catch (_: Exception) {
@@ -601,7 +732,22 @@ class GuidanceActivity : AppCompatActivity() {
         lifecycleScope.launch {
             ble.state.collectLatest { st ->
                 val connected = st == BleConnectionManager.State.CONNECTED
-                tvBleHint.visibility = if (connected) View.GONE else View.VISIBLE
+                tvBleHint.visibility =
+                    if (connected && NaviPrefs.castEnabled.value) View.GONE else View.VISIBLE
+                tvBleHint.text = if (!connected) {
+                    getString(R.string.guidance_ble_hint)
+                } else {
+                    getString(R.string.guidance_cast_off_hint)
+                }
+            }
+        }
+        lifecycleScope.launch {
+            NaviPrefs.castEnabled.collect {
+                tvBleHint.visibility =
+                    if (ble.state.value == BleConnectionManager.State.CONNECTED && it) View.GONE
+                    else View.VISIBLE
+                tvBleHint.text = if (it) getString(R.string.guidance_ble_hint)
+                else getString(R.string.guidance_cast_off_hint)
             }
         }
     }
@@ -621,14 +767,16 @@ class GuidanceActivity : AppCompatActivity() {
         tvTurnRoad.text = roadText.ifBlank {
             if (s.onRoute) getString(R.string.hud_step_remain_label) else getString(R.string.guidance_demo_short)
         }
+        ivTurnIcon.setImageResource(TurnIcons.res(s.iconType))
         tvTurnDistance.text = CoordConverter.formatDistance(s.stepRemain)
-        ivTurnIcon.setImageResource(HudActivity.iconRes(s.iconType))
+        renderNextStep(s)
 
         // 底部信息
         tvRemain.text = CoordConverter.formatDistance(s.pathRemain)
         tvSpeed.text = String.format(Locale.US, "%.0f", s.speedKmh)
         tvEta.text = if (s.arrived) clock.format(Date()) else
             clock.format(Date(System.currentTimeMillis() + s.etaSeconds * 1000L))
+        renderExtraStats(s)
 
         // 定位质量
         tvGpsMode.text = when {
@@ -641,7 +789,7 @@ class GuidanceActivity : AppCompatActivity() {
 
         // 信号弱：只在导航中真的弱时提示，且只弹一次
         val weak = s.running && (!s.gpsActive || accuracyLevel(s.accuracy) == 1)
-        tvSignalWarn.visibility = if (weak) View.VISIBLE else View.GONE
+        tvSignalWarn.visibility = if (weak && !inPip) View.VISIBLE else View.GONE
         if (weak && !weakGpsToastShown && s.accuracy > 40f) {
             weakGpsToastShown = true
             Toast.makeText(
@@ -651,16 +799,31 @@ class GuidanceActivity : AppCompatActivity() {
             ).show()
         }
 
+        // 路口前自动放大状态切换：置零节流，让下一帧立刻动相机
+        val wantBoost = !s.arrived && s.stepRemain in 1..AUTO_ZOOM_RANGE_M && TurnIcons.isTurn(s.iconType)
+        if (wantBoost != zoomBoost) {
+            zoomBoost = wantBoost
+            lastCameraMs = 0L
+        }
+
+        // 轨迹采样（10m / 5s 门槛，见 NaviTrack）
+        if (s.running && !s.arrived) {
+            historyId?.let { id ->
+                NaviTrack.feed(id, s.latitude, s.longitude, s.speedKmh, System.currentTimeMillis())
+            }
+        }
+
+        renderProgress(s.traveled)
+
         if (s.arrived) {
             if (!stopped) {
                 stopped = true
                 app.naviForwarder.forwardFinish()
                 speak(getString(R.string.hud_arrived))
-                // 导航历史：到达即结束这条记录
-                com.motohud.ble.data.NaviHistory.finish(app, historyId, castToDevice)
-                historyId = null
+                // 导航历史：到达即结束这条记录（轨迹在这里压缩写回）
+                finishHistory()
             }
-            arrivedOverlay.visibility = View.VISIBLE
+            showArrivalCard(s)
             turnBanner.visibility = View.GONE
         } else {
             arrivedOverlay.visibility = View.GONE
@@ -669,59 +832,175 @@ class GuidanceActivity : AppCompatActivity() {
         }
     }
 
-    // ---------- 交互 ----------
-
-    /**
-     * 显示方式：手机导航（本页竖屏全屏） / 投屏车机（[HudActivity] 横屏大字）。
-     *
-     * 两种形态共用同一个 [RouteNaviEngine] 与 [com.motohud.ble.navi.NaviForwarder]，
-     * 切到车机后本页仍在后台继续跑，返回即回到手机导航，导航过程不中断。
-     */
-    private fun showDisplayModeDialog() {
-        val v = layoutInflater.inflate(R.layout.dialog_display_mode, null)
-        val optPhone = v.findViewById<View>(R.id.opt_phone)
-        val optCast = v.findViewById<View>(R.id.opt_cast)
-        val checkPhone = v.findViewById<View>(R.id.check_phone)
-        val checkCast = v.findViewById<View>(R.id.check_cast)
-
-        fun render() {
-            val phone = NaviPrefs.phoneMode.value
-            checkPhone.visibility = if (phone) View.VISIBLE else View.INVISIBLE
-            checkCast.visibility = if (phone) View.INVISIBLE else View.VISIBLE
+    /** 下一步预告：`steps[stepIndex + 1]` 的数据一直都在，以前只是没显示 */
+    private fun renderNextStep(s: NaviEngine.NaviState) {
+        val steps = route?.steps.orEmpty()
+        val next = steps.getOrNull(s.stepIndex + 1)
+        val text = next?.instruction.orEmpty().ifBlank { next?.action.orEmpty() }
+        if (s.arrived || text.isBlank()) {
+            tvTurnNext.visibility = View.GONE
+        } else {
+            tvTurnNext.visibility = View.VISIBLE
+            tvTurnNext.text = getString(R.string.guidance_next_step, text)
         }
-        render()
-
-        val dialog = MotoDialog.builder(this)
-            .setTitle(R.string.navi_display_mode)
-            .setView(v)
-            .setNegativeButton(R.string.cancel, null)
-            .create()
-
-        optPhone.setOnClickListener {
-            NaviPrefs.setPhoneMode(true)
-            dialog.dismiss()
-            Toast.makeText(this, R.string.navi_mode_phone_toast, Toast.LENGTH_SHORT).show()
-        }
-        optCast.setOnClickListener {
-            NaviPrefs.setPhoneMode(false)
-            dialog.dismiss()
-            Toast.makeText(this, R.string.navi_mode_cast_toast, Toast.LENGTH_SHORT).show()
-            openHud()
-        }
-
-        dialog.show()
     }
 
-    private fun openHud() {
-        // 记进导航历史：这趟导航有投屏到车机
-        castToDevice = true
-        startActivity(
-            Intent(this, HudActivity::class.java).apply {
-                putExtra(HudActivity.EXTRA_NAME, destName)
-                putExtra(HudActivity.EXTRA_LAT, destLat)
-                putExtra(HudActivity.EXTRA_LNG, destLng)
-            }
+    /** 展开区：红绿灯 / 过路费 / 步骤进度 / 路况估算 */
+    private fun renderExtraStats(s: NaviEngine.NaviState) {
+        val r = route ?: return
+        if (!cardExpanded) return
+        tvLights.text = r.trafficLights.toString()
+        tvTolls.text = if (r.tolls > 0f) String.format(Locale.US, "%.0f 元", r.tolls) else "免费"
+        val total = r.steps.size
+        tvStepProgress.text = if (total > 0) "${(s.stepIndex + 1).coerceIn(1, total)}/$total" else "--"
+        tvTrafficEstimate.text = buildTrafficEstimate(r)
+    }
+
+    /**
+     * 路况估算。
+     *
+     * 高德**搜索 SDK 没有实时路况分段**（那是导航 SDK 的能力），所以这里只能用
+     * 每步「距离 ÷ 时长」推出的平均速度来估三档，并明确标注"估算"——
+     * 不能伪装成实时路况，否则用户按这个决策会出问题。
+     */
+    private fun buildTrafficEstimate(r: RouteData): String {
+        if (r.durationS <= 1f || r.distanceM <= 1f) return ""
+        val kmh = r.distanceM / 1000f / (r.durationS / 3600f)
+        val level = when {
+            kmh >= 35f -> getString(R.string.guidance_traffic_smooth)
+            kmh >= 22f -> getString(R.string.guidance_traffic_slow)
+            else -> getString(R.string.guidance_traffic_jam)
+        }
+        return getString(R.string.guidance_traffic_estimate, level, kmh.roundToInt())
+    }
+
+    // ---------- 到达 ----------
+
+    private fun showArrivalCard(s: NaviEngine.NaviState) {
+        arrivedOverlay.visibility = View.VISIBLE
+        tvArriveSub.text = getString(R.string.guidance_arrive_sub, destName)
+        val traveledM = s.traveled.coerceAtLeast(0)
+        tvArriveDistance.text = CoordConverter.formatDistance(traveledM)
+        val durationMs = (System.currentTimeMillis() - naviStartMs).coerceAtLeast(0L)
+        tvArriveDuration.text = formatDuration(durationMs)
+        tvArriveAvg.text = if (durationMs > 0) {
+            val kmh = traveledM / 1000.0 / (durationMs / 3_600_000.0)
+            String.format(Locale.US, "%.0f km/h", kmh)
+        } else "--"
+    }
+
+    private fun formatDuration(ms: Long): String {
+        val totalSec = ms / 1000
+        val h = totalSec / 3600
+        val m = (totalSec % 3600) / 60
+        return if (h > 0) "${h}h${m}m" else "${m}min"
+    }
+
+    private fun naviAgain() {
+        val loc = engine.state.value
+        RouteSelectActivity.start(
+            this, destName, destLat, destLng,
+            fromLat = if (loc.latitude != 0.0) loc.latitude else 0.0,
+            fromLng = if (loc.longitude != 0.0) loc.longitude else 0.0
         )
+        finish()
+    }
+
+    // ---------- 交互 ----------
+
+    /** 底部卡展开/收起 */
+    private fun toggleCard() {
+        cardExpanded = !cardExpanded
+        bottomExtra.visibility = if (cardExpanded) View.VISIBLE else View.GONE
+        if (cardExpanded) renderExtraStats(engine.state.value)
+    }
+
+    /**
+     * 「投到车机」开关 + 息屏导航开关。
+     *
+     * 原来这里是"显示方式"二选一，选投屏会跳到横屏 HUD 页；
+     * HUD 的内容与车机 100% 重复，已删除。投屏本质是一个开关，
+     * 与"手机显示什么"完全无关（BLE 转发由 NaviForwarder 统一负责）。
+     */
+    private fun showCastDialog() {
+        val v = layoutInflater.inflate(R.layout.dialog_display_mode, null)
+        val swCast = v.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.sw_cast)
+        val swScreenOff =
+            v.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.sw_screen_off)
+        val hint = v.findViewById<View>(R.id.tv_cast_hint)
+
+        swCast.isChecked = NaviPrefs.castEnabled.value
+        swScreenOff.isChecked = NaviPrefs.screenOffNavi.value
+        hint.visibility =
+            if (ble.state.value == BleConnectionManager.State.CONNECTED) View.GONE else View.VISIBLE
+
+        MotoDialog.builder(this)
+            .setTitle(R.string.navi_cast_title)
+            .setView(v)
+            .setNegativeButton(R.string.close, null)
+            .show()
+
+        swCast.setOnCheckedChangeListener { _, checked ->
+            NaviPrefs.setCastEnabled(checked)
+            // 开关本身就是反馈，不再补 Toast
+        }
+        swScreenOff.setOnCheckedChangeListener { _, checked ->
+            NaviPrefs.setScreenOffNavi(checked)
+            // 服务一直在跑（通知条要留着），这里只是让它重新评估唤醒锁
+            if (!stopped) com.motohud.ble.service.NaviForegroundService.start(this)
+        }
+    }
+
+    // ---------- 画中画 ----------
+
+    /**
+     * 进入画中画小窗。
+     *
+     * 用系统 PiP 而不是自绘悬浮窗：零额外权限、系统托管、不会被 ROM 拦；
+     * 自绘 `SYSTEM_ALERT_WINDOW` 要引导授权、处理点击穿透，得不偿失。
+     * 只在 Android 8+ 提供入口（minSdk 24），低版本隐藏按钮，用通知栏导航条兜底。
+     */
+    private fun enterPip() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val stopIntent = PendingIntent.getBroadcast(
+            this,
+            100,
+            Intent(ACTION_PIP_STOP).setPackage(packageName),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val action = RemoteAction(
+            Icon.createWithResource(this, R.drawable.ic_turn_arrive),
+            getString(R.string.guidance_stop),
+            getString(R.string.guidance_stop),
+            stopIntent
+        )
+        val params = PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(16, 9))
+            .setActions(listOf(action))
+            .build()
+        runCatching { enterPictureInPictureMode(params) }
+            .onFailure {
+                Toast.makeText(this, R.string.navi_pip_failed, Toast.LENGTH_SHORT).show()
+            }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPip = isInPictureInPictureMode
+        val vis = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.btn_back).visibility = vis
+        findViewById<View>(R.id.btn_voice).visibility = vis
+        findViewById<View>(R.id.btn_cast).visibility = vis
+        findViewById<View>(R.id.btn_pip).visibility = vis
+        findViewById<View>(R.id.btn_overview).visibility = vis
+        findViewById<View>(R.id.btn_recenter).visibility = vis
+        tvSignalWarn.visibility = View.GONE
+        // 小窗里只留转向横幅 + 距离：地图在 16:9 里看不清还费电
+        bottomInfo.visibility = vis
+        mapActions.visibility = vis
     }
 
     private fun confirmExit() {
@@ -749,8 +1028,16 @@ class GuidanceActivity : AppCompatActivity() {
             app.naviForwarder.forwardExit()
         }
         turnBanner.visibility = View.GONE
-        // 导航历史：结束这条记录，补上用时与结束时的车况
-        com.motohud.ble.data.NaviHistory.finish(app, historyId, castToDevice)
+        // 导航历史 + 轨迹收尾
+        finishHistory()
+    }
+
+    /** 结束这条历史记录，并把轨迹压缩写回 */
+    private fun finishHistory() {
+        val id = historyId ?: return
+        finishedHistoryId = id
+        com.motohud.ble.data.NaviHistory.finish(app, id, NaviPrefs.castEnabled.value)
+        NaviTrack.finish(app, id)
         historyId = null
     }
 
@@ -794,30 +1081,26 @@ class GuidanceActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        // 息屏导航：熄屏时 Activity 会走到 onStop，但导航还在继续，
-        // 此时不能解除转发，否则车机上的数据就停住了。
+        // 息屏导航 / 画中画：此时 Activity 会走到 onStop，但导航还在继续，
+        // 不能解除转发，否则车机上的数据就停住了。
         // 只有真正结束导航 / 退出页面才 detach。
+        if (inPip) return
         if (stopped || isFinishing) app.naviForwarder.detach(TAG_FORWARD)
     }
 
     override fun onResume() {
         super.onResume()
-        mapView?.onResume()
-        // 导航可能是在车机 HUD 页被「停止导航」停掉的：那边只 finish 了 HUD，
+        if (!inPip) mapView?.onResume()
+        // 导航可能是在通知栏 / 画中画里被"结束导航"停掉的：那边只停了引擎，
         // 本页的 stopped 不会跟着变，回到这里还会显示"导航中"，用户以为没停掉。
-        // 发现引擎已停就同步收尾并退出。
-        if (!stopped && !engine.state.value.running) {
+        if (!stopped && !engine.state.value.running && started) {
             stopNavi(sendFinish = false)
             finish()
-            return
         }
-        // 从车机 HUD 返回本页：显示方式实际已回到「手机导航」，
-        // 同步一次偏好，避免对话框里的勾选和当前页面不一致。
-        NaviPrefs.setPhoneMode(true)
     }
 
     override fun onPause() {
-        mapView?.onPause()
+        if (!inPip) mapView?.onPause()
         super.onPause()
     }
 
@@ -839,11 +1122,10 @@ class GuidanceActivity : AppCompatActivity() {
             engine.stop()
             com.motohud.ble.service.NaviForegroundService.stop(this)
             app.naviForwarder.forwardExit()
-            // 导航历史：中途退出也算一次导航结束，用时记到退出时刻
-            com.motohud.ble.data.NaviHistory.finish(app, historyId, castToDevice)
-            historyId = null
+            finishHistory()
         }
         app.naviForwarder.detach(TAG_FORWARD)
+        runCatching { unregisterReceiver(pipReceiver) }
         mapView?.onDestroy()
         mapView = null
         aMap = null
@@ -855,6 +1137,13 @@ class GuidanceActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    private inline fun safeMap(block: () -> Unit) {
+        try {
+            block()
+        } catch (_: Exception) {
+        }
+    }
+
     companion object {
         const val EXTRA_NAME = "extra_name"
         const val EXTRA_LAT = "extra_lat"
@@ -862,5 +1151,9 @@ class GuidanceActivity : AppCompatActivity() {
         const val EXTRA_FROM_LAT = "extra_from_lat"
         const val EXTRA_FROM_LNG = "extra_from_lng"
         private const val TAG_FORWARD = "guidance"
+        private const val ACTION_PIP_STOP = "com.motohud.ble.action.PIP_STOP"
+
+        /** 路口前自动放大的触发距离 */
+        private const val AUTO_ZOOM_RANGE_M = 200
     }
 }

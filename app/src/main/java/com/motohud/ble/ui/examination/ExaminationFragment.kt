@@ -63,7 +63,7 @@ class ExaminationFragment : Fragment(R.layout.fragment_examination) {
                         emptyMessage.setText(R.string.empty_message_exam)
                         emptyAction.visibility = if (connected) View.GONE else View.VISIBLE
                         emptyAction.setOnClickListener {
-                            (requireActivity() as? MainActivity)?.goToTab(MainActivity.TAB_CONNECT)
+                            com.motohud.ble.ui.scan.ScanActivity.start(requireContext())
                         }
                     }
                 }

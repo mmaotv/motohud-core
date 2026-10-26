@@ -73,6 +73,41 @@
         <item name="android:textSize">12sp</item>
     </style>
 
+    <!-- 车况页：信息行 -->
+    <style name="Vehicle.Row.Label" parent="">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="Vehicle.Row.Value" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:fontFamily">@font/inter</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="Vehicle.Ability.Ok" parent="">
+        <item name="android:layout_width">20dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginEnd">8dp</item>
+        <item name="android:textColor">#FF34C77B</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="Vehicle.Ability.No" parent="">
+        <item name="android:layout_width">20dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginEnd">8dp</item>
+        <item name="android:textColor">@color/text_tertiary</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
     <!-- 爱车页：亮点标签 -->
     <style name="Garage.Highlight" parent="">
         <item name="android:layout_width">wrap_content</item>

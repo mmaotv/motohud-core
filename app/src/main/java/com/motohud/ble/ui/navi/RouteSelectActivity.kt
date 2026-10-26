@@ -18,6 +18,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.motohud.ble.R
+import com.motohud.ble.amap.AmapCache
 import com.motohud.ble.amap.AmapLocator
 import com.motohud.ble.amap.AmapManager
 import com.motohud.ble.amap.AmapRepo
@@ -55,6 +56,35 @@ class RouteSelectActivity : AppCompatActivity() {
     private var routes: List<RouteData> = emptyList()
     private var selected = 0
 
+    /**
+     * 起点：默认「当前位置」（有存档坐标时直接用，不再每次都去gps取一次，
+     * 那既慢又会让"原地反复查同一段路"的请求缓存永远命中不了）。
+     * 用户可以从起点面板改成地图选点 / 常用地址 / 手动坐标。
+     */
+    private var originName: String = ""
+
+    private val mapPickLauncher = registerMapPick { lat, lng ->
+        setOrigin(getString(R.string.origin_map_pick), lat, lng)
+    }
+
+    // ---------- 路线预览图 ----------
+    private var mapView: com.amap.api.maps.MapView? = null
+    private var aMap: com.amap.api.maps.AMap? = null
+    private var mapReady = false
+    private val drawnLines = mutableListOf<com.amap.api.maps.model.Polyline>()
+    private val drawnMarkers = mutableListOf<com.amap.api.maps.model.Marker>()
+
+    /**
+     * 每条方案一个颜色。选中的那条用原色 + 加粗，
+     * 其余同名同色但压低透明度 —— 既区分方案，又不会把地图画成调色盘。
+     */
+    private val routeColors = intArrayOf(
+        android.graphics.Color.parseColor("#FFFF9F0A"),
+        android.graphics.Color.parseColor("#FF3E8BFF"),
+        android.graphics.Color.parseColor("#FF34C77B"),
+        android.graphics.Color.parseColor("#FFBF6BFF")
+    )
+
     private val permLauncher = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
     ) { plan() }
@@ -91,23 +121,215 @@ class RouteSelectActivity : AppCompatActivity() {
                 selected = index
                 adapter.setSelected(index)
                 updateStartButton()
+                // 点哪条，地图就把哪条加粗并转过去（fitAll=false）
+                drawRoutes(fitAll = false)
             }
         )
         list.layoutManager = LinearLayoutManager(this)
         list.adapter = adapter
 
+        originName = getString(R.string.origin_current)
+        renderOrigin()
+
         findViewById<View>(R.id.rs_btn_back).setOnClickListener { finish() }
         findViewById<View>(R.id.rs_pref_row).setOnClickListener { showPrefs() }
+        findViewById<View>(R.id.rs_origin_row).setOnClickListener { showOriginPicker() }
         findViewById<View>(R.id.rs_start).setOnClickListener { startNavi() }
         findViewById<View>(R.id.rs_other_map).setOnClickListener { showThirdPartyMaps() }
 
+        setupMap(savedInstanceState)
         ensureLocationPermissionThenPlan()
+    }
+
+    // ---------- 路线预览图 ----------
+
+    /**
+     * 地图只做"看轮廓、选方案"这一件事：
+     * 不显示实时路况（那是额外流量）、不接管手势定位，简单可控。
+     */
+    private fun setupMap(savedInstanceState: Bundle?) {
+        mapView = findViewById(R.id.rs_map)
+        if (!AmapManager.hasKey(this) || !AmapManager.isPrivacyAgreed(this)) {
+            // 没 Key 时地图卡整体收掉，列表照常可用
+            (mapView?.parent as? View)?.visibility = View.GONE
+            return
+        }
+        runCatching {
+            AmapManager.initMap(this)
+            mapView?.onCreate(savedInstanceState)
+            aMap = mapView?.map?.apply {
+                mapType = com.amap.api.maps.AMap.MAP_TYPE_NIGHT
+                uiSettings.apply {
+                    isZoomControlsEnabled = false
+                    isMyLocationButtonEnabled = false
+                    isRotateGesturesEnabled = false
+                    isTiltGesturesEnabled = false
+                }
+            }
+            mapReady = aMap != null
+            if (!mapReady) (mapView?.parent as? View)?.visibility = View.GONE
+        }.onFailure {
+            android.util.Log.w("RouteSelect", "预览地图初始化失败", it)
+            (mapView?.parent as? View)?.visibility = View.GONE
+        }
+    }
+
+    /** 把一条方案的几何拼起来：逐 step 的 polyline 首尾相接 */
+    private fun pathOf(r: RouteData): List<com.amap.api.maps.model.LatLng> {
+        val out = ArrayList<com.amap.api.maps.model.LatLng>()
+        r.steps.forEach { step ->
+            step.polyline.forEach { p ->
+                val ll = com.amap.api.maps.model.LatLng(p.first, p.second)
+                // 相邻 step 的首尾会重复，去掉可以避免折线出现小毛刺
+                if (out.isEmpty() || out.last() != ll) out.add(ll)
+            }
+        }
+        return out
+    }
+
+    /** 重画所有路线；[fitAll] = true 时相机包住全部方案 */
+    private fun drawRoutes(fitAll: Boolean) {
+        val map = aMap ?: return
+        drawnLines.forEach { runCatching { it.remove() } }
+        drawnLines.clear()
+        if (drawnMarkers.isEmpty()) drawEndpoints(map)
+        // 有多套方案才提示"颜色对应下方列表"，单方案时说了反而是噪音
+        findViewById<TextView>(R.id.rs_map_hint).visibility =
+            if (routes.size > 1) View.VISIBLE else View.GONE
+
+        routes.forEachIndexed { index, route ->
+            val path = pathOf(route)
+            if (path.size < 2) return@forEachIndexed
+            val isSel = index == selected
+            val color = routeColors[index % routeColors.size]
+            val body = if (isSel) color else (color and 0x00FFFFFF) or 0x8C000000.toInt()
+            // 外层描边：让选中那条从其它线里"浮"出来
+            if (isSel) {
+                drawnLines += map.addPolyline(
+                    com.amap.api.maps.model.PolylineOptions()
+                        .addAll(path)
+                        .width(18f)
+                        .color(0x33000000)
+                        .zIndex(3f)
+                )
+            }
+            drawnLines += map.addPolyline(
+                com.amap.api.maps.model.PolylineOptions()
+                    .addAll(path)
+                    .width(if (isSel) 11f else 8f)
+                    .color(body)
+                    .zIndex(if (isSel) 4f else 2f)
+            )
+        }
+
+        val target = if (fitAll) routes.flatMap { pathOf(it) } else pathOf(routes.getOrNull(selected) ?: return)
+        if (target.size >= 2) {
+            runCatching {
+                val builder = com.amap.api.maps.model.LatLngBounds.Builder()
+                target.forEach { builder.include(it) }
+                map.animateCamera(
+                    com.amap.api.maps.CameraUpdateFactory.newLatLngBounds(builder.build(), dp(48))
+                )
+            }
+        }
+    }
+
+    private fun drawEndpoints(map: com.amap.api.maps.AMap) {
+        if (startLat != 0.0 && startLng != 0.0) {
+            drawnMarkers += map.addMarker(
+                com.amap.api.maps.model.MarkerOptions()
+                    .position(com.amap.api.maps.model.LatLng(startLat, startLng))
+                    .title(getString(R.string.route_select_from))
+            )
+        }
+        if (destLat != 0.0 && destLng != 0.0) {
+            drawnMarkers += map.addMarker(
+                com.amap.api.maps.model.MarkerOptions()
+                    .position(com.amap.api.maps.model.LatLng(destLat, destLng))
+                    .title(destName)
+            )
+        }
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
+    // ---------- MapView 生命周期 ----------
+    // MapView 不跟着 Activity 走这几个回调，会出现"回来后地图全黑"或纹理泄漏
+
+    override fun onResume() {
+        super.onResume()
+        runCatching { mapView?.onResume() }
+    }
+
+    override fun onPause() {
+        runCatching { mapView?.onPause() }
+        super.onPause()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        runCatching { mapView?.onSaveInstanceState(outState) }
+    }
+
+    override fun onDestroy() {
+        drawnLines.clear()
+        drawnMarkers.clear()
+        runCatching { mapView?.onDestroy() }
+        mapView = null
+        aMap = null
+        super.onDestroy()
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        runCatching { mapView?.onLowMemory() }
+    }
+
     private fun renderPref() {
         prefValue.text = NaviPrefs.summary()
+    }
+
+    // ---------- 起点 ----------
+
+    private fun renderOrigin() {
+        findViewById<TextView>(R.id.rs_origin_name).text = originName
+    }
+
+    private fun showOriginPicker() {
+        val dialog = OriginPickDialog.newInstance(
+            currentLocation = if (startLat != 0.0 && startLng != 0.0) startLat to startLng
+            else currentFix()
+        )
+        dialog.onPicked = { name, lat, lng -> setOrigin(name, lat, lng) }
+        dialog.onPickOnMap = {
+            mapPickLauncher.launch(
+                MapPickActivity.intent(this, startLat, startLng)
+            )
+        }
+        dialog.show(supportFragmentManager, "origin_pick")
+    }
+
+    /** 起点坐标：调用方没给时才去取一次实时定位 */
+    private fun currentFix(): Pair<Double, Double>? =
+        if (startLat != 0.0 && startLng != 0.0) startLat to startLng else null
+
+    private fun setOrigin(name: String, lat: Double, lng: Double) {
+        // 改成「当前位置」时要把坐标清空，让 plan() 去重新取一次实时定位 ——
+        // 沿用上一次的坐标会在用户已经移动后算出一条错误的路线。
+        if (name == getString(R.string.origin_current)) {
+            startLat = 0.0
+            startLng = 0.0
+        } else {
+            startLat = lat
+            startLng = lng
+        }
+        originName = name
+        renderOrigin()
+        drawnLines.forEach { runCatching { it.remove() } }
+        drawnLines.clear()
+        drawnMarkers.forEach { runCatching { it.remove() } }
+        drawnMarkers.clear()
+        plan()
     }
 
     private fun showPrefs() {
@@ -171,39 +393,59 @@ class RouteSelectActivity : AppCompatActivity() {
             val fromLng = startLng
             val strategy = NaviPrefs.strategy()
             val summary = NaviPrefs.summary()
+
+            // 同一段路 10 分钟内复用上次算路结果：不产生网络请求，直接省掉最贵的一次调用
+            val cacheKey = AmapCache.routeKey(fromLat, fromLng, destLat, destLng, strategy, LIMIT)
+            val cached = AmapCache.get<RoutePlanResult>(cacheKey, AmapCache.TTL_ROUTE_MS)
+            if (cached != null) {
+                loading.visibility = View.GONE
+                applyResult(cached)
+                return@launch
+            }
+
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     AmapRepo(this@RouteSelectActivity)
-                        .planCandidates(fromLat, fromLng, destLat, destLng, strategy, summary)
+                        .planCandidates(fromLat, fromLng, destLat, destLng, strategy, summary, LIMIT)
                 }
             }.getOrNull()
 
+            // 只有算成功了才进缓存：失败/错误码不缓存，避免一次抖动被记十分钟
+            if (result is RoutePlanResult.Many) AmapCache.put(cacheKey, result)
+
             loading.visibility = View.GONE
-            when (result) {
-                is RoutePlanResult.Many -> {
-                    // 高德返回的顺序是按策略来的，不保证最快在前。
-                    // 统一按耗时升序排，让第一项就是"最快"，默认选中它也符合直觉。
-                    routes = result.routes.sortedBy { it.durationS }
-                    selected = 0
-                    adapter.submit(routes, 0)
-                    list.visibility = View.VISIBLE
-                    updateStartButton()
-                }
-                is RoutePlanResult.Success -> {
-                    routes = listOf(result.route)
-                    selected = 0
-                    adapter.submit(routes, 0)
-                    list.visibility = View.VISIBLE
-                    updateStartButton()
-                }
-                is RoutePlanResult.Failure -> {
-                    empty.visibility = View.VISIBLE
-                    empty.text = getString(R.string.guidance_plan_failed, result.message)
-                }
-                null -> {
-                    empty.visibility = View.VISIBLE
-                    empty.setText(R.string.guidance_plan_failed_short)
-                }
+            applyResult(result)
+        }
+    }
+
+    /** 算路结果的统一落渲染处：缓存命中与真实网络两条路都走这里 */
+    private fun applyResult(result: RoutePlanResult?) {
+        when (result) {
+            is RoutePlanResult.Many -> {
+                // 高德返回的顺序是按策略来的，不保证最快在前。
+                // 统一按耗时升序排，让第一项就是"最快"，默认选中它也符合直觉。
+                routes = result.routes.sortedBy { it.durationS }
+                selected = 0
+                adapter.submit(routes, 0)
+                list.visibility = View.VISIBLE
+                updateStartButton()
+                drawRoutes(fitAll = true)
+            }
+            is RoutePlanResult.Success -> {
+                routes = listOf(result.route)
+                selected = 0
+                adapter.submit(routes, 0)
+                list.visibility = View.VISIBLE
+                updateStartButton()
+                drawRoutes(fitAll = true)
+            }
+            is RoutePlanResult.Failure -> {
+                empty.visibility = View.VISIBLE
+                empty.text = getString(R.string.guidance_plan_failed, result.message)
+            }
+            null -> {
+                empty.visibility = View.VISIBLE
+                empty.setText(R.string.guidance_plan_failed_short)
             }
         }
     }
@@ -247,6 +489,9 @@ class RouteSelectActivity : AppCompatActivity() {
         const val EXTRA_LNG = "lng"
         const val EXTRA_FROM_LAT = "from_lat"
         const val EXTRA_FROM_LNG = "from_lng"
+
+        /** 最多展示几套方案：多了列表要滑很久，且每多一条就多一份算路数据量 */
+        private const val LIMIT = 3
 
         /** 统一入口：所有"选个地点"的地方都走这里，先出方案再导航 */
         fun start(

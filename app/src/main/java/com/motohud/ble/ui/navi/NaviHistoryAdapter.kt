@@ -15,6 +15,7 @@ import java.util.Locale
  * 导航历史列表项。
  */
 class NaviHistoryAdapter(
+    private val onClick: (NaviHistoryEntity) -> Unit,
     private val onLongClick: (NaviHistoryEntity) -> Unit
 ) : RecyclerView.Adapter<NaviHistoryAdapter.VH>() {
 
@@ -26,6 +27,7 @@ class NaviHistoryAdapter(
     }
 
     class VH(view: View) : RecyclerView.ViewHolder(view) {
+        val thumb: TrackThumbView = view.findViewById(R.id.nh_thumb)
         val dest: TextView = view.findViewById(R.id.nh_dest)
         val duration: TextView = view.findViewById(R.id.nh_duration)
         val from: TextView = view.findViewById(R.id.nh_from)
@@ -83,6 +85,10 @@ class NaviHistoryAdapter(
             )
         }
 
+        // 轨迹缩略图：列表里最省的"看起来像高德"手段（Canvas 画折线，不加载地图）
+        holder.thumb.setTrack(item.trackPolyline)
+
+        holder.itemView.setOnClickListener { onClick(item) }
         holder.itemView.setOnLongClickListener {
             onLongClick(item)
             true

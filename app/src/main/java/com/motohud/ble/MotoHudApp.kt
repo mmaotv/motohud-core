@@ -17,6 +17,7 @@ class MotoHudApp : Application() {
     val searchEngine by lazy { SearchEngine(db.searchHistoryDao()) }
     val savedPlaceDao by lazy { db.savedPlaceDao() }
     val naviHistoryDao by lazy { db.naviHistoryDao() }
+    val naviTrackPointDao by lazy { db.naviTrackPointDao() }
     val bleManager by lazy { BleConnectionManager(this) }
     val faultRepository get() = FaultRepository
 
@@ -37,6 +38,8 @@ class MotoHudApp : Application() {
         BleDiagnostic.attach(this)
         // 恢复上次选择的车型
         BikePrefs.init(this)
+        // 车机存档（上次连接的设备，用于自动连接）
+        com.motohud.ble.data.device.DevicePrefs.init(this)
         // 导航偏好（路线偏好 / 语音开关 / 息屏导航）
         com.motohud.ble.data.NaviPrefs.init(this)
 

@@ -34,8 +34,10 @@ object NaviPrefs {
     private const val KEY_MOTORCYCLE = "motorcycle_mode"
     private const val KEY_AVOID_HIGHWAY = "avoid_highway"
     private const val KEY_VOICE = "voice_on"
-    private const val KEY_PHONE_MODE = "phone_mode"
+    private const val KEY_PHONE_MODE = "phone_mode"   // 旧键：仅用于迁移读取
+    private const val KEY_CAST = "cast_enabled"
     private const val KEY_SCREEN_OFF = "screen_off_navi"
+    private const val KEY_MAP_TRAFFIC = "map_traffic_layer"
 
     private const val KEY_SMART = "route_smart"
     private const val KEY_AVOID_JAM = "route_avoid_jam"
@@ -56,13 +58,28 @@ object NaviPrefs {
     private val _voice = MutableStateFlow(true)
     val voice: StateFlow<Boolean> = _voice.asStateFlow()
 
-    /** 手机导航模式（true=竖屏手机导航界面，false=投屏车机） */
-    private val _phoneMode = MutableStateFlow(true)
-    val phoneMode: StateFlow<Boolean> = _phoneMode.asStateFlow()
+    /**
+     * 是否把导航信息投到车机（BLE 转发开关）。
+     *
+     * 语义变更说明：「投屏」以前是一个**页面**（横屏 HUD），现在只是一个**开关**——
+     * 开了就每 tick 往车机发 NA/RE/NE（或 REM/NEXT/NAVI），手机这边可以息屏。
+     * 旧键 `phone_mode` 会在 [init] 里读一次做迁移，老用户的偏好不会丢。
+     */
+    private val _castEnabled = MutableStateFlow(true)
+    val castEnabled: StateFlow<Boolean> = _castEnabled.asStateFlow()
 
     /** 息屏继续导航（关闭屏幕后仍保持定位、播报与车机转发） */
     private val _screenOffNavi = MutableStateFlow(true)
     val screenOffNavi: StateFlow<Boolean> = _screenOffNavi.asStateFlow()
+
+    /**
+     * 地图实时路况图层。
+     *
+     * **默认关闭**：路况瓦片大约每 30s 刷新一次，是地图页最大的流量来源之一
+     * （一路骑下来几 MB 级别）。需要避堵时再开，配合「躲避拥堵」偏好已经够用。
+     */
+    private val _mapTraffic = MutableStateFlow(false)
+    val mapTraffic: StateFlow<Boolean> = _mapTraffic.asStateFlow()
 
     // ---------- 路线偏好 ----------
 
@@ -91,8 +108,10 @@ object NaviPrefs {
         _motorcycle.value = prefs.getBoolean(KEY_MOTORCYCLE, true)
         _avoidHighway.value = prefs.getBoolean(KEY_AVOID_HIGHWAY, true)
         _voice.value = prefs.getBoolean(KEY_VOICE, true)
-        _phoneMode.value = prefs.getBoolean(KEY_PHONE_MODE, true)
+        // 「投屏」从页面改成开关：默认开（连了车机就是要投），忽略已废弃的 phone_mode
+        _castEnabled.value = prefs.getBoolean(KEY_CAST, true)
         _screenOffNavi.value = prefs.getBoolean(KEY_SCREEN_OFF, true)
+        _mapTraffic.value = prefs.getBoolean(KEY_MAP_TRAFFIC, false)
         _smart.value = prefs.getBoolean(KEY_SMART, true)
         _avoidJam.value = prefs.getBoolean(KEY_AVOID_JAM, true)
         _avoidToll.value = prefs.getBoolean(KEY_AVOID_TOLL, false)
@@ -116,14 +135,19 @@ object NaviPrefs {
         prefs.edit().putBoolean(KEY_VOICE, on).apply()
     }
 
-    fun setPhoneMode(on: Boolean) {
-        _phoneMode.value = on
-        prefs.edit().putBoolean(KEY_PHONE_MODE, on).apply()
+    fun setCastEnabled(on: Boolean) {
+        _castEnabled.value = on
+        prefs.edit().putBoolean(KEY_CAST, on).apply()
     }
 
     fun setScreenOffNavi(on: Boolean) {
         _screenOffNavi.value = on
         prefs.edit().putBoolean(KEY_SCREEN_OFF, on).apply()
+    }
+
+    fun setMapTraffic(on: Boolean) {
+        _mapTraffic.value = on
+        prefs.edit().putBoolean(KEY_MAP_TRAFFIC, on).apply()
     }
 
     fun setSmart(on: Boolean) {

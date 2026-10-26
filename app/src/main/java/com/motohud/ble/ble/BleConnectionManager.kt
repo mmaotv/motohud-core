@@ -99,6 +99,45 @@ class BleConnectionManager(private val context: Context) {
 
     val scanResults = mutableMapOf<String, ScanItem>()
 
+    /**
+     * 自动连接状态机。
+     *
+     * 为什么不用 `autoConnect=true` 打头：它是"挂起等待"，设备出现才连，
+     * 实测常 5~15 秒，用户会以为 App 没反应。这里**先快后稳**：
+     *   ① 直连 6s（autoConnect=false，最快路径）
+     *   ② 定向扫描 8s（按 MAC 精确匹配，不看名字）
+     *   ③ 都失败 → 静默结束，界面停在"未连接 · 点击连接"
+     */
+    private var autoTarget: String? = null
+    private var autoResult: ((Boolean) -> Unit)? = null
+    private var lastAutoTryAt = 0L
+
+    /** 用户手动断开过：本次运行内不再自动连接（避免"我断开它又连上"） */
+    var manualDisconnect = false
+        private set
+
+    private val autoScanStage = Runnable {
+        if (autoTarget == null) return@Runnable
+        if (_state.value == State.CONNECTED) {
+            finishAuto(true)
+            return@Runnable
+        }
+        BleDiagnostic.log("自动连接：直连超时，启动定向扫描 ${autoTarget}")
+        startScan()
+        mainHandler.postDelayed(autoScanTimeout, AUTO_SCAN_TIMEOUT_MS)
+    }
+
+    private val autoScanTimeout = Runnable {
+        if (autoTarget == null) return@Runnable
+        stopScan()
+        if (_state.value == State.CONNECTED) {
+            finishAuto(true)
+        } else {
+            BleDiagnostic.log("自动连接：定向扫描未命中 ${autoTarget}")
+            finishAuto(false)
+        }
+    }
+
     private val _state = MutableStateFlow(State.DISCONNECTED)
     val state: StateFlow<State> = _state.asStateFlow()
 
@@ -109,6 +148,11 @@ class BleConnectionManager(private val context: Context) {
         get() = _connectedName
     private var _connectedName: String? = null
 
+    /** 已连上的车机 MAC（自动连接存档用） */
+    val connectedAddress: String?
+        get() = _connectedAddress
+    private var _connectedAddress: String? = null
+
     /** 已记录过的扫描名，诊断日志里每个名字只记一次，避免刷屏 */
     private val seenScanNames = mutableSetOf<String>()
 
@@ -118,6 +162,14 @@ class BleConnectionManager(private val context: Context) {
                 val name = d.name ?: return
                 // 诊断用：把附近所有出现的设备名记下来，便于确认车边到底有没有 ECU（860745020*）
                 if (seenScanNames.add(name)) BleDiagnostic.log("扫描到设备: $name (${d.address})")
+
+                // 自动连接的定向扫描：MAC 精确命中就直接连，不受名称过滤影响
+                if (d.address.equals(autoTarget, ignoreCase = true)) {
+                    BleDiagnostic.log("自动连接：扫描命中 ${d.address}")
+                    stopScan()
+                    connect(d.address, fromReconnect = false, autoConnect = false)
+                    return
+                }
 
                 val legacy = BleConstants.isLegacyDevice(name)
                 // 放行两类：FastBLE 仪表(BYQ/SR) 与 legacy ECU(860745020*)
@@ -151,8 +203,12 @@ class BleConnectionManager(private val context: Context) {
                 BluetoothGatt.STATE_CONNECTED -> {
                     _state.value = State.CONNECTED
                     reconnectAttempts = 0
+                    manualDisconnect = false
+                    _connectedAddress = g.device?.address
+                    _connectedName = g.device?.name ?: _connectedName
                     BleDiagnostic.setState("CONNECTED")
                     _events.tryEmit(Event.ConnectionState(State.CONNECTED))
+                    finishAuto(true)
                     g.discoverServices()
                 }
                 BluetoothGatt.STATE_DISCONNECTED -> {
@@ -354,26 +410,90 @@ class BleConnectionManager(private val context: Context) {
     fun isScanning() = scanning
 
     @SuppressLint("MissingPermission")
-    fun connect(address: String, fromReconnect: Boolean = false) {
+    fun connect(address: String, fromReconnect: Boolean = false, autoConnect: Boolean = false) {
         if (adapter?.isEnabled != true) {
             _events.tryEmit(Event.Error("蓝牙未开启"))
             return
         }
         stopScan()
+        cancelAutoConnect()
         val attempts = reconnectAttempts
-        disconnect()
+        disconnectInternal()
         reconnectAttempts = if (fromReconnect) attempts else 0
+        // 用户主动发起 / 自动重试都算"不是手动断开"
+        manualDisconnect = false
         _state.value = State.CONNECTING
         _events.tryEmit(Event.ConnectionState(State.CONNECTING))
         val device: BluetoothDevice = adapter.getRemoteDevice(address)
         _connectedName = device.name
+        _connectedAddress = address
         BleDiagnostic.onNewConnection(device.name)
-        BleDiagnostic.log("设备地址=${device.address} 名称=${device.name} 绑定状态=${device.bondState}")
+        BleDiagnostic.log("设备地址=${device.address} 名称=${device.name} 绑定状态=${device.bondState} autoConnect=$autoConnect")
         gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            device.connectGatt(context, true, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            device.connectGatt(context, autoConnect, gattCallback, BluetoothDevice.TRANSPORT_LE)
         } else {
-            device.connectGatt(context, true, gattCallback)
+            device.connectGatt(context, autoConnect, gattCallback)
         }
+    }
+
+    /**
+     * 连接存档里的车机：**先直连、再定向扫描**，全流程幂等。
+     *
+     * @param onResult true=连上；false=6s 直连 + 8s 扫描都失败（静默，不打扰用户）
+     */
+    @SuppressLint("MissingPermission")
+    fun connectSavedOrScan(
+        address: String,
+        name: String? = null,
+        onResult: ((Boolean) -> Unit)? = null
+    ) {
+        if (adapter?.isEnabled != true) {
+            onResult?.invoke(false)
+            _events.tryEmit(Event.Error("蓝牙未开启"))
+            return
+        }
+        // 同一 MAC 1s 内不重复发起（冷启动 + 回前台可能同时触发）
+        val now = System.currentTimeMillis()
+        if (autoTarget == address && now - lastAutoTryAt < 1000L) return
+        lastAutoTryAt = now
+
+        when (_state.value) {
+            State.CONNECTED -> {
+                if (gatt?.device?.address.equals(address, ignoreCase = true)) {
+                    onResult?.invoke(true)
+                    return
+                }
+            }
+            State.CONNECTING, State.RECONNECTING -> return
+            else -> Unit
+        }
+
+        BleDiagnostic.log("开始自动连接：$name ($address)")
+        mainHandler.removeCallbacks(autoScanStage)
+        mainHandler.removeCallbacks(autoScanTimeout)
+        connect(address, fromReconnect = false, autoConnect = false)
+        // connect() 内部会 cancelAutoConnect()，所以状态与超时必须在其之后再挂
+        autoTarget = address
+        autoResult = onResult
+        if (!name.isNullOrBlank()) _connectedName = name
+        mainHandler.postDelayed(autoScanStage, AUTO_DIRECT_TIMEOUT_MS)
+    }
+
+    private fun finishAuto(ok: Boolean) {
+        val cb = autoResult
+        autoResult = null
+        autoTarget = null
+        mainHandler.removeCallbacks(autoScanStage)
+        mainHandler.removeCallbacks(autoScanTimeout)
+        cb?.invoke(ok)
+    }
+
+    /** 取消进行中的自动连接（用户手动操作时调用） */
+    fun cancelAutoConnect() {
+        mainHandler.removeCallbacks(autoScanStage)
+        mainHandler.removeCallbacks(autoScanTimeout)
+        autoTarget = null
+        autoResult = null
     }
 
     /** 把整张 GATT 表（服务/特征/属性/权限）写进诊断日志 */
@@ -529,8 +649,16 @@ class BleConnectionManager(private val context: Context) {
         }
     }
 
+    /** 用户主动断开：本次运行内不再自动连接（避免"我断开它又连上"） */
     @SuppressLint("MissingPermission")
     fun disconnect() {
+        manualDisconnect = true
+        cancelAutoConnect()
+        disconnectInternal()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun disconnectInternal() {
         reconnectAttempts = BleConstants.RECONNECT_COUNT + 1 // 手动断开不触发重连
         gatt?.disconnect()
         gatt?.close()
@@ -545,29 +673,37 @@ class BleConnectionManager(private val context: Context) {
         mainHandler.removeCallbacks(notifyReadyFallback)
         notifyReadyEmitted = false
         _connectedName = null
+        _connectedAddress = null
         _state.value = State.DISCONNECTED
         _events.tryEmit(Event.ConnectionState(State.DISCONNECTED))
     }
 
     /** 掉线自动重连：10 次 × 500ms（ScanMainActivity.java:395-398） */
     private fun scheduleReconnect() {
+        if (manualDisconnect) return
         val address = gatt?.device?.address ?: return
         if (reconnectAttempts >= BleConstants.RECONNECT_COUNT) return
         reconnectAttempts++
         _state.value = State.RECONNECTING
         _events.tryEmit(Event.ConnectionState(State.RECONNECTING))
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            connect(address, fromReconnect = true)
+            connect(address, fromReconnect = true, autoConnect = true)
         }, BleConstants.RECONNECT_DELAY_MS)
     }
 
     fun release() {
         reconnectAttempts = BleConstants.RECONNECT_COUNT + 1
         stopScan()
-        disconnect()
+        disconnectInternal()
     }
 
     companion object {
         private const val TAG = "BleConnMgr"
+
+        /** 自动连接：直连阶段等待时长 */
+        private const val AUTO_DIRECT_TIMEOUT_MS = 6_000L
+
+        /** 自动连接：定向扫描阶段等待时长 */
+        private const val AUTO_SCAN_TIMEOUT_MS = 8_000L
     }
 }

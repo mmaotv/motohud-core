@@ -80,18 +80,20 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.MotoHeadUnit" />
 
-        <!-- 投屏导航 HUD（横屏大字体，屏幕常亮） -->
+        <!-- 连接车机（二级页）：原第 4 个页签降级而来 -->
         <activity
-            android:name=".ui.navi.HudActivity"
+            android:name=".ui.scan.ScanActivity"
             android:exported="false"
-            android:screenOrientation="landscape"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.MotoHeadUnit" />
 
-        <!-- 手机端专业导航页（地图 + 转向引导 + TTS 播报） -->
+        <!-- 手机端专业导航页（地图 + 转向引导 + TTS 播报 + 画中画） -->
         <activity
             android:name=".ui.navi.GuidanceActivity"
             android:exported="false"
             android:screenOrientation="portrait"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+            android:supportsPictureInPicture="true"
             android:theme="@style/Theme.MotoHeadUnit" />
 
         <!-- 二级页面容器（本地检索等低频功能） -->
@@ -136,6 +138,27 @@
         <!-- 导航历史：按时间范围查看过往导航记录 -->
         <activity
             android:name=".ui.navi.NaviHistoryActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.MotoHeadUnit" />
+
+        <!-- 历史导航详情：行驶轨迹回放 + 再次导航 -->
+        <activity
+            android:name=".ui.navi.NaviHistoryDetailActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.MotoHeadUnit" />
+
+        <!-- 地图选点：给「起点 ≠ 当前位置」用 -->
+        <activity
+            android:name=".ui.navi.MapPickActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.MotoHeadUnit" />
+
+        <!-- 车况（二级页）：底部页签收成两个之后，从导航页「车况」按钮进入 -->
+        <activity
+            android:name=".ui.vehicle.VehicleActivity"
             android:exported="false"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.MotoHeadUnit" />

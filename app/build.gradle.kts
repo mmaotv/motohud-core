@@ -22,8 +22,10 @@ android {
         applicationId = "com.motohud.ble"
         minSdk = 24
         targetSdk = 36
-versionCode = 12
-versionName = "2.2.7"
+        // 开发期版本号：0.0.1 起，每次只递增最后一位（0.0.2 → 0.0.3 …）。
+        // 未正式上线，不体现主版本语义。
+        versionCode = 14
+        versionName = "0.0.2"
 
         manifestPlaceholders["AMAP_API_KEY"] = amapApiKey
         buildConfigField("String", "AMAP_API_KEY", "\"$amapApiKey\"")

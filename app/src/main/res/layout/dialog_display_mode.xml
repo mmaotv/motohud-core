@@ -1,22 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 显示方式（手机导航 / 车机投屏）选择。
-     与 dialog_route_mode 一致：自绘选项，避免深色主题下 setItems 文字不可见。 -->
+<!--
+  「投到车机」开关。
+
+  这里原先是一个二选一的"显示方式"对话框（手机导航 / 投屏车机），选后者会跳到
+  一个横屏 HUD 页面。那个页面画的内容（转向图标 / 本段剩余 / 全程剩余）与车机上
+  显示的完全重复，多出来的 ETA / 速度撑不起一个独立页面。
+  现在投屏只是一个开关：开了就往车机发指令，手机这边照常用导航页（或息屏）。
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:paddingStart="8dp"
+    android:paddingStart="4dp"
     android:paddingTop="4dp"
-    android:paddingEnd="8dp">
+    android:paddingEnd="4dp">
 
     <LinearLayout
-        android:id="@+id/opt_phone"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@drawable/bg_chip"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:padding="14dp">
+        android:paddingStart="14dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="12dp">
 
         <LinearLayout
             android:layout_width="0dp"
@@ -28,7 +36,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
-                android:text="@string/navi_phone_mode"
+                android:text="@string/navi_cast_switch_title"
                 android:textColor="@color/text_primary"
                 android:textSize="16sp"
                 android:textStyle="bold" />
@@ -38,29 +46,29 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
                 android:fontFamily="@font/inter"
-                android:text="@string/navi_phone_mode_desc"
+                android:text="@string/navi_cast_switch_desc"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
         </LinearLayout>
 
-        <ImageView
-            android:id="@+id/check_phone"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
-            android:layout_marginStart="10dp"
-            android:contentDescription="@string/navi_phone_mode"
-            android:src="@drawable/ic_check_circle" />
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/sw_cast"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp" />
     </LinearLayout>
 
     <LinearLayout
-        android:id="@+id/opt_cast"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:background="@drawable/bg_chip"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:padding="14dp">
+        android:paddingStart="14dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="12dp">
 
         <LinearLayout
             android:layout_width="0dp"
@@ -72,7 +80,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
-                android:text="@string/navi_cast_mode"
+                android:text="@string/hud_screen_off"
                 android:textColor="@color/text_primary"
                 android:textSize="16sp"
                 android:textStyle="bold" />
@@ -82,17 +90,26 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
                 android:fontFamily="@font/inter"
-                android:text="@string/navi_cast_mode_desc"
+                android:text="@string/navi_screen_off_desc"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
         </LinearLayout>
 
-        <ImageView
-            android:id="@+id/check_cast"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
-            android:layout_marginStart="10dp"
-            android:contentDescription="@string/navi_cast_mode"
-            android:src="@drawable/ic_check_circle" />
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/sw_screen_off"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp" />
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/tv_cast_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:fontFamily="@font/inter"
+        android:text="@string/navi_cast_no_device"
+        android:textColor="@color/text_tertiary"
+        android:textSize="11sp"
+        android:visibility="gone" />
 </LinearLayout>

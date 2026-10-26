@@ -10,6 +10,13 @@
     <color name="fill_strong">#52787880</color>
     <color name="hairline">#1AFFFFFF</color>
 
+    <!-- 分隔线（卡片内部分区；比 hairline 略明显一点） -->
+    <color name="divider">#1FFFFFFF</color>
+
+    <!-- 导航轨迹：已走路段（灰）与未走路段（主色） -->
+    <color name="track_done">#8A8A8E</color>
+    <color name="track_ahead">#FFFF9F0A</color>
+
     <!-- 弹窗专用表面色：必须完全不透明。
          surface_high(#F21C1C1E) 带 alpha，是为叠加在纯黑窗口上的玻璃卡片设计的，
          拿去做弹窗填充会透出背后的地图/列表，看起来像"弹窗是半透明的 bug"。 -->

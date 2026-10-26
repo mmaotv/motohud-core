@@ -40,6 +40,64 @@
             android:textStyle="bold" />
     </LinearLayout>
 
+    <!--
+      起点（可改）。
+
+      以前起点永远是"当前位置"，于是这一页只能做"从这里出发怎么走"。
+      但很多时候用户只是**查路线** —— 从公司到家多久、A 到 B 怎么走，
+      这时候必须能指定起点。
+    -->
+    <LinearLayout
+        android:id="@+id/rs_origin_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_card"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="12dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/inter"
+                android:text="@string/route_select_from"
+                android:textColor="@color/text_tertiary"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/rs_origin_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:fontFamily="@font/inter"
+                android:maxLines="1"
+                android:text="@string/origin_current"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/origin_change"
+            android:textColor="@color/accent"
+            android:textSize="12sp" />
+    </LinearLayout>
+
     <!-- 目的地 + 路线偏好入口 -->
     <LinearLayout
         android:layout_width="match_parent"
@@ -107,11 +165,46 @@
         </LinearLayout>
     </LinearLayout>
 
+    <!-- 路线预览图：多条方案同屏画出，颜色区分；
+         点列表任一条 → 该条加粗高亮 + 相机转到它。
+         纯列表看不出"绕不绕路"，地图是这一页最该有的东西。 -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="220dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_card"
+        android:clipToOutline="true">
+
+        <com.amap.api.maps.MapView
+            android:id="@+id/rs_map"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <TextView
+            android:id="@+id/rs_map_hint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start"
+            android:layout_margin="10dp"
+            android:background="@drawable/bg_navi_panel"
+            android:fontFamily="@font/inter"
+            android:paddingStart="8dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="4dp"
+            android:text="@string/route_select_map_hint"
+            android:textColor="@color/text_secondary"
+            android:textSize="10sp"
+            android:visibility="gone" />
+    </FrameLayout>
+
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginStart="20dp"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="12dp"
         android:layout_marginBottom="8dp"
         android:text="@string/route_select_pick"
         android:textColor="@color/text_tertiary"

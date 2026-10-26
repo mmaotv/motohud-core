@@ -64,7 +64,10 @@ class NaviHistoryActivity : AppCompatActivity() {
         empty = findViewById(R.id.nh_empty)
         summary = findViewById(R.id.nh_summary)
 
-        adapter = NaviHistoryAdapter { item -> confirmDelete(item) }
+        adapter = NaviHistoryAdapter(
+            onClick = { item -> NaviHistoryDetailActivity.start(this, item.id) },
+            onLongClick = { item -> confirmDelete(item) }
+        )
         list.layoutManager = LinearLayoutManager(this)
         list.adapter = adapter
 

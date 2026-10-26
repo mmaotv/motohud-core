@@ -22,11 +22,13 @@ import com.motohud.ble.data.bike.BikeModel
 import com.motohud.ble.data.bike.BikePhotoStore
 import com.motohud.ble.data.bike.BikePrefs
 import com.motohud.ble.data.bike.BikeSpec
+import com.motohud.ble.data.device.DevicePrefs
 import com.motohud.ble.databinding.FragmentGarageBinding
 import com.motohud.ble.ui.HostActivity
 import com.motohud.ble.ui.MainActivity
 import com.motohud.ble.ui.MainViewModel
 import com.motohud.ble.ui.common.MotoDialog
+import com.motohud.ble.ui.scan.ScanActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,18 +62,160 @@ class GarageFragment : Fragment(R.layout.fragment_garage) {
         binding.btnChangeBike.setOnClickListener { showPicker() }
         binding.hero.setOnClickListener { showPhotoMenu() }
 
-        // 只保留底部 Tab 里没有的入口；仪表/体检/指令/导航/连接 都在底部，不再重复放这里
-        binding.tileSearch.setOnClickListener {
+        // 首页只保留这两个工具入口（原「功能」板块两个大方块 → Hero 右上角图标）
+        binding.ivSearch.setOnClickListener {
             // 标题留空：检索页自身有标题，避免顶部重复
             HostActivity.start(requireContext(), "", HostActivity.PAGE_SEARCH)
         }
-        binding.tileSettings.setOnClickListener {
+        binding.ivSettings.setOnClickListener {
             (requireActivity() as? MainActivity)?.showSettings()
         }
 
         observeBike()
         observeConnection()
         observeTelemetry()
+        setupDeviceCard()
+    }
+
+    // ---------- 车机连接卡 ----------
+    // 连接页已从底部页签降级为二级页，这里是它的主入口。
+    // 一个用户只有一台车机，所以卡片只记一台，换车机走「更换车机」。
+
+    private fun setupDeviceCard() {
+        binding.cardDeviceAction.setOnClickListener { onDeviceAction() }
+        binding.cardChangeDevice.setOnClickListener {
+            ScanActivity.start(requireContext())
+        }
+        // 未连过车机时卡片本身也可点（等同于「连接车机」）
+        binding.cardDevice.setOnClickListener {
+            val st = app.bleManager.state.value
+            if (st != BleConnectionManager.State.CONNECTED && !DevicePrefs.hasSaved(requireContext())) {
+                ScanActivity.start(requireContext())
+            }
+        }
+        binding.cardDeviceName.setOnClickListener { onDeviceAction() }
+
+        renderDeviceCard(app.bleManager.state.value)
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    DevicePrefs.saved.collect { renderDeviceCard(app.bleManager.state.value) }
+                }
+            }
+        }
+
+        showAutoConnectHintOnce()
+    }
+
+    /** 三态渲染：已连接 / 有存档未连上 / 从未连过 */
+    private fun renderDeviceCard(state: BleConnectionManager.State) {
+        val saved = DevicePrefs.saved.value
+        val connecting =
+            state == BleConnectionManager.State.CONNECTING || state == BleConnectionManager.State.RECONNECTING
+        val connected = state == BleConnectionManager.State.CONNECTED
+
+        binding.cardDot.setBackgroundResource(
+            when {
+                connected -> R.drawable.dot_green
+                connecting -> R.drawable.dot_orange
+                else -> R.drawable.dot_gray
+            }
+        )
+
+        when {
+            connected -> {
+                val name = app.bleManager.connectedDeviceName
+                    ?: saved?.second?.takeIf { it.isNotBlank() }
+                    ?: getString(R.string.banner_device_fallback)
+                binding.cardDeviceName.text = name
+                binding.cardDeviceAction.setText(R.string.device_card_disconnect)
+                val ts = DevicePrefs.lastConnectedAt.value
+                binding.cardDeviceSub.text = if (ts > 0L) {
+                    getString(R.string.device_card_last_seen, relativeTime(ts))
+                } else {
+                    getString(R.string.device_card_connected_hint)
+                }
+            }
+            connecting -> {
+                binding.cardDeviceName.text =
+                    saved?.second?.takeIf { it.isNotBlank() } ?: getString(R.string.banner_device_fallback)
+                binding.cardDeviceAction.setText(R.string.device_card_connecting)
+                binding.cardDeviceSub.setText(R.string.device_card_hint)
+            }
+            saved != null -> {
+                binding.cardDeviceName.text =
+                    saved.second.takeIf { it.isNotBlank() } ?: getString(R.string.banner_device_fallback)
+                binding.cardDeviceAction.setText(R.string.auto_connect_retry)
+                binding.cardDeviceSub.setText(R.string.device_card_hint)
+            }
+            else -> {
+                binding.cardDeviceName.setText(R.string.device_card_not_connected)
+                binding.cardDeviceAction.setText(R.string.device_card_connect)
+                binding.cardDeviceSub.setText(R.string.device_card_hint_new)
+            }
+        }
+    }
+
+    /** 按钮语义随状态变化：断开 / 重连 / 去连接页 */
+    private fun onDeviceAction() {
+        val ble = app.bleManager
+        val ctx = requireContext()
+        when (ble.state.value) {
+            BleConnectionManager.State.CONNECTED -> {
+                MotoDialog.builder(ctx)
+                    .setTitle(R.string.device_card_disconnect)
+                    .setMessage(R.string.device_card_disconnect_msg)
+                    .setPositiveButton(R.string.device_card_disconnect) { _, _ ->
+                        ble.disconnect()
+                        Toast.makeText(ctx, R.string.device_card_disconnected, Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton(R.string.cancel, null)
+                    .show()
+            }
+            BleConnectionManager.State.CONNECTING,
+            BleConnectionManager.State.RECONNECTING -> Unit
+            else -> {
+                val saved = DevicePrefs.saved.value
+                if (saved == null) {
+                    ScanActivity.start(ctx)
+                    return
+                }
+                // 有存档：就地重连，失败再引导去连接页（不打断用户）
+                // 不弹"正在连接"：卡片按钮已经变成「连接中…」，说了两遍
+                ble.connectSavedOrScan(saved.first, saved.second) { ok ->
+                    if (!ok) {
+                        _binding ?: return@connectSavedOrScan
+                        Toast.makeText(ctx, R.string.auto_connect_failed, Toast.LENGTH_LONG).show()
+                        if (isAdded) ScanActivity.start(requireContext())
+                    }
+                }
+            }
+        }
+    }
+
+    /** 首次连上后提示一次「以后打开自动连接」，只提示一次 */
+    private fun showAutoConnectHintOnce() {
+        val ctx = requireContext()
+        if (!DevicePrefs.hasSaved(ctx)) return
+        if (DevicePrefs.hintShown(ctx)) return
+        if (app.bleManager.state.value != BleConnectionManager.State.CONNECTED) return
+        DevicePrefs.markHintShown(ctx)
+        MotoDialog.builder(ctx)
+            .setTitle(R.string.auto_hint_title)
+            .setMessage(R.string.auto_hint_message)
+            .setPositiveButton(R.string.auto_hint_ok, null)
+            .show()
+    }
+
+    private fun relativeTime(ts: Long): String {
+        val diff = System.currentTimeMillis() - ts
+        return when {
+            diff < 60_000L -> getString(R.string.device_card_just_now)
+            diff < 3_600_000L -> getString(R.string.device_card_min_ago, diff / 60_000L)
+            diff < 86_400_000L -> getString(R.string.device_card_hour_ago, diff / 3_600_000L)
+            else -> getString(R.string.device_card_day_ago, diff / 86_400_000L)
+        }
     }
 
     // ---------- 车型 ----------
@@ -232,7 +376,11 @@ class GarageFragment : Fragment(R.layout.fragment_garage) {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 ble.state.collect { st ->
                     renderStatus(st)
-                    if (st == BleConnectionManager.State.CONNECTED) tryAutoMatch(ble.connectedDeviceName)
+                    renderDeviceCard(st)
+                    if (st == BleConnectionManager.State.CONNECTED) {
+                        tryAutoMatch(ble.connectedDeviceName)
+                        showAutoConnectHintOnce()
+                    }
                 }
             }
         }
@@ -266,16 +414,21 @@ class GarageFragment : Fragment(R.layout.fragment_garage) {
 
     // ---------- 实时数据 ----------
 
+    /**
+     * 关键数据块。
+     *
+     * 车机侧没有遥测上行帧（实测确认），这三格在真机上永远是 "--"，
+     * 所以整块默认 GONE：**只有真的拿到数据才显示**。
+     * 这样首页不会用一排空框占掉一整屏，接上 OBD 后又会自动长出来。
+     */
     private fun observeTelemetry() {
         vm.telemetry.observe(viewLifecycleOwner) { t ->
+            val hasAny = t.oil != null || t.battery != null || t.totalMileage != null
+            binding.metricRow.visibility = if (hasAny) View.VISIBLE else View.GONE
+            if (!hasAny) return@observe
             binding.tvOil.text = t.oil?.let { "$it%" } ?: getString(R.string.garage_value_empty)
             binding.tvBattery.text = t.battery?.let { String.format(Locale.US, "%.1fV", it) }
                 ?: getString(R.string.garage_value_empty)
-            binding.tvWater.text = when (t.waterTemp) {
-                null -> getString(R.string.garage_value_empty)
-                0 -> "<45℃"
-                else -> "${t.waterTemp}℃"
-            }
             binding.tvMileage.text = t.totalMileage?.let { "$it" }
                 ?: getString(R.string.garage_value_empty)
         }

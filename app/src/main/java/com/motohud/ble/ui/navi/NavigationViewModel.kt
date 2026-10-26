@@ -7,6 +7,7 @@ import android.location.LocationManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.motohud.ble.MotoHudApp
+import com.motohud.ble.amap.AmapCache
 import com.motohud.ble.amap.AmapManager
 import com.motohud.ble.amap.AmapRepo
 import com.motohud.ble.amap.RoutePlanResult
@@ -202,11 +203,28 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- POI 搜索 ----------
 
-    /** POI 输入提示（取消上一次未完成的请求） */
+    /**
+     * POI 输入提示（输入中，300ms 防抖后调用）。
+     *
+     * ## 排序逻辑（这是"同名地点按距离排序"的核心）
+     * 原先：`_tips.value = r.items`，直接把高德返回的数组顺序渲染，
+     * 等于使用**服务端相关性排序**（POI 等级 + 热度 + 名称匹配度），
+     * 跨城市混排 —— 搜"万达广场"，外地的可能排在本地前面。
+     *
+     * 现在：本地补距离（Inputtips 没有 distance 字段，用当前定位算球面距离）
+     * 后按 `名称完全匹配(降序) → 距离(升序)` 排。
+     * 同名地点必然近的在前；名称完全匹配的优先于"包含关键字"的。
+     */
     fun searchTips(keyword: String) {
         tipsJob?.cancel()
         val kw = keyword.trim()
         if (kw.isEmpty()) {
+            _tips.value = emptyList()
+            _tipsState.value = TipsState.IDLE
+            return
+        }
+        // 一个字不出请求：联想召回基本无意义，却是输入过程中最密集的一批请求
+        if (kw.length < 2) {
             _tips.value = emptyList()
             _tipsState.value = TipsState.IDLE
             return
@@ -217,12 +235,24 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
         }
         _tipsState.value = TipsState.LOADING
         tipsJob = viewModelScope.launch {
-            val result = runCatching { amapRepo.searchTips(kw) }
+            val origin = currentLocation
+            // 同一个词 30 分钟内直接复用：退格重打、清空重输都不再发请求
+            val key = AmapCache.tipsKey(kw, "", origin?.first, origin?.second)
+            val cached = AmapCache.get<List<TipItem>>(key, AmapCache.TTL_TIPS_MS)
+            if (cached != null) {
+                val list = rank(kw, cached)
+                _tips.value = list
+                _tipsState.value = if (list.isEmpty()) TipsState.EMPTY else TipsState.DONE
+                return@launch
+            }
+            val result = runCatching { amapRepo.searchTips(kw, "", origin) }
             result.onSuccess { r ->
                 when (r) {
                     is com.motohud.ble.amap.TipsResult.Ok -> {
-                        _tips.value = r.items
-                        _tipsState.value = if (r.items.isEmpty()) TipsState.EMPTY else TipsState.DONE
+                        AmapCache.put(key, r.items)
+                        val list = rank(kw, r.items)
+                        _tips.value = list
+                        _tipsState.value = if (list.isEmpty()) TipsState.EMPTY else TipsState.DONE
                     }
                     is com.motohud.ble.amap.TipsResult.Err -> {
                         _tips.value = emptyList()
@@ -235,6 +265,91 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
                 _tipsState.value = TipsState.ERROR
             }
         }
+    }
+
+    /**
+     * POI 搜索结果（回车 / 点搜索时调用）。
+     *
+     * 换用 `PoiSearch`：它**自带 distance**、能分页、召回比 Inputtips 更全。
+     * 只改前端排序救不回来 —— Inputtips 的召回本身受服务端相关度限制，
+     * 如果它只返回 10 条外地同名点，本地排得再准也没用。
+     */
+    fun searchResults(keyword: String) {
+        tipsJob?.cancel()
+        val kw = keyword.trim()
+        if (kw.isEmpty()) return
+        if (!amapReady) {
+            _tipsState.value = TipsState.ERROR
+            return
+        }
+        _tipsState.value = TipsState.LOADING
+        tipsJob = viewModelScope.launch {
+            val origin = currentLocation
+            // POI 结果比联想更重（一页几十条带图片/评分字段），同一个词必须复用
+            val key = AmapCache.poiKey(kw, "", origin?.first, origin?.second, 1, 20)
+            val cached = AmapCache.get<List<TipItem>>(key, AmapCache.TTL_POI_MS)
+            if (cached != null) {
+                val list = rank(kw, cached)
+                _tips.value = list
+                _tipsState.value = if (list.isEmpty()) TipsState.EMPTY else TipsState.DONE
+                return@launch
+            }
+            val result = runCatching { amapRepo.searchPoi(kw, "", origin) }
+            result.onSuccess { r ->
+                when (r) {
+                    is com.motohud.ble.amap.TipsResult.Ok -> {
+                        AmapCache.put(key, r.items)
+                        val list = rank(kw, r.items)
+                        _tips.value = list
+                        _tipsState.value = if (list.isEmpty()) TipsState.EMPTY else TipsState.DONE
+                    }
+                    is com.motohud.ble.amap.TipsResult.Err -> {
+                        _tips.value = emptyList()
+                        _tipsErrorCode.value = r.code
+                        _tipsState.value = TipsState.ERROR
+                    }
+                }
+            }.onFailure {
+                _tipsErrorCode.value = -1
+                _tipsState.value = TipsState.ERROR
+            }
+        }
+    }
+
+    /**
+     * 排序 + 同名归并。
+     *
+     * 1. 排序键：名称与关键字完全一致优先，其次按距离升序（无距离的排最后）；
+     * 2. 归并：同名且相距 < 500m 的合并成一条（显示"（N 个地点）"），
+     *    避免"XX 大厦"在同一栋楼里出现三四条把列表刷满。
+     */
+    private fun rank(keyword: String, items: List<TipItem>): List<TipItem> {
+        val sorted = items.sortedWith(
+            compareBy<TipItem> { if (it.name.trim() == keyword) 0 else 1 }
+                .thenBy { it.distanceM ?: Int.MAX_VALUE }
+        )
+        val out = ArrayList<TipItem>(sorted.size)
+        val merged = HashMap<String, Int>()
+        for (item in sorted) {
+            val dup = out.indexOfFirst { exist ->
+                exist.name == item.name && near(exist, item)
+            }
+            if (dup >= 0) {
+                val count = (merged[item.name] ?: 1) + 1
+                merged[item.name] = count
+                out[dup] = out[dup].copy(name = "${item.name}（$count 个地点）")
+            } else {
+                out.add(item)
+            }
+        }
+        return out
+    }
+
+    private fun near(a: TipItem, b: TipItem): Boolean {
+        val dLat = (a.latitude - b.latitude) * 111_320.0
+        val dLng = (a.longitude - b.longitude) * 111_320.0 *
+            kotlin.math.cos(Math.toRadians(a.latitude))
+        return kotlin.math.sqrt(dLat * dLat + dLng * dLng) < 500.0
     }
 
     fun clearTips() {

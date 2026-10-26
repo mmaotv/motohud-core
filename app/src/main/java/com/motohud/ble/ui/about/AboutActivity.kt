@@ -26,6 +26,7 @@ import com.motohud.ble.ble.BleConnectionManager
 import com.motohud.ble.ble.BleConstants
 import com.motohud.ble.data.UpdateChecker
 import com.motohud.ble.ui.MainViewModel
+import com.motohud.ble.ui.diagnostic.DiagnosticActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -92,6 +93,9 @@ class AboutActivity : AppCompatActivity() {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.REPO_URL)))
             }
         }
+        // 诊断页隐藏入口：连点版本号 5 次。
+        // 从设置菜单移出来——普通用户不需要它，但排查 BLE 问题时必须够得着。
+        findViewById<View>(R.id.tv_version).setOnClickListener { onVersionTap() }
 
         observeDevice()
         // 进页面自动检查一次（静默，不打扰）
@@ -99,6 +103,29 @@ class AboutActivity : AppCompatActivity() {
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    // ---------- 诊断页隐藏入口 ----------
+
+    private var versionTaps = 0
+    private var lastTapAt = 0L
+
+    private fun onVersionTap() {
+        val now = System.currentTimeMillis()
+        // 两次点击间隔超过 1.5s 就重新计数，避免误触累积
+        versionTaps = if (now - lastTapAt > 1500L) 1 else versionTaps + 1
+        lastTapAt = now
+        val left = 5 - versionTaps
+        when {
+            left > 2 -> Unit
+            left in 1..2 -> Toast.makeText(
+                this, getString(R.string.about_debug_hint, left), Toast.LENGTH_SHORT
+            ).show()
+            else -> {
+                versionTaps = 0
+                startActivity(Intent(this, DiagnosticActivity::class.java))
+            }
+        }
+    }
 
     // ---------- 版本更新 ----------
 

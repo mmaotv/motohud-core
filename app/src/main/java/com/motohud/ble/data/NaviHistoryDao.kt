@@ -29,6 +29,19 @@ interface NaviHistoryDao {
     @Query("SELECT COUNT(*) FROM navi_history")
     suspend fun count(): Int
 
+    /**
+     * 只更新轨迹相关三列。
+     *
+     * 为什么不复用 [update]：结束导航时 [NaviHistory.finish] 与 [NaviTrack.finish]
+     * 是两条并行协程，各自 `copy()` 整行再写回会互相覆盖（例如轨迹写回把 finishedAt 又抹成 0）。
+     * 这里只改自己那三列，永远安全。
+     */
+    @Query(
+        "UPDATE navi_history SET trackPolyline = :polyline, " +
+            "avgSpeedKmh = :avgSpeed, maxSpeedKmh = :maxSpeed WHERE id = :id"
+    )
+    suspend fun updateTrack(id: Long, polyline: String?, avgSpeed: Double?, maxSpeed: Double?)
+
     @Query("DELETE FROM navi_history WHERE id = :id")
     suspend fun delete(id: Long)
 

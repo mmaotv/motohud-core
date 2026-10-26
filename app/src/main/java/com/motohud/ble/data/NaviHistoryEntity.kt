@@ -62,7 +62,23 @@ data class NaviHistoryEntity(
     val oil: Int? = null,
 
     /** 结束时总里程（km），null = 未知 */
-    val mileage: Int? = null
+    val mileage: Int? = null,
+
+    /**
+     * 行驶轨迹，压缩编码为 `lat,lng;lat,lng;…`（GCJ02，6 位小数）。
+     *
+     * 为什么不由详情页去算：原始采样点在 [NaviTrack] 结束时就被清掉了，
+     * 这里存一份简化后的折线，详情页只读一列即可秒开，也不占空间
+     * （200 条 × 平均 400 点 × 16 字符 ≈ 1.3MB 上限）。
+     * null = 这条记录没有轨迹（老版本记录，或导航刚起就退出）。
+     */
+    val trackPolyline: String? = null,
+
+    /** 平均速度（km/h），已剔除 <2km/h 的停车点 */
+    val avgSpeedKmh: Double? = null,
+
+    /** 最高速度（km/h） */
+    val maxSpeedKmh: Double? = null
 ) {
     /** 是否已结束 */
     val finished: Boolean get() = finishedAt > 0L

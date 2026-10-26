@@ -103,7 +103,7 @@ class CommandFragment : Fragment(R.layout.fragment_command) {
                         emptyMessage.setText(R.string.empty_message_command)
                         emptyAction.visibility = if (connected) View.GONE else View.VISIBLE
                         emptyAction.setOnClickListener {
-                            (requireActivity() as? MainActivity)?.goToTab(MainActivity.TAB_CONNECT)
+                            com.motohud.ble.ui.scan.ScanActivity.start(requireContext())
                         }
                     }
                 }

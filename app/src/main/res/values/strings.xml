@@ -340,6 +340,8 @@
     <string name="route_select_other_map">用其他地图打开</string>
     <string name="route_select_other_map_desc">把这个目的地交给高德、百度或系统地图继续导航</string>
     <string name="route_select_no_map">地图服务不可用，暂时无法规划路线</string>
+    <string name="route_select_map_hint">颜色对应下方方案顺序</string>
+    <string name="route_select_from">起点</string>
 
     <!-- ============ 关于页 ============ -->
     <string name="about_title">关于</string>
@@ -396,4 +398,143 @@
     <string name="navi_history_sec">%1$d 秒</string>
     <string name="navi_history_hour">%1$d 小时 %2$d 分</string>
     <string name="navi_history_km">%1$s 公里</string>
+
+    <!-- ================= 车机存档 / 自动连接 ================= -->
+    <string name="banner_device_fallback">车机</string>
+    <string name="banner_disconnected_saved">车机已断开，点这里重连</string>
+    <!-- 整条状态条即按钮，文案自带动作提示 -->
+    <string name="banner_disconnected_tap">未连接车机 · 点这里连接 ›</string>
+    <string name="banner_disconnected_saved_tap">车机已断开 · 点这里重连 ›</string>
+    <string name="banner_action_retry">重连</string>
+    <string name="auto_connect_ok">正在连接车机…</string>
+    <string name="auto_connect_retry">重连</string>
+    <string name="auto_connect_failed">没找到车机，去连接页看看</string>
+    <string name="auto_hint_title">已记住这台车机</string>
+    <string name="auto_hint_message">下次打开 App 会自动连接，不用再手动扫描。开关在爱车页的连接卡里，随时可以改。</string>
+    <string name="auto_hint_ok">知道了</string>
+
+    <!-- ================= 爱车页连接卡 ================= -->
+    <string name="device_card_not_connected">未连接车机</string>
+    <string name="device_card_connect">连接</string>
+    <string name="device_card_connecting">连接中…</string>
+    <string name="device_card_disconnect">断开</string>
+    <string name="device_card_disconnect_msg">断开后不再自动重连，需要时可以再点连接。</string>
+    <string name="device_card_disconnected">已断开连接</string>
+    <string name="device_card_hint">点右侧按钮可重新连接</string>
+    <string name="device_card_hint_new">还没有连接过车机。先连一次，之后打开 App 会自动连上</string>
+    <string name="device_card_connected_hint">投屏与车况通道已就绪</string>
+    <string name="device_card_last_seen">上次连接：%1$s</string>
+    <string name="device_card_auto_connect">打开 App 自动连接</string>
+    <string name="device_card_change">更换车机</string>
+    <string name="device_card_connect_failed">连接失败，请确认车机已上电</string>
+    <string name="device_card_never">从未连接</string>
+    <string name="device_card_just_now">刚刚</string>
+    <string name="device_card_min_ago">%1$d 分钟前</string>
+    <string name="device_card_hour_ago">%1$d 小时前</string>
+    <string name="device_card_day_ago">%1$d 天前</string>
+
+    <!-- ================= 连接页（二级页） ================= -->
+    <string name="scan_page_title">连接车机</string>
+    <string name="scan_page_hint">选择你的车机，连接后可投屏导航</string>
+    <string name="scan_forget_device">忘记此车机</string>
+    <string name="scan_forget_device_named">忘记此车机（%1$s）</string>
+    <string name="scan_forget_title">忘记此车机？</string>
+    <string name="scan_forget_message">忘记后，下次打开 App 不会自动连接 %1$s，需要重新扫描配对。</string>
+    <string name="scan_forget_confirm">忘记</string>
+
+    <!-- ================= 投屏开关 / 画中画 ================= -->
+    <string name="navi_cast_title">投屏</string>
+    <string name="navi_cast_switch_title">投到车机</string>
+    <string name="navi_cast_switch_desc">把转向提示推到车机屏幕</string>
+    <string name="navi_screen_off_desc">导航中屏幕自动熄灭，只保留转向提示</string>
+    <string name="navi_cast_no_device">未连接车机，投屏指令不会发送</string>
+    <string name="navi_cast_on_toast">已投到车机</string>
+    <string name="navi_cast_off_toast">已关闭投屏</string>
+    <string name="navi_pip">小窗导航</string>
+    <string name="navi_pip_failed">当前系统不支持小窗</string>
+    <string name="close">关闭</string>
+
+    <!-- ================= 导航页增强 ================= -->
+    <string name="guidance_next_step">然后 %1$s</string>
+    <string name="guidance_lights">红绿灯</string>
+    <string name="guidance_tolls">过路费</string>
+    <string name="guidance_step_progress">步骤进度</string>
+    <string name="guidance_traffic_estimate">%1$s · 均速 %2$d km/h（估算）</string>
+    <string name="guidance_traffic_smooth">畅通</string>
+    <string name="guidance_traffic_slow">缓行</string>
+    <string name="guidance_traffic_jam">拥堵</string>
+    <string name="guidance_cast_off_hint">投屏已关闭，导航仅在本机显示</string>
+    <string name="guidance_arrive_sub">已到达 %1$s</string>
+    <string name="guidance_arrive_distance">实际里程</string>
+    <string name="guidance_arrive_duration">用时</string>
+    <string name="guidance_arrive_avg">平均速度</string>
+    <string name="guidance_view_track">查看轨迹</string>
+    <string name="guidance_navi_again">再走一次</string>
+    <string name="guidance_no_track">这次导航没有记录到轨迹</string>
+
+    <!-- ================= 导航详情（轨迹回放） ================= -->
+    <string name="navi_history_detail_title">导航详情</string>
+    <string name="navi_history_detail_time">%1$s → %2$s</string>
+    <string name="navi_history_distance">里程</string>
+    <string name="navi_history_duration">用时</string>
+    <string name="navi_history_avg_speed">平均速度</string>
+    <string name="navi_history_max_speed">最高速度</string>
+    <string name="navi_history_device_name">车机 %1$s</string>
+    <string name="navi_history_again">再走一次</string>
+    <string name="navi_history_no_track">这次导航没有记录到轨迹</string>
+    <string name="navi_history_no_map">地图未就绪，无法绘制轨迹</string>
+
+    <!-- ================= 通知栏导航条 ================= -->
+    <string name="navi_fg_remain">剩余 %1$s · %2$s 到达</string>
+
+    <!-- 诊断页隐藏入口（连点版本号） -->
+    <string name="about_debug_hint">再点 %1$d 次进入诊断页</string>
+
+    <!-- ================= 设置面板 ================= -->
+    <string name="settings_auto_connect_desc">打开 App 自动连回上次的车机</string>
+    <string name="settings_voice">语音播报</string>
+    <string name="settings_voice_desc">转弯前播报引导语</string>
+    <string name="settings_traffic_layer">地图实时路况</string>
+    <string name="settings_traffic_layer_desc">显示红绿拥堵色带，会增加流量消耗</string>
+
+    <!-- ================= 车况二级页 ================= -->
+    <string name="navi_vehicle_entry">车况</string>
+    <string name="vehicle_page_title">车况</string>
+    <string name="vehicle_page_hint">车机不上报遥测，接入 OBD 后这些数值才会有</string>
+
+    <!-- 车况页（重做后：只显示拿得到的信息） -->
+    <string name="vehicle_no_device">还没有配对过的车机</string>
+    <string name="vehicle_unknown_device">未知车机</string>
+    <string name="vehicle_state_connecting">正在尝试连接车机…</string>
+    <string name="vehicle_state_reconnecting">连接断开，正在自动重连…</string>
+    <string name="vehicle_section_device">车机信息</string>
+    <string name="vehicle_section_ability">这台车机能做什么</string>
+    <string name="vehicle_field_name">设备名称</string>
+    <string name="vehicle_field_mac">蓝牙地址</string>
+    <string name="vehicle_field_session">本次连接</string>
+    <string name="vehicle_field_last">上次连接</string>
+    <string name="vehicle_ability_navi">投屏导航（转向 / 剩余距离 / ETA）</string>
+    <string name="vehicle_ability_autoconn">打开 App 自动回连</string>
+    <string name="vehicle_ability_telemetry">仪表 / 体检 / 故障码 —— 无遥测上行通道</string>
+    <string name="vehicle_ability_obd">OBD 诊断口数据 —— 尚未接入</string>
+    <string name="vehicle_ability_note">上面标 ✕ 的两项不是 Bug：这台车机在蓝牙侧从未上报过任何遥测帧（上行帧数为 0），仪表、体检、故障码在软件里没有数据源。要拿到这些数据只能走 OBD 诊断口，方案验证时会另行说明。</string>
+
+    <!-- ================= 起点设置 ================= -->
+    <string name="origin_change">修改</string>
+    <string name="origin_pick_title">选择起点</string>
+    <string name="origin_current">当前位置</string>
+    <string name="origin_current_sub">实时定位</string>
+    <string name="origin_map_pick">在地图上选点</string>
+    <string name="origin_map_pick_sub">拖动地图，把起点对准屏幕中心</string>
+    <string name="origin_map_confirm">确定选这一点</string>
+    <string name="origin_map_failed">没能取到地图中心坐标，请重试</string>
+    <string name="origin_manual">输入坐标</string>
+    <string name="origin_manual_sub">经度 / 纬度</string>
+    <string name="origin_saved">常用地址</string>
+    <string name="origin_place_hint">设为起点</string>
+    <string name="navi_locate_failed_short">尚未获取到定位</string>
+
+    <!-- 搜索历史 -->
+    <string name="search_history_clear">清空</string>
+    <string name="search_history_delete">删除这条历史</string>
 </resources>

@@ -78,6 +78,13 @@ class MainViewModel(app: MotoHudApp) : ViewModel() {
                         }
                         if (event.state == BleConnectionManager.State.CONNECTED) {
                             com.motohud.ble.data.BikeSnapshot.deviceName = ble.connectedDeviceName
+                            // 连上之后才记存档：用户点错设备不会被当成"我的车"
+                            val addr = ble.connectedAddress
+                            if (!addr.isNullOrBlank()) {
+                                com.motohud.ble.data.device.DevicePrefs.save(
+                                    app, addr, ble.connectedDeviceName
+                                )
+                            }
                         }
                     }
 

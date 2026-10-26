@@ -65,7 +65,7 @@ class DashboardFragment : Fragment(R.layout.fragment_dashboard) {
                         emptyMessage.setText(R.string.empty_message_dashboard)
                         emptyAction.visibility = if (connected) View.GONE else View.VISIBLE
                         emptyAction.setOnClickListener {
-                            (requireActivity() as? MainActivity)?.goToTab(MainActivity.TAB_CONNECT)
+                            com.motohud.ble.ui.scan.ScanActivity.start(requireContext())
                         }
                     }
                 }

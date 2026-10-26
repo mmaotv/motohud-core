@@ -11,7 +11,6 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import com.motohud.ble.ui.common.MotoDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -24,27 +23,32 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.bottomnavigation.BottomNavigationView
-import com.motohud.ble.BuildConfig
 import com.motohud.ble.MotoHudApp
 import com.motohud.ble.R
 import com.motohud.ble.ble.BleConnectionManager
 import com.motohud.ble.data.AppCache
+import com.motohud.ble.data.device.DevicePrefs
 import com.motohud.ble.service.NotificationForwardService
-import com.motohud.ble.ui.diagnostic.DiagnosticActivity
+import com.motohud.ble.ui.common.MotoDialog
 import com.motohud.ble.ui.navi.KeySetupDialog
+import com.motohud.ble.ui.scan.ScanActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 /**
- * 主界面：6 个页签 + 顶部连接状态条。
+ * 主界面：**爱车 / 导航** 两个页签 + 顶部连接状态条。
  *
- * 状态呈现规则（连接 / 未连接全链路）：
- *  - DISCONNECTED：灰点 + "未连接车机"，右侧"去连接" → 跳到连接页；
- *  - CONNECTING / RECONNECTING：橙点 + 进行中文案，右侧动作隐藏（不可重复操作）；
- *  - CONNECTED：绿点 + "已连接：设备名"，右侧"设置"；
- *  - 各业务页在未连接时显示空态遮罩并给出"去连接"入口（见各 Fragment）。
+ * 为什么只剩两个页签：
+ * 实测确认 BYQ 车机只提供投屏导航通道，没有任何上行遥测数据，
+ * 仪表 / 体检 / 指令台在本硬件上属于"永远等不到数据"的功能，
+ * 因此入口全部收起（代码保留在 [com.motohud.ble.ui.dashboard] 等包里，
+ * 归档分支 archive/full-2.2.7 随时可恢复），只留真正可用的两个功能。
+ *
+ * 连接状态条：连接不再是独立页签，而是状态条 + 爱车页连接卡；
+ * 未连接时点状态条 → 连接页（二级页）；已连接的设备由
+ * [DevicePrefs] 记住，冷启动 / 回前台自动连。
  */
 class MainActivity : AppCompatActivity() {
 
@@ -56,9 +60,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bannerText: TextView
     private lateinit var bannerAction: TextView
 
+    private val app get() = application as MotoHudApp
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { /* 结果在各页按需处理 */ }
+    ) {
+        // 权限刚拿到 → 补一次自动连接（用户可能一开 App 就点了"允许"）
+        if (it.values.any { g -> g }) maybeAutoConnect(force = true)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,7 +81,7 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(R.layout.activity_main)
 
-        vm = ViewModelProvider(this, MainViewModel.Factory(application as MotoHudApp))[MainViewModel::class.java]
+        vm = ViewModelProvider(this, MainViewModel.Factory(app))[MainViewModel::class.java]
 
         banner = findViewById(R.id.banner_connection)
         bannerDot = findViewById(R.id.banner_dot)
@@ -97,8 +106,6 @@ class MainActivity : AppCompatActivity() {
             pager.currentItem = when (item.itemId) {
                 R.id.nav_garage -> TAB_GARAGE
                 R.id.nav_navigation -> TAB_NAVIGATION
-                R.id.nav_vehicle -> TAB_VEHICLE
-                R.id.nav_scan -> TAB_CONNECT
                 else -> TAB_GARAGE
             }
             true
@@ -106,10 +113,8 @@ class MainActivity : AppCompatActivity() {
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 bottomNav.selectedItemId = when (position) {
-                    TAB_GARAGE -> R.id.nav_garage
                     TAB_NAVIGATION -> R.id.nav_navigation
-                    TAB_VEHICLE -> R.id.nav_vehicle
-                    else -> R.id.nav_scan
+                    else -> R.id.nav_garage
                 }
                 onTabShown(position)
             }
@@ -118,6 +123,8 @@ class MainActivity : AppCompatActivity() {
         applyEdgeToEdge()
         setupConnectionBanner()
         requestBlePermissions()
+        // 冷启动自动连接：延迟 300ms 让首帧 UI 先画出来，用户不会看到"白屏等连接"
+        banner.postDelayed({ maybeAutoConnect() }, 300L)
 
         vm.toast.observe(this) { msg ->
             msg?.let {
@@ -127,23 +134,89 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ---------- 自动连接 ----------
+
+    /**
+     * 自动连接（幂等）。触发点：冷启动、回到前台（60s 节流）、掉线重连由 BLE 层负责。
+     *
+     * 触发条件全部满足才动手：有存档 + 开关开 + 未手动断开 + 蓝牙开 + 权限齐 + 当前未连接。
+     * 失败静默——车不在旁边是常态，弹窗只会打扰。
+     */
+    private fun maybeAutoConnect(force: Boolean = false) {
+        val ble = app.bleManager
+        if (!DevicePrefs.autoConnectEnabled(this)) return
+        if (ble.manualDisconnect) return
+        when (ble.state.value) {
+            BleConnectionManager.State.CONNECTED,
+            BleConnectionManager.State.CONNECTING,
+            BleConnectionManager.State.RECONNECTING -> return
+            else -> Unit
+        }
+        val saved = DevicePrefs.last(this) ?: return
+        if (!blePermissionsGranted()) return
+        if (!force) {
+            val since = System.currentTimeMillis() - DevicePrefs.lastAutoTry(this)
+            if (since < AUTO_RETRY_GAP_MS) return
+        }
+        DevicePrefs.markAutoTry(this)
+        // 连上不再弹 Toast：顶部状态条本身就会变成「已连接」，弹窗只是噪音
+        ble.connectSavedOrScan(saved.first, saved.second)
+    }
+
+    private fun blePermissionsGranted(): Boolean {
+        val perms = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            perms += Manifest.permission.BLUETOOTH_SCAN
+            perms += Manifest.permission.BLUETOOTH_CONNECT
+        }
+        return perms.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
     /** 顶部连接状态条：连接状态 → 文案 / 圆点 / 动作 */
     private fun setupConnectionBanner() {
-        val ble = (application as MotoHudApp).bleManager
+        val ble = app.bleManager
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 ble.state.collect { st -> renderBanner(st, ble.connectedDeviceName) }
             }
         }
-        banner.setOnClickListener {
-            if (ble.state.value == BleConnectionManager.State.CONNECTED) showSettings() else goToTab(TAB_CONNECT)
-        }
+        banner.setOnClickListener { onBannerTap() }
         banner.setOnLongClickListener {
             showSettings()
             true
         }
-        bannerAction.setOnClickListener {
-            if (ble.state.value == BleConnectionManager.State.CONNECTED) showSettings() else goToTab(TAB_CONNECT)
+        // 未连接时整条状态条就是那个"去连接"按钮：
+        // 以前文字写「未连接车机」右边再放一颗「去连接」，同一件事两个入口，
+        // 而且两处的点击行为还不一样，用户不知道该点哪个。
+        banner.setOnClickListener { onBannerTap() }
+        bannerAction.setOnClickListener { onBannerTap() }
+    }
+
+    /**
+     * 点击状态条：
+     *  - 已连接 → 设置
+     *  - 有存档但未连上 → 先就地重试一次自动连接（最快路径），再退到连接页
+     *  - 从未连过 → 直接进连接页
+     */
+    private fun onBannerTap() {
+        val ble = app.bleManager
+        if (ble.state.value == BleConnectionManager.State.CONNECTED) {
+            showSettings()
+            return
+        }
+        val saved = DevicePrefs.last(this)
+        if (saved != null && blePermissionsGranted()) {
+            DevicePrefs.markAutoTry(this)
+            ble.connectSavedOrScan(saved.first, saved.second) { ok ->
+                if (!ok) runOnUiThread { ScanActivity.start(this) }
+            }
+        } else {
+            ScanActivity.start(this)
         }
     }
 
@@ -168,9 +241,12 @@ class MainActivity : AppCompatActivity() {
             }
             BleConnectionManager.State.DISCONNECTED -> {
                 bannerDot.setImageResource(R.drawable.dot_gray)
-                bannerText.setText(R.string.banner_disconnected)
-                bannerAction.setText(R.string.empty_action)
-                bannerAction.visibility = View.VISIBLE
+                // 文案本身带动作提示（› 表示可点），右侧不再单独放「去连接」按钮
+                bannerText.setText(
+                    if (DevicePrefs.hasSaved(this)) R.string.banner_disconnected_saved_tap
+                    else R.string.banner_disconnected_tap
+                )
+                bannerAction.visibility = View.GONE
             }
         }
     }
@@ -207,15 +283,9 @@ class MainActivity : AppCompatActivity() {
         pager.setCurrentItem(index.coerceIn(0, TAB_COUNT - 1), true)
     }
 
-    /** 跳到车况页的指定子页：0=仪表 1=体检 2=指令 */
-    fun goToVehicle(subPage: Int) {
-        goToTab(TAB_VEHICLE)
-        pager.post {
-            supportFragmentManager.fragments
-                .filterIsInstance<com.motohud.ble.ui.vehicle.VehicleFragment>()
-                .firstOrNull()
-                ?.selectPage(subPage)
-        }
+    /** 打开连接页（爱车页连接卡、各页空态共用） */
+    fun openConnectPage() {
+        ScanActivity.start(this)
     }
 
     /**
@@ -237,35 +307,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // 回到前台：60s 内不重复尝试，避免频繁开关 App 把电池打光
+        maybeAutoConnect()
+    }
+
     // ---------- 设置 ----------
 
-    /** 设置入口：顶部状态条、爱车页「设置」宫格共用同一个对话框 */
+    /**
+     * 设置入口：顶部状态条 / 爱车页右上角齿轮共用。
+     *
+     * 从 `setItems` 文本列表换成底部面板，因为「自动连接 / 投屏 / 息屏 /
+     * 语音 / 路况」都是开关型设置，文本列表放不下。
+     */
     fun showSettings() {
-        val items = arrayOf(
-            getString(R.string.settings_onboarding),
-            getString(R.string.settings_amap_key),
-            getString(R.string.settings_privacy),
-            getString(R.string.settings_clear_cache),
-            getString(R.string.settings_diagnostic),
-            getString(R.string.settings_about)
-        )
-        MotoDialog.builder(this)
-            .setTitle(R.string.settings_title)
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> OnboardingActivity.start(this)
-                    1 -> KeySetupDialog().show(supportFragmentManager, "key_setup")
-                    2 -> showPrivacy()
-                    3 -> showClearCache()
-                    4 -> startActivity(Intent(this, DiagnosticActivity::class.java))
-                    5 -> com.motohud.ble.ui.about.AboutActivity::class.java.let {
-                        startActivity(Intent(this, it))
-                    }
-                }
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+        com.motohud.ble.ui.settings.SettingsSheetDialog.newInstance()
+            .show(supportFragmentManager, "settings")
     }
+
+    fun openPrivacy() = showPrivacy()
+
+    fun openClearCache() = showClearCache()
 
     private fun showPrivacy() {
         MotoDialog.builder(this)
@@ -357,13 +420,9 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val TAB_GARAGE = 0
         const val TAB_NAVIGATION = 1
-        const val TAB_VEHICLE = 2
-        const val TAB_CONNECT = 3
-        const val TAB_COUNT = 4
+        const val TAB_COUNT = 2
 
-        /** 车况页子页 */
-        const val VEHICLE_DASHBOARD = 0
-        const val VEHICLE_EXAMINATION = 1
-        const val VEHICLE_COMMAND = 2
+        /** 回前台自动连接的节流间隔 */
+        private const val AUTO_RETRY_GAP_MS = 60_000L
     }
 }

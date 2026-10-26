@@ -8,14 +8,20 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [SearchHistoryEntity::class, SavedPlaceEntity::class, NaviHistoryEntity::class],
-    version = 3,
+    entities = [
+        SearchHistoryEntity::class,
+        SavedPlaceEntity::class,
+        NaviHistoryEntity::class,
+        NaviTrackPointEntity::class
+    ],
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun searchHistoryDao(): SearchHistoryDao
     abstract fun savedPlaceDao(): SavedPlaceDao
     abstract fun naviHistoryDao(): NaviHistoryDao
+    abstract fun naviTrackPointDao(): NaviTrackPointDao
 
     companion object {
         /** v1 -> v2：新增 saved_place 表（搜索历史不丢） */
@@ -69,6 +75,35 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v3 -> v4：导航轨迹。
+         *
+         * 新增 navi_track_point 表（原始采样点，导航结束后清空）+ navi_history 三列
+         * （压缩后的轨迹、均速、最高速）。用 ALTER TABLE 加列，**不重建表**，
+         * 老用户的导航历史一条都不会丢。
+         */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS navi_track_point (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "historyId INTEGER NOT NULL, " +
+                        "lat REAL NOT NULL, " +
+                        "lng REAL NOT NULL, " +
+                        "ts INTEGER NOT NULL, " +
+                        "speedKmh REAL NOT NULL DEFAULT 0, " +
+                        "bearing REAL NOT NULL DEFAULT 0)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_navi_track_point_historyId " +
+                        "ON navi_track_point (historyId)"
+                )
+                db.execSQL("ALTER TABLE navi_history ADD COLUMN trackPolyline TEXT")
+                db.execSQL("ALTER TABLE navi_history ADD COLUMN avgSpeedKmh REAL")
+                db.execSQL("ALTER TABLE navi_history ADD COLUMN maxSpeedKmh REAL")
+            }
+        }
+
         @Volatile private var instance: AppDatabase? = null
 
         fun get(context: Context): AppDatabase =
@@ -78,7 +113,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "motohud.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { instance = it }
             }

@@ -66,6 +66,24 @@
                 android:visibility="gone" />
         </LinearLayout>
 
+        <!-- 搜索状态行：搜索中 / 无结果 / 失败。
+             以前这三种状态各弹一个 Toast，打字时反复打断。
+             状态属于"当前列表在说什么"，放在列表位置最合适，不抢焦点。 -->
+        <TextView
+            android:id="@+id/tv_tips_state"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_card"
+            android:fontFamily="@font/inter"
+            android:paddingStart="14dp"
+            android:paddingTop="12dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="12dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
         <!-- POI 搜索结果 -->
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/rv_tips"
@@ -76,7 +94,78 @@
             android:maxHeight="320dp"
             android:padding="4dp"
             android:visibility="gone" />
+
+        <!--
+          最近搜索。
+          只在输入框获得焦点且为空时出现 —— 用户点搜索框通常没想好要搜什么，
+          最近查过的地方往往就是答案，比空列表有用得多。
+          点任一条直接带着坐标进路线页，不再发一次搜索请求。
+        -->
+        <LinearLayout
+            android:id="@+id/search_history_block"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:paddingStart="6dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="6dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="36dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:fontFamily="@font/inter"
+                    android:text="@string/search_history"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/search_history_clear"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/inter"
+                    android:paddingStart="12dp"
+                    android:paddingTop="6dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="6dp"
+                    android:text="@string/search_history_clear"
+                    android:textColor="@color/accent"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_search_history"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
     </LinearLayout>
+
+    <!-- 实时路况开关（浮动按钮）。
+         路况是地图页最费的流量项，默认关，需要避堵时手动打开。
+         必须叠在定位按钮**正上方**：两者若都贴 parent 底边会完全重在一起。 -->
+    <ImageView
+        android:id="@+id/btn_traffic"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="10dp"
+        android:background="@drawable/bg_navi_circle"
+        android:contentDescription="@string/settings_traffic_layer"
+        android:padding="11dp"
+        android:src="@drawable/ic_traffic"
+        app:layout_constraintBottom_toTopOf="@id/fab_location"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <!-- 常用地址 chips -->
     <HorizontalScrollView
@@ -178,17 +267,11 @@
                 android:text="@string/route_prefs"
                 android:textSize="12sp" />
 
-            <Button
-                android:id="@+id/btn_manual_dest"
-                style="@style/Widget.Moto.Button.Ghost"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:layout_weight="1"
-                android:paddingStart="4dp"
-                android:paddingEnd="4dp"
-                android:text="@string/navi_manual_dest"
-                android:textSize="12sp" />
+            <!--
+              「输入坐标」入口在这里删掉了。
+              普通用户根本不知道自己的经纬度，这个按钮放了也没人会用；
+              真正需要精确落点的场景，用搜索和地图选点就够了。
+            -->
 
             <Button
                 android:id="@+id/btn_navi_history"
@@ -200,6 +283,19 @@
                 android:paddingStart="4dp"
                 android:paddingEnd="4dp"
                 android:text="@string/navi_history_entry"
+                android:textSize="12sp" />
+
+            <!-- 车况入口：底部页签收成两个之后，车况从这里进 -->
+            <Button
+                android:id="@+id/btn_vehicle"
+                style="@style/Widget.Moto.Button.Ghost"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:text="@string/navi_vehicle_entry"
                 android:textSize="12sp" />
         </LinearLayout>
 

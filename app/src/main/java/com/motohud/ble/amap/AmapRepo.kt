@@ -5,6 +5,9 @@ import com.amap.api.services.core.LatLonPoint
 import com.amap.api.services.help.Inputtips
 import com.amap.api.services.help.InputtipsQuery
 import com.amap.api.services.help.Tip
+import com.amap.api.services.core.PoiItem
+import com.amap.api.services.poisearch.PoiResult
+import com.amap.api.services.poisearch.PoiSearch
 import com.amap.api.services.route.DrivePath
 import com.amap.api.services.route.DriveStep
 import com.amap.api.services.route.RouteSearch
@@ -14,13 +17,20 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** POI 提示结果（搜索建议） */
+/**
+ * POI 结果项（输入提示与搜索结果共用）。
+ *
+ * [distanceM] 是**本地算的直线距离**（起点 = 当前定位）。
+ * 高德的 Inputtips 接口不返回距离字段，所以联想层只能自己算；
+ * PoiSearch 自带 distance，直接透传。距离为 null 表示"没有定位，算不了"。
+ */
 data class TipItem(
     val name: String,
     val address: String,
     val district: String,
     val latitude: Double,
-    val longitude: Double
+    val longitude: Double,
+    val distanceM: Int? = null
 )
 
 /** 路线规划结果 */
@@ -51,7 +61,11 @@ class AmapRepo(private val context: Context) {
      * POI 输入提示（专业导航软件同款搜索体验）。
      * @param city 城市名或 adcode；空串 = 全国范围
      */
-    suspend fun searchTips(keyword: String, city: String = ""): TipsResult {
+    suspend fun searchTips(
+        keyword: String,
+        city: String = "",
+        origin: Pair<Double, Double>? = null
+    ): TipsResult {
         if (keyword.isBlank()) return TipsResult.Ok(emptyList())
         return suspendCancellableCoroutine { cont ->
             try {
@@ -61,7 +75,8 @@ class AmapRepo(private val context: Context) {
                 val inputtips = Inputtips(context, query)
                 inputtips.setInputtipsListener { tips, rCode ->
                     if (rCode == 1000) {
-                        cont.resume(TipsResult.Ok(tips.orEmpty().mapNotNull { it.toItem() }))
+                        val items = tips.orEmpty().mapNotNull { it.toItem(origin) }
+                        cont.resume(TipsResult.Ok(items))
                     } else {
                         // 10001 INVALID_USER_KEY / 10009 未开通服务 等
                         cont.resume(TipsResult.Err(rCode))
@@ -180,16 +195,94 @@ class AmapRepo(private val context: Context) {
         else -> "路线规划失败，请稍后重试"
     }
 
+    /**
+     * POI 搜索结果（回车 / 点搜索时用）。
+     *
+     * 为什么联想层和结果层必须分两套接口：
+     *  - `Inputtips` 快、轻，但**没有 distance 字段**，只能本地自算；
+     *  - `PoiSearch` 有 distance、能分页、能按类型筛，但每次请求更重。
+     * 原先两者混用（只用 Inputtips 就当成结果列表），导致同名地点只能按
+     * 服务端相关性排序、跨城市混排 —— 搜"万达广场"排在前面的是外地那个。
+     */
+    suspend fun searchPoi(
+        keyword: String,
+        city: String = "",
+        origin: Pair<Double, Double>? = null,
+        pageNum: Int = 1,
+        pageSize: Int = 20
+    ): TipsResult {
+        if (keyword.isBlank()) return TipsResult.Ok(emptyList())
+        return suspendCancellableCoroutine { cont ->
+            try {
+                val query = PoiSearch.Query(keyword.trim(), "", city).apply {
+                    this.pageSize = pageSize
+                    this.pageNum = pageNum
+                    // 不设城市硬限制：用户出差搜外地地址仍要能搜到，
+                    // 本地结果会因为距离近自然排到前面
+                    setCityLimit(false)
+                }
+                val search = PoiSearch(context, query)
+                search.setOnPoiSearchListener(object : PoiSearch.OnPoiSearchListener {
+                    override fun onPoiSearched(result: PoiResult?, rCode: Int) {
+                        if (rCode == 1000) {
+                            val items = result?.pois.orEmpty().map { it.toItem(origin) }
+                            cont.resume(TipsResult.Ok(items))
+                        } else {
+                            android.util.Log.w("AmapRepo", "PoiSearch rCode=$rCode kw=$keyword")
+                            cont.resume(TipsResult.Err(rCode))
+                        }
+                    }
+
+                    @Deprecated("旧版回调")
+                    override fun onPoiItemSearched(item: PoiItem?, rCode: Int) = Unit
+                })
+                search.searchPOIAsyn()
+            } catch (e: Exception) {
+                cont.resumeWithException(e)
+            }
+        }
+    }
+
     // ---------- 转换 ----------
-    private fun Tip.toItem(): TipItem? {
+
+    private fun Tip.toItem(origin: Pair<Double, Double>?): TipItem? {
         val p = point ?: return null
         return TipItem(
             name = name.orEmpty(),
             address = address.orEmpty(),
             district = district.orEmpty(),
             latitude = p.latitude,
-            longitude = p.longitude
+            longitude = p.longitude,
+            distanceM = origin?.let { haversineM(it.first, it.second, p.latitude, p.longitude) }
         )
+    }
+
+    private fun PoiItem.toItem(origin: Pair<Double, Double>?): TipItem {
+        val p = latLonPoint
+        val dist = when {
+            p != null && origin != null -> haversineM(origin.first, origin.second, p.latitude, p.longitude)
+            distance > 0 -> distance
+            else -> 0
+        }
+        return TipItem(
+            name = title.orEmpty(),
+            address = snippet.orEmpty(),
+            district = cityName.orEmpty().ifBlank { adName.orEmpty() },
+            latitude = p?.latitude ?: 0.0,
+            longitude = p?.longitude ?: 0.0,
+            distanceM = if (dist > 0) dist else null
+        )
+    }
+
+    /** 球面距离（米）。联想层补距离用，误差 <0.5%，足够排序 */
+    private fun haversineM(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Int {
+        val r = 6371000.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLng = Math.toRadians(lng2 - lng1)
+        val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
+            kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
+            kotlin.math.sin(dLng / 2) * kotlin.math.sin(dLng / 2)
+        return (r * 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))).toInt()
     }
 
     private fun DrivePath.toRouteData(
