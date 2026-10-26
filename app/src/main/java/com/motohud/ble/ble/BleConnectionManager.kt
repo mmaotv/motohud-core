@@ -53,7 +53,9 @@ class BleConnectionManager(private val context: Context) {
         val name: String,
         val address: String,
         val rssi: Int,
-        val deviceType: BleConstants.DeviceType
+        val deviceType: BleConstants.DeviceType,
+        /** true = legacy ECU（860745020*），只有二进制遥测通道，没有 3719 文本写通道 */
+        val isLegacy: Boolean = false
     )
 
     private val bluetoothManager: BluetoothManager? =
@@ -70,6 +72,22 @@ class BleConnectionManager(private val context: Context) {
     private val writeQueue = ArrayDeque<ByteArray>()
     private var writeBusy = false
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    /** 记录 CCCD 写入属于哪条通道（A=文本/握手，B=纯遥测），onDescriptorWrite 回调里按顺序取回 */
+    private val pendingCccdChannels = ArrayDeque<String>()
+
+    /** GATT 探测：连上后逐个读取可读特征，看车机是否把数据放在 READ 特征里（而不是 notify） */
+    private val readQueue = ArrayDeque<BluetoothGattCharacteristic>()
+    private var readBusy = false
+    private var readProbed = false
+    private val readWatchdog = Runnable {
+        if (readBusy) {
+            Log.w(TAG, "read watchdog fired")
+            BleDiagnostic.log("读取超时，跳过")
+            synchronized(readQueue) { readBusy = false }
+            drainReadQueue()
+        }
+    }
+
     /** 写看门狗：NO_RESPONSE 回调偶发不触发时仍能推进队列，避免整条链路卡死 */
     private val writeWatchdog = Runnable {
         if (writeBusy) {
@@ -91,16 +109,25 @@ class BleConnectionManager(private val context: Context) {
         get() = _connectedName
     private var _connectedName: String? = null
 
+    /** 已记录过的扫描名，诊断日志里每个名字只记一次，避免刷屏 */
+    private val seenScanNames = mutableSetOf<String>()
+
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             result?.device?.let { d ->
                 val name = d.name ?: return
-                if (!BleConstants.isTargetDevice(name)) return
+                // 诊断用：把附近所有出现的设备名记下来，便于确认车边到底有没有 ECU（860745020*）
+                if (seenScanNames.add(name)) BleDiagnostic.log("扫描到设备: $name (${d.address})")
+
+                val legacy = BleConstants.isLegacyDevice(name)
+                // 放行两类：FastBLE 仪表(BYQ/SR) 与 legacy ECU(860745020*)
+                if (!BleConstants.isTargetDevice(name) && !legacy) return
                 scanResults[d.address] = ScanItem(
                     name = name,
                     address = d.address,
                     rssi = result.rssi,
-                    deviceType = BleConstants.deviceTypeOf(name)
+                    deviceType = BleConstants.deviceTypeOf(name),
+                    isLegacy = legacy
                 )
                 _events.tryEmit(Event.ScanUpdate(scanResults.values.toList()))
             }
@@ -144,40 +171,69 @@ class BleConnectionManager(private val context: Context) {
                 _events.tryEmit(Event.Error("服务发现失败 status=$status"))
                 return
             }
-            // 通道 A（FastBLE 主栈）：00003719 / 00001234
+            // 通道 A（FastBLE 主栈，文本指令）：00003719 / 00001234
             val serviceA = g.getService(UUID.fromString(BleConstants.UUID_SERVICE))
             val chA = serviceA?.getCharacteristic(UUID.fromString(BleConstants.UUID_NOTIFY))
-            if (chA == null) {
-                BleDiagnostic.log("未找到服务/特征 A")
-                _events.tryEmit(Event.Error("未找到服务 ${BleConstants.UUID_SERVICE} / 特征 ${BleConstants.UUID_NOTIFY}"))
-                return
-            }
-            BleDiagnostic.log("服务发现成功，准备开启通知 (通道 A)")
-            notifyCharacteristic = chA
-            enableNotify(g, chA, "A")
 
             // 通道 B（legacy 二进制遥测栈）：0000ff33 / 0000ff02
             // 原厂 CMD A~F 遥测（车速/转速/油耗/水温/油量/电压/里程/故障码）走这条；
             // 4.9.0 启动入口虽变死代码，但车机固件仍可能在此下发，必须也开通知，否则"读不到数据"。
             val chB = g.getService(UUID.fromString(BleConstants.UUID_SERVICE_LEGACY))
                 ?.getCharacteristic(UUID.fromString(BleConstants.UUID_CHART_LEGACY))
+
+            if (chA == null && chB == null) {
+                BleDiagnostic.log("未找到通道 A 与通道 B")
+                _events.tryEmit(
+                    Event.Error(
+                        "未找到 ${BleConstants.UUID_SERVICE} 或 ${BleConstants.UUID_SERVICE_LEGACY} 服务，该设备可能不是车机"
+                    )
+                )
+                return
+            }
+
+            if (chA != null) {
+                BleDiagnostic.log("服务发现成功，准备开启通知 (通道 A)")
+                notifyCharacteristic = chA
+                enableNotify(g, chA, "A")
+            } else {
+                // 纯 legacy ECU 设备：只有遥测、没有文本写通道，属正常情况
+                BleDiagnostic.log("纯遥测设备：无通道 A(3719)，仅开通道 B")
+            }
+
             if (chB != null) {
                 BleDiagnostic.log("发现 legacy 遥测通道 0000ff02，开启通知 (通道 B)")
                 enableNotify(g, chB, "B")
             } else {
                 BleDiagnostic.log("未发现 legacy 遥测通道 0000ff02（部分车机仅用通道 A）")
             }
+
+            // 诊断增强：把整张 GATT 表（服务/特征/属性）打到日志（纯本地枚举，不占 GATT 通道）。
+            // 读取探测要等 CCCD 写完成后再做，否则会和开通知抢同一个 GATT 操作。
+            dumpGatt(g)
         }
 
         override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) {
             if (d.uuid == UUID.fromString(BleConstants.UUID_CCCD)) {
+                val channel = synchronized(pendingCccdChannels) {
+                    pendingCccdChannels.removeFirstOrNull()
+                } ?: "A"
                 if (status == BluetoothGatt.GATT_SUCCESS) {
-                    Log.d(TAG, "CCCD written, notify ready")
-                    BleDiagnostic.setNotifyReady(true)
-                    emitNotifyReady()
+                    if (channel == "A") {
+                        Log.d(TAG, "CCCD(A) written, notify ready")
+                        BleDiagnostic.setNotifyReady(true)
+                        emitNotifyReady()
+                        // 通知就绪后再做"可读特征"探测，避免与 CCCD 写抢 GATT 操作
+                        if (!readProbed) {
+                            readProbed = true
+                            gatt?.let { startReadAll(it) }
+                        }
+                    } else {
+                        // 通道 B 只是遥测，不需要触发 HELLO
+                        BleDiagnostic.log("CCCD(B) 已写入，遥测通道就绪")
+                    }
                 } else {
-                    BleDiagnostic.log("打开通知失败 status=$status")
-                    _events.tryEmit(Event.Error("打开通知失败 status=$status"))
+                    BleDiagnostic.log("打开通知失败 channel=$channel status=$status")
+                    if (channel == "A") _events.tryEmit(Event.Error("打开通知失败 status=$status"))
                 }
             }
         }
@@ -196,6 +252,37 @@ class BleConnectionManager(private val context: Context) {
         ) {
             val channel = if (ch.uuid == UUID.fromString(BleConstants.UUID_NOTIFY)) "A" else "B"
             emitNotify(value, channel)
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onCharacteristicRead(
+            g: BluetoothGatt,
+            ch: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            @Suppress("DEPRECATION") val v = ch.value
+            handleRead(ch, status, v)
+        }
+
+        override fun onCharacteristicRead(
+            g: BluetoothGatt,
+            ch: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int
+        ) {
+            handleRead(ch, status, value)
+        }
+
+        private fun handleRead(ch: BluetoothGattCharacteristic, status: Int, value: ByteArray?) {
+            mainHandler.removeCallbacks(readWatchdog)
+            if (status == BluetoothGatt.GATT_SUCCESS && value != null && value.isNotEmpty()) {
+                BleDiagnostic.log("读取 ${ch.uuid} = ${value.toHexString()} (${value.size}B)")
+                Log.d(TAG, "read ${ch.uuid} = ${value.toHexString()}")
+            } else {
+                BleDiagnostic.log("读取 ${ch.uuid} 无数据 status=$status")
+            }
+            synchronized(readQueue) { readBusy = false }
+            drainReadQueue()
         }
 
         override fun onCharacteristicWrite(
@@ -281,10 +368,85 @@ class BleConnectionManager(private val context: Context) {
         val device: BluetoothDevice = adapter.getRemoteDevice(address)
         _connectedName = device.name
         BleDiagnostic.onNewConnection(device.name)
+        BleDiagnostic.log("设备地址=${device.address} 名称=${device.name} 绑定状态=${device.bondState}")
         gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             device.connectGatt(context, true, gattCallback, BluetoothDevice.TRANSPORT_LE)
         } else {
             device.connectGatt(context, true, gattCallback)
+        }
+    }
+
+    /** 把整张 GATT 表（服务/特征/属性/权限）写进诊断日志 */
+    private fun dumpGatt(g: BluetoothGatt) {
+        try {
+            BleDiagnostic.log("=== GATT 服务列表 ===")
+            g.services?.forEach { svc ->
+                BleDiagnostic.log("服务 ${svc.uuid}")
+                svc.characteristics?.forEach { ch ->
+                    BleDiagnostic.log("  特征 ${ch.uuid} [${propsOf(ch)}] perms=0x${Integer.toHexString(ch.permissions)}")
+                }
+            }
+            BleDiagnostic.log("=== GATT 结束 ===")
+        } catch (e: Exception) {
+            BleDiagnostic.log("GATT 枚举异常: ${e.message}")
+        }
+    }
+
+    /** 特征属性 → 可读文字 */
+    private fun propsOf(ch: BluetoothGattCharacteristic): String {
+        val p = ch.properties
+        val list = mutableListOf<String>()
+        if (p and BluetoothGattCharacteristic.PROPERTY_READ != 0) list += "READ"
+        if (p and BluetoothGattCharacteristic.PROPERTY_WRITE != 0) list += "WRITE"
+        if (p and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0) list += "WRITE_NR"
+        if (p and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) list += "NOTIFY"
+        if (p and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) list += "INDICATE"
+        if (p and BluetoothGattCharacteristic.PROPERTY_BROADCAST != 0) list += "BROADCAST"
+        return if (list.isEmpty()) "NONE" else list.joinToString("|")
+    }
+
+    /** 收集所有"可读且不需加密"的特征，逐个读一次（只读探测，不改变车机状态） */
+    @SuppressLint("MissingPermission")
+    private fun startReadAll(g: BluetoothGatt) {
+        try {
+            val readable = g.services.orEmpty().flatMap { it.characteristics.orEmpty() }
+                .filter {
+                    it.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0 &&
+                        it.permissions and BluetoothGattCharacteristic.PERMISSION_READ != 0 &&
+                        it.permissions and BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED == 0
+                }
+            if (readable.isEmpty()) {
+                BleDiagnostic.log("无可直接读取的特征（数据只能靠 notify/indicate 推送）")
+                return
+            }
+            BleDiagnostic.log("开始读取 ${readable.size} 个可读特征…")
+            synchronized(readQueue) {
+                readQueue.clear()
+                readQueue.addAll(readable)
+                readBusy = false
+            }
+            drainReadQueue()
+        } catch (e: Exception) {
+            BleDiagnostic.log("读取探测异常: ${e.message}")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun drainReadQueue() {
+        val g = gatt ?: return
+        val ch = synchronized(readQueue) {
+            if (readBusy || readQueue.isEmpty()) null else {
+                readBusy = true
+                readQueue.removeFirst()
+            }
+        } ?: return
+        mainHandler.removeCallbacks(readWatchdog)
+        mainHandler.postDelayed(readWatchdog, 1500L)
+        val ok = try { g.readCharacteristic(ch) } catch (e: Exception) { false }
+        if (!ok) {
+            mainHandler.removeCallbacks(readWatchdog)
+            synchronized(readQueue) { readBusy = false }
+            mainHandler.postDelayed({ drainReadQueue() }, 120L)
         }
     }
 
@@ -298,8 +460,19 @@ class BleConnectionManager(private val context: Context) {
             if (channel == "A") _events.tryEmit(Event.Error("缺少 CCCD 描述符"))
             return
         }
-        cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        // 按特征属性选 CCCD 值：只有 NOTIFY 写 0x0001，只有 INDICATE 必须写 0x0002，
+        // 否则车机收到"开通知"但不会真正推送（这是"连上了却收不到数据"的常见原因之一）。
+        val props = ch.properties
+        val useIndicate = props and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0 &&
+            props and BluetoothGattCharacteristic.PROPERTY_NOTIFY == 0
+        cccd.value = if (useIndicate) {
+            BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+        } else {
+            BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        }
+        BleDiagnostic.log("开启通道 $channel 通知: ${if (useIndicate) "INDICATE" else "NOTIFY"} (${propsOf(ch)})")
         if (channel == "A") scheduleNotifyReadyFallback()
+        synchronized(pendingCccdChannels) { pendingCccdChannels.addLast(channel) }
         g.writeDescriptor(cccd)
     }
 
@@ -364,6 +537,10 @@ class BleConnectionManager(private val context: Context) {
         gatt = null
         notifyCharacteristic = null
         synchronized(writeQueue) { writeQueue.clear(); writeBusy = false }
+        synchronized(pendingCccdChannels) { pendingCccdChannels.clear() }
+        synchronized(readQueue) { readQueue.clear(); readBusy = false }
+        readProbed = false
+        mainHandler.removeCallbacks(readWatchdog)
         mainHandler.removeCallbacks(writeWatchdog)
         mainHandler.removeCallbacks(notifyReadyFallback)
         notifyReadyEmitted = false

@@ -26,12 +26,13 @@ class DeviceAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = items[position]
-        holder.binding.deviceName.text = item.name
-        holder.binding.deviceAddress.text = item.address
+        holder.binding.deviceName.text = if (item.isLegacy) "SR Max300_${item.name.takeLast(6)}" else item.name
+        holder.binding.deviceAddress.text = if (item.isLegacy) item.name else item.address
         holder.binding.deviceRssi.text = "${item.rssi} dBm"
-        holder.binding.deviceType.text = when (item.deviceType.name) {
-            "SR" -> "SR 设备"
-            "BYQ" -> "BYQ 设备"
+        holder.binding.deviceType.text = when {
+            item.isLegacy -> "ECU 遥测"
+            item.deviceType.name == "SR" -> "SR 设备"
+            item.deviceType.name == "BYQ" -> "BYQ 设备"
             else -> "未知"
         }
         holder.binding.root.setOnClickListener { onConnect(item) }

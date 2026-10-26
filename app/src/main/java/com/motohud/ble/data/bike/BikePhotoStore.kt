@@ -87,8 +87,9 @@ object BikePhotoStore {
     private fun decodeDownsampled(context: Context, uri: Uri): Bitmap? {
         val cr = context.contentResolver
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        // 注意：inJustDecodeBounds=true 时 decodeStream 永远返回 null，只能靠 bounds.outWidth 判断是否取到有效尺寸
         cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-            ?: return null
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var sample = 1
         while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_SIDE) sample *= 2
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }

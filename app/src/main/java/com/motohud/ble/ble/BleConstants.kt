@@ -154,6 +154,17 @@ object BleConstants {
     fun isTargetDevice(name: String?): Boolean =
         !name.isNullOrEmpty() && FASTBLE_PREFIXES.any { name.startsWith(it, ignoreCase = true) }
 
+    /**
+     * 是否为 legacy ECU（二进制遥测）设备：15 位名称、前缀 860745020。
+     * 原厂旧栈（BleService/BluetoothBLE）专门连这类设备，车速/转速/油耗等 CMD A~F 从它的
+     * 0000ff33/0000ff02 下发；名称本身就是车机 IMEI，但**不需要事先知道 IMEI**，按前缀即可扫到。
+     */
+    fun isLegacyDevice(name: String?): Boolean =
+        !name.isNullOrEmpty() && name.length == LEGACY_NAME_LENGTH && name.startsWith(LEGACY_PREFIX)
+
+    /** 扫描列表要放行的设备：FastBLE 仪表(BYQ/SR) 或 legacy ECU(860745020*) */
+    fun isAnyKnownDevice(name: String?): Boolean = isTargetDevice(name) || isLegacyDevice(name)
+
     /** legacy 栈 15 位 IMEI 式名称 → 显示名（StringUtils.java:133-138） */
     fun encapsulateLegacyName(name: String?): String? =
         if (name != null && name.length == LEGACY_NAME_LENGTH && name.startsWith(LEGACY_PREFIX))

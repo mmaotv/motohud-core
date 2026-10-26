@@ -19,7 +19,7 @@
     <string name="status_reconnecting">掉线重连中…</string>
     <string name="btn_scan">扫描设备</string>
     <string name="btn_disconnect">断开连接</string>
-    <string name="scan_hint">仅显示名称以 BYQ / SR 开头的目标设备（与原厂车机过滤规则一致）</string>
+    <string name="scan_hint">显示 BYQ / SR 开头的仪表设备，以及 860745020 开头的 ECU 遥测设备（ECU 负责车速/转速等数据）</string>
     <string name="scan_empty">未发现设备，请确认设备已开机且在附近</string>
     <string name="perm_denied">缺少蓝牙/定位权限，无法扫描</string>
 
