@@ -14,8 +14,11 @@ import java.net.URL
  */
 object UpdateChecker {
 
-    private const val API = "https://api.github.com/repos/mmaotv/motohud-bridge/releases/latest"
-    const val REPO_URL = "https://github.com/mmaotv/motohud-bridge"
+    // 0.0.x 核心双功能版走独立仓库发布；
+    // 旧仓库 motohud-bridge 是 2.2.x 全功能线的存档，版本体系完全不同，
+    // 混用会让更新检查拿到旧大版本的 release 提示"降级"。
+    private const val API = "https://api.github.com/repos/mmaotv/motohud-core/releases/latest"
+    const val REPO_URL = "https://github.com/mmaotv/motohud-core"
 
     data class ReleaseInfo(
         /** 形如 v2.2.0 */
