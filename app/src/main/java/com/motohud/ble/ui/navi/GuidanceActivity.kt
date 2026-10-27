@@ -15,6 +15,8 @@ import android.graphics.drawable.Icon
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.util.Rational
 import android.view.Gravity
@@ -138,6 +140,8 @@ class GuidanceActivity : AppCompatActivity() {
     private lateinit var tvArriveDistance: TextView
     private lateinit var tvArriveDuration: TextView
     private lateinit var tvArriveAvg: TextView
+    private lateinit var betterRouteCard: View
+    private lateinit var tvBetterRoute: TextView
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
@@ -148,6 +152,23 @@ class GuidanceActivity : AppCompatActivity() {
     private var destLat = 0.0
     private var destLng = 0.0
     private var lastCameraMs = 0L
+
+    /** 周期性检查更优/更畅通路线：每隔一段时间重新算路并对比当前路线 */
+    private val betterRouteHandler = Handler(Looper.getMainLooper())
+    private var betterRouteDismissed = false
+    private var pendingBetterRoute: RouteData? = null
+    private var pendingBetterStart: Pair<Double, Double>? = null
+    private val betterRouteTask = object : Runnable {
+        override fun run() {
+            val s = engine.state.value
+            if (!betterRouteDismissed && started && !stopped && s.running &&
+                !s.arrived && s.gpsActive
+            ) {
+                checkBetterRoute()
+            }
+            betterRouteHandler.postDelayed(this, BETTER_ROUTE_INTERVAL_MS)
+        }
+    }
 
     /** 上一次相机跟随的目标点（用于拦截异常跳跃） */
     private var lastFollowLat = 0.0
@@ -209,6 +230,9 @@ class GuidanceActivity : AppCompatActivity() {
         engine = app.naviEngine
         ble = app.bleManager
 
+        // 偏航 → 自动重新规划（开错路时上层负责算新路线）
+        engine.onRerouteRequest = { lat, lng -> requestReroute(lat, lng) }
+
         NaviPrefs.init(this)
         bindViews()
         applyWindowInsets()
@@ -241,6 +265,9 @@ class GuidanceActivity : AppCompatActivity() {
         btnPip.visibility = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) View.VISIBLE else View.GONE
 
         planAndStart()
+
+        // 周期性检查更优/更畅通路线（偏航重算由引擎回调触发，这里负责"路况变化换线"）
+        betterRouteHandler.postDelayed(betterRouteTask, BETTER_ROUTE_INTERVAL_MS)
     }
 
     private fun bindViews() {
@@ -277,6 +304,8 @@ class GuidanceActivity : AppCompatActivity() {
         tvArriveDistance = findViewById(R.id.tv_arrive_distance)
         tvArriveDuration = findViewById(R.id.tv_arrive_duration)
         tvArriveAvg = findViewById(R.id.tv_arrive_avg)
+        betterRouteCard = findViewById(R.id.better_route_card)
+        tvBetterRoute = findViewById(R.id.tv_better_route)
     }
 
     /**
@@ -323,7 +352,28 @@ class GuidanceActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.btn_navi_again).setOnClickListener { naviAgain() }
 
+        findViewById<View>(R.id.btn_better_adopt).setOnClickListener {
+            val cand = pendingBetterRoute
+            val start = pendingBetterStart
+            if (cand != null && start != null) {
+                applyRoute(cand, start)
+                Toast.makeText(this, R.string.guidance_better_route_adopted, Toast.LENGTH_SHORT).show()
+            }
+            hideBetterRouteCard()
+        }
+        findViewById<View>(R.id.btn_better_dismiss).setOnClickListener {
+            // 本次导航不再提示，避免打扰
+            betterRouteDismissed = true
+            hideBetterRouteCard()
+        }
+
         btnVoice.setOnClickListener {
+            // 没有语音引擎时按钮是压暗的：点了不切换开关，改为说明原因，
+            // 避免「按了没反应」的困惑（这也替代了原先每次进页面的常驻 Toast）
+            if (ttsFailed) {
+                Toast.makeText(this, R.string.navi_tts_missing, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             val on = !NaviPrefs.voice.value
             NaviPrefs.setVoice(on)
             updateVoiceButton()
@@ -574,6 +624,128 @@ class GuidanceActivity : AppCompatActivity() {
                 ).show()
             }
         }
+    }
+
+    // ---------- 偏航重算 / 更优换线 ----------
+
+    /**
+     * 应用一条新路线（绘制 + 让引擎从当前位置接管），复用同一引擎实例与历史记录，
+     * 不新建导航、不重置计时。偏航重算与主动换线共用。
+     */
+    private fun applyRoute(r: RouteData, start: Pair<Double, Double>) {
+        route = r
+        drawRoute(r, fitAll = false)
+        tvDestSub.text = routeSummary(r)
+        started = true
+        stopped = false
+        engine.start(destName, destLat, destLng, start, r)
+    }
+
+    /** 从指定起点重新规划并应用（联网） */
+    private fun planAndReplace(start: Pair<Double, Double>) {
+        if (!AmapManager.hasKey(this) || !AmapManager.isPrivacyAgreed(this)) {
+            Toast.makeText(this, R.string.guidance_reroute_no_key, Toast.LENGTH_SHORT).show()
+            return
+        }
+        planningOverlay.visibility = View.VISIBLE
+        lifecycleScope.launch {
+            AmapManager.initSearch(this@GuidanceActivity)
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    AmapRepo(this@GuidanceActivity)
+                        .planDriveRoute(start.first, start.second, destLat, destLng, NaviPrefs.strategy(), NaviPrefs.summary())
+                }
+            }
+            planningOverlay.visibility = View.GONE
+            val r = result.getOrNull()
+            when (r) {
+                is RoutePlanResult.Success -> applyRoute(r.route, start)
+                is RoutePlanResult.Failure ->
+                    Toast.makeText(this@GuidanceActivity, R.string.guidance_reroute_failed, Toast.LENGTH_SHORT).show()
+                else -> Toast.makeText(this@GuidanceActivity, R.string.guidance_reroute_failed, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /** 引擎偏航回调：已持续偏离路线，提示并重新规划 */
+    private fun requestReroute(lat: Double, lng: Double) {
+        Toast.makeText(this, R.string.guidance_rerouting, Toast.LENGTH_SHORT).show()
+        hideBetterRouteCard()
+        planAndReplace(lat to lng)
+    }
+
+    /** 单次联网算路，失败返回 null */
+    private suspend fun planOnce(
+        start: Pair<Double, Double>,
+        strategy: Int,
+        summary: String
+    ): RouteData? {
+        val r = withContext(Dispatchers.IO) {
+            runCatching {
+                AmapRepo(this@GuidanceActivity)
+                    .planDriveRoute(start.first, start.second, destLat, destLng, strategy, summary)
+            }.getOrNull()
+        }
+        return (r as? RoutePlanResult.Success)?.route
+    }
+
+    /** 路线拥堵里程（TMC 状态≥3 的分段累加） */
+    private fun sumCongestion(r: RouteData): Int =
+        r.steps.sumOf { it.congestedM.toDouble() }.toInt()
+
+    /** 每隔一段时间检查：更省时，或前方明显拥堵且"避拥堵"方案更畅通 */
+    private fun checkBetterRoute() {
+        val s = engine.state.value
+        val start = s.latitude to s.longitude
+        lifecycleScope.launch {
+            AmapManager.initSearch(this@GuidanceActivity)
+            val cur = planOnce(start, NaviPrefs.strategy(), NaviPrefs.summary())
+            // 前方拥堵达到阈值，再算一条"避拥堵"方案做对比
+            val avoid = if (s.congestionAheadM >= CONGESTION_TRIGGER_M) {
+                planOnce(
+                    start,
+                    com.amap.api.services.route.RouteSearch.DRIVING_MULTI_STRATEGY_FASTEST_SHORTEST_AVOID_CONGESTION,
+                    "避拥堵"
+                )
+            } else null
+            val candidate = avoid ?: cur ?: return@launch
+            val curEta = route?.durationS?.toInt() ?: s.etaSeconds
+            val newEta = candidate.durationS.toInt()
+            val saveSecs = curEta - newEta
+            val curCong = route?.let { sumCongestion(it) } ?: s.congestionAheadM.toInt()
+            val newCong = sumCongestion(candidate)
+            val saveCong = curCong - newCong
+            // 更省时：快 ≥5 分钟；或更畅通：少堵 ≥1 公里且耗时不劣化太多
+            val adopt = saveSecs >= BETTER_ROUTE_SAVE_SEC ||
+                (avoid != null && saveCong >= BETTER_ROUTE_SAVE_CONG_M && newEta <= curEta + 300)
+            if (adopt) {
+                runOnUiThread { showBetterRouteCard(candidate, start, saveSecs, saveCong, avoid != null) }
+            }
+        }
+    }
+
+    private fun showBetterRouteCard(
+        candidate: RouteData,
+        start: Pair<Double, Double>,
+        saveSecs: Int,
+        saveCong: Int,
+        isAvoid: Boolean
+    ) {
+        pendingBetterRoute = candidate
+        pendingBetterStart = start
+        val msg = if (isAvoid && saveCong >= BETTER_ROUTE_SAVE_CONG_M) {
+            getString(R.string.guidance_better_route_cong, saveCong / 1000)
+        } else {
+            getString(R.string.guidance_better_route_time, saveSecs / 60)
+        }
+        tvBetterRoute.text = msg
+        betterRouteCard.visibility = View.VISIBLE
+    }
+
+    private fun hideBetterRouteCard() {
+        betterRouteCard.visibility = View.GONE
+        pendingBetterRoute = null
+        pendingBetterStart = null
     }
 
     // ---------- 地图 ----------
@@ -867,6 +1039,7 @@ class GuidanceActivity : AppCompatActivity() {
                 // 导航历史：到达即结束这条记录（轨迹在这里压缩写回）
                 finishHistory()
             }
+            hideBetterRouteCard()
             showArrivalCard(s)
             turnBanner.visibility = View.GONE
         } else {
@@ -1069,6 +1242,7 @@ class GuidanceActivity : AppCompatActivity() {
         findViewById<View>(R.id.btn_pip).visibility = vis
         findViewById<View>(R.id.btn_overview).visibility = vis
         findViewById<View>(R.id.btn_recenter).visibility = vis
+        betterRouteCard.visibility = View.GONE
         tvSignalWarn.visibility = View.GONE
         // 小窗里只留转向横幅 + 距离：地图在 16:9 里看不清还费电
         bottomInfo.visibility = vis
@@ -1092,6 +1266,9 @@ class GuidanceActivity : AppCompatActivity() {
         if (stopped) return
         stopped = true
         engine.onStepChanged = null
+        engine.onRerouteRequest = null
+        betterRouteHandler.removeCallbacks(betterRouteTask)
+        hideBetterRouteCard()
         engine.stop()
         com.motohud.ble.service.NaviForegroundService.stop(this)
         if (sendFinish) {
@@ -1130,17 +1307,11 @@ class GuidanceActivity : AppCompatActivity() {
         tts = TextToSpeech(this) { status ->
             if (status != TextToSpeech.SUCCESS) {
                 // 系统里没有任何 TTS 引擎：播报不可能工作。
-                // 按钮压暗 + 一次性提示（这是「为什么没声音」的关键解释，不是冗余 Toast）
+                // 静默降级：按钮压暗（alpha 0.35），点按钮时才解释原因——
+                // 不再每次进导航都弹长 Toast 打断用户。
                 android.util.Log.w("GuidanceTts", "TextToSpeech init failed: $status")
                 ttsFailed = true
-                runOnUiThread {
-                    updateVoiceButton()
-                    Toast.makeText(
-                        this@GuidanceActivity,
-                        R.string.navi_tts_missing,
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
+                runOnUiThread { updateVoiceButton() }
                 return@TextToSpeech
             }
             // 导航语音走「导航播报」音频通道：与媒体/铃声音量分开，符合导航 App 习惯
@@ -1274,6 +1445,21 @@ class GuidanceActivity : AppCompatActivity() {
             height = if (landscape) dp(128) else dp(220)
         }
 
+        // 横屏屏高只有 ~360dp：转向横幅与信号提示收到右侧面板左侧，
+        // 否则它们全宽铺开后会和右下角信息面板在空间上打架（任一长高就叠在一起）。
+        val sideZone = dp(352)
+        (turnBanner.layoutParams as ViewGroup.MarginLayoutParams).apply {
+            rightMargin = if (landscape) sideZone else 0
+            turnBanner.layoutParams = this
+        }
+        (tvSignalWarn.layoutParams as ViewGroup.MarginLayoutParams).apply {
+            rightMargin = if (landscape) sideZone else 0
+            tvSignalWarn.layoutParams = this
+        }
+        // 横屏太矮，红绿灯/过路费/路况估算不是骑行时需要的阅读项，折叠手柄隐藏，
+        // 避免展开后面板长高吃掉大半个屏；竖屏照常。
+        findViewById<View>(R.id.btn_expand).visibility = if (landscape) View.GONE else View.VISIBLE
+
         val card = bottomInfo.layoutParams as FrameLayout.LayoutParams
         val acts = mapActions.layoutParams as FrameLayout.LayoutParams
         if (landscape) {
@@ -1284,7 +1470,7 @@ class GuidanceActivity : AppCompatActivity() {
             acts.gravity = Gravity.START or Gravity.BOTTOM
             acts.marginStart = dp(14)
             acts.marginEnd = 0
-            acts.bottomMargin = dp(16)
+            acts.bottomMargin = dp(46)
         } else {
             // 竖屏：恢复底部通栏 + 右侧悬浮操作键
             card.gravity = Gravity.BOTTOM
@@ -1296,6 +1482,9 @@ class GuidanceActivity : AppCompatActivity() {
         }
         bottomInfo.layoutParams = card
         mapActions.layoutParams = acts
+
+        // 横屏空间窄，转向引导语收成单行，避免双行把横幅顶高与面板相撞
+        tvTurnInstruction.maxLines = if (landscape) 1 else 2
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -1320,6 +1509,7 @@ class GuidanceActivity : AppCompatActivity() {
         }
         app.naviForwarder.detach(TAG_FORWARD)
         runCatching { unregisterReceiver(pipReceiver) }
+        betterRouteHandler.removeCallbacks(betterRouteTask)
         mapView?.onDestroy()
         mapView = null
         aMap = null
@@ -1349,5 +1539,14 @@ class GuidanceActivity : AppCompatActivity() {
 
         /** 路口前自动放大的触发距离 */
         private const val AUTO_ZOOM_RANGE_M = 200
+
+        /** 更优路线检查间隔（4 分钟，兼顾体验与流量节省） */
+        private const val BETTER_ROUTE_INTERVAL_MS = 4 * 60_000L
+        /** 比当前路线快多少秒才提示换线 */
+        private const val BETTER_ROUTE_SAVE_SEC = 300
+        /** 比当前路线少堵多少米才提示换线（绕开前方拥堵场景） */
+        private const val BETTER_ROUTE_SAVE_CONG_M = 1000
+        /** 前方拥堵达到该米数才额外尝试"避拥堵"方案 */
+        private const val CONGESTION_TRIGGER_M = 800
     }
 }

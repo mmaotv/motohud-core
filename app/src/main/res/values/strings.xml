@@ -208,7 +208,7 @@
     <string name="navi_tts_start">开始导航，全程 %1$s，大约需要 %2$s</string>
     <string name="navi_tts_start_plain">开始导航</string>
     <string name="navi_tts_turn_soon">前方 %1$d 米 %2$s</string>
-    <string name="navi_tts_missing">未检测到语音引擎，语音播报不可用</string>
+    <string name="navi_tts_missing">未检测到语音引擎，语音播报不可用。可在系统设置 → 文字转语音 中安装引擎后恢复</string>
     <string name="navi_signal_weak">GPS 信号弱，正按路线方向继续引导</string>
     <string name="navi_overview">全览路线</string>
     <string name="navi_recenter">回到当前位置</string>
@@ -232,6 +232,16 @@
     <string name="navi_display_mode">显示方式</string>
     <string name="navi_mode_phone_toast">已切到手机导航</string>
     <string name="navi_mode_cast_toast">已切到车机投屏</string>
+
+    <!-- 偏航重算 / 更优换线 -->
+    <string name="guidance_rerouting">已偏离路线，正在重新规划</string>
+    <string name="guidance_reroute_failed">重新规划失败，请按原路线行驶</string>
+    <string name="guidance_reroute_no_key">未配置地图，无法重新规划</string>
+    <string name="guidance_better_route_time">发现更快路线，约省 %1$d 分钟</string>
+    <string name="guidance_better_route_cong">前方拥堵，已找到更畅通路线（少堵约 %1$d 公里）</string>
+    <string name="guidance_better_route_adopt">采用</string>
+    <string name="guidance_better_route_dismiss">忽略</string>
+    <string name="guidance_better_route_adopted">已切换路线</string>
     <string name="amap_test">测试</string>
     <string name="amap_testing">正在测试搜索服务…</string>
     <string name="amap_test_ok">✓ Key 可用，搜索服务正常（返回 %1$d 条结果）</string>

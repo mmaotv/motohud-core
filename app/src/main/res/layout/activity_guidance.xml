@@ -257,6 +257,49 @@
             android:textColor="@color/orange"
             android:textSize="12sp"
             android:visibility="gone" />
+
+        <!-- 更优/更畅通路线提示（非阻塞，横竖屏都贴在顶栏下方居中） -->
+        <LinearLayout
+            android:id="@+id/better_route_card"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_navi_panel"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="14dp"
+            android:paddingTop="9dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="9dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tv_better_route"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/inter"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/btn_better_adopt"
+                style="@style/Widget.Moto.Button.Accent"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:layout_marginStart="10dp"
+                android:text="@string/guidance_better_route_adopt" />
+
+            <Button
+                android:id="@+id/btn_better_dismiss"
+                style="@style/Widget.Moto.Button.Ghost"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:layout_marginStart="6dp"
+                android:text="@string/guidance_better_route_dismiss" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- 浮动：全览 / 回中 -->

@@ -58,7 +58,9 @@ interface NaviEngine {
         /** 定位来源类型（高德 locationType：1=GPS 6=网络 8=融合 0=推算） */
         val locType: Int = 0,
         /** 本帧是否来自卫星定位（决定"信号弱"提示） */
-        val fromSatellite: Boolean = false
+        val fromSatellite: Boolean = false,
+        /** 前方剩余路段上的拥堵里程（米，TMC 状态≥3 拥堵/严重拥堵累加） */
+        val congestionAheadM: Float = 0f
     )
 
     val state: StateFlow<NaviState>
@@ -88,6 +90,9 @@ interface NaviEngine {
     /** 步骤切换回调（TTS 播报） */
     var onStepChanged: ((String) -> Unit)?
 
+    /** 偏航回调：开错路、持续偏离路线时触发，携带当前坐标供上层重新规划 */
+    var onRerouteRequest: ((Double, Double) -> Unit)?
+
     companion object {
         const val DEFAULT_SPEED_KMH = 25f
         const val MIN_SPEED_KMH = 5f
@@ -95,6 +100,15 @@ interface NaviEngine {
         const val TICK_MS = 1000L
         const val ARRIVE_THRESHOLD_M = 25.0
         const val GPS_STALE_MS = 3_000L
+
+        /** 偏航判定：偏移超过该米数（吸附前原始偏移）才视为开错路 */
+        const val OFFROUTE_M = 90.0
+        /** 偏航判定：定位精度需优于该米数，避免噪点触发重算 */
+        const val OFFROUTE_ACC_M = 60f
+        /** 偏航需持续该毫秒数才重算，过滤瞬时 GPS 跳变 */
+        const val OFFROUTE_SUSTAIN_MS = 8_000L
+        /** 两次偏航重算的最小间隔，避免反复重算 */
+        const val REROUTE_COOLDOWN_MS = 25_000L
 
         /** 默认起点（无定位权限时用于室内演示） */
         val DEFAULT_START = 39.9087 to 116.3975
@@ -114,7 +128,9 @@ data class RouteStep(
     /** 本步骤距离（米） */
     val distanceM: Float,
     /** 本步骤几何（lat, lng） */
-    val polyline: List<Pair<Double, Double>>
+    val polyline: List<Pair<Double, Double>>,
+    /** 本步骤拥堵里程（米，TMC 状态≥3）；用于"前方拥堵"统计 */
+    val congestedM: Float = 0f
 )
 
 /** 规划路线（自高德搜索 SDK DrivePath 转换） */
@@ -175,6 +191,12 @@ class RouteNaviEngine(
     override val state: StateFlow<NaviEngine.NaviState> = _state.asStateFlow()
 
     override var onStepChanged: ((String) -> Unit)? = null
+
+    override var onRerouteRequest: ((Double, Double) -> Unit)? = null
+
+    /** 偏航检测：持续偏离路线的起始时刻与最近一次重算冷却 */
+    private var offRouteSinceMs = 0L
+    private var lastRerouteMs = 0L
 
     private val handler = Handler(Looper.getMainLooper())
     private var running = false
@@ -302,9 +324,13 @@ class RouteNaviEngine(
         startHint: Pair<Double, Double>?,
         route: RouteData?
     ) {
+        // 重规划（偏航/换线）会再次调用 start：先清掉上一条 tick 循环，否则会叠加成双倍推演
+        handler.removeCallbacks(tick)
         stopLocationUpdates()
         manualIcon = null
         lastIndex = 0
+        offRouteSinceMs = 0L
+        lastRerouteMs = 0L
         // 新一次导航必须清空滤波与定位历史，否则会沿用上一次的平滑中心
         filter.reset()
         lastGpsTime = 0L
@@ -428,15 +454,24 @@ class RouteNaviEngine(
                 // 不吸附就会看到"车标在楼里 / 在路外"——这就是用户感知到的"漂移"。
                 val p = cumulative[lastIndex]
                 val off = LocationFilter.distanceM(curLat, curLng, p.lat, p.lng)
-                val snap = when {
-                    off > 60f -> if (lastAccuracy > 25f) 0.65f else 0f // 偏离过大：精度差才拉回
-                    off > 15f -> 0.75f
-                    off > 4f -> 0.5f
-                    else -> 0f
-                }
-                if (snap > 0f) {
-                    curLat += (p.lat - curLat) * snap
-                    curLng += (p.lng - curLng) * snap
+                // 偏航判定必须在吸附前用原始偏移：吸附会掩盖偏移，否则开错路也发现不了。
+                // 精度尚可且持续偏离 >90m 超过 8s，视为开错路，回调上层重算。
+                val offRoute = off > NaviEngine.OFFROUTE_M && lastAccuracy <= NaviEngine.OFFROUTE_ACC_M
+                var snap = 0f
+                if (offRoute) {
+                    trackOffRoute()
+                } else {
+                    offRouteSinceMs = 0L
+                    snap = when {
+                        off > 60f -> if (lastAccuracy > 25f) 0.65f else 0f // 偏离过大：精度差才拉回
+                        off > 15f -> 0.75f
+                        off > 4f -> 0.5f
+                        else -> 0f
+                    }
+                    if (snap > 0f) {
+                        curLat += (p.lat - curLat) * snap
+                        curLng += (p.lng - curLng) * snap
+                    }
                 }
                 if (com.motohud.ble.BuildConfig.DEBUG) {
                     android.util.Log.d(
@@ -458,6 +493,9 @@ class RouteNaviEngine(
 
             val (curStep, stepRemain) = currentStep(traveled)
             curBearing = bearingAt(lastIndex)
+
+            // 前方拥堵里程：当前步骤及之后的拥堵分段累加（TMC 状态≥3），用于提示与换线
+            val congestionAhead = if (curStep >= 0) steps.drop(curStep).sumOf { it.congestedM.toDouble() }.toInt() else 0
 
             val icon = when {
                 arrived -> IconType.ARRIVED_DESTINATION
@@ -491,7 +529,8 @@ class RouteNaviEngine(
                 gpsActive = gpsFresh,
                 traveled = traveled.toInt(),
                 speedKmh = s.speedKmh,
-                onRoute = true
+                onRoute = true,
+                congestionAheadM = congestionAhead.toFloat()
             )
 
             if (arrived) {
@@ -536,6 +575,19 @@ class RouteNaviEngine(
                 handler.removeCallbacks(tick)
                 stopLocationUpdates()
             }
+        }
+    }
+
+    /** 偏航累计：持续偏离足够久且过了冷却，就向上层请求重新规划 */
+    private fun trackOffRoute() {
+        val now = System.currentTimeMillis()
+        if (offRouteSinceMs == 0L) offRouteSinceMs = now
+        else if (now - offRouteSinceMs > NaviEngine.OFFROUTE_SUSTAIN_MS &&
+            now - lastRerouteMs > NaviEngine.REROUTE_COOLDOWN_MS
+        ) {
+            lastRerouteMs = now
+            offRouteSinceMs = 0L
+            onRerouteRequest?.invoke(curLat, curLng)
         }
     }
 

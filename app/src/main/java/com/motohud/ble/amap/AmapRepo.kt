@@ -303,13 +303,20 @@ class AmapRepo(private val context: Context) {
     }
 
     private fun DriveStep.toRouteStep(): RouteStep {
+        // TMC 实时拥堵分段：getStatus() 返回中文串（畅通/缓行/拥堵/严重拥堵），
+        // 累加含"拥堵"分段里程，作为"前方拥堵"统计与自动换线依据。
+        val congestedM = getTMCs().orEmpty()
+            .filter { it.status?.contains("拥堵") == true }
+            .sumOf { it.distance.toDouble() }
+            .toFloat()
         return RouteStep(
             instruction = instruction.orEmpty(),
             action = action.orEmpty(),
             orientation = orientation.orEmpty(),
             road = road.orEmpty(),
             distanceM = distance,
-            polyline = polyline.orEmpty().map { it.latitude to it.longitude }
+            polyline = polyline.orEmpty().map { it.latitude to it.longitude },
+            congestedM = congestedM
         )
     }
 }
