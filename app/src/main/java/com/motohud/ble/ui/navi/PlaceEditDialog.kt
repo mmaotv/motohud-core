@@ -21,6 +21,21 @@ class PlaceEditDialog : DialogFragment() {
     var onSave: ((name: String, lat: Double, lng: Double, type: String, remark: String) -> Unit)? = null
 
     private var editing: SavedPlaceEntity? = null
+    private var etLatRef: TextInputEditText? = null
+    private var etLngRef: TextInputEditText? = null
+
+    /** 地图选点回来的坐标回填（DialogFragment 需要在自己的生命周期内注册） */
+    private val pickMap = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { r ->
+        if (r.resultCode != android.app.Activity.RESULT_OK) return@registerForActivityResult
+        val lat = r.data?.getDoubleExtra(MapPickActivity.EXTRA_LAT, 0.0) ?: 0.0
+        val lng = r.data?.getDoubleExtra(MapPickActivity.EXTRA_LNG, 0.0) ?: 0.0
+        if (lat != 0.0 && lng != 0.0) {
+            etLatRef?.setText(lat.toString())
+            etLngRef?.setText(lng.toString())
+        }
+    }
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         // 从参数取（DialogFragment 重建安全）
@@ -59,12 +74,26 @@ class PlaceEditDialog : DialogFragment() {
             ddType.setText(typeLabels[typeValues.indexOf(prefill.type).coerceAtLeast(0)], false)
         } else {
             ddType.setText(typeLabels[0], false)
+            // 名称可能已由「地点卡 → 收藏」带过来，就不让用户再手打一遍
+            arguments?.getString(ARG_DEFAULT_NAME)?.takeIf { it.isNotBlank() }?.let { etName.setText(it) }
             val dLat = arguments?.getDouble(ARG_DEFAULT_LAT, Double.NaN) ?: Double.NaN
             val dLng = arguments?.getDouble(ARG_DEFAULT_LNG, Double.NaN) ?: Double.NaN
             if (!dLat.isNaN() && !dLng.isNaN()) {
                 etLat.setText(dLat.toString())
                 etLng.setText(dLng.toString())
+            } else {
+                // 既没带坐标也没有定位：直接给出「在地图上选点」，别让用户面对两个空输入框
+                etLat.setText("")
+                etLng.setText("")
             }
+        }
+
+        etLatRef = etLat
+        etLngRef = etLng
+        view.findViewById<android.view.View>(R.id.btn_place_pick_map).setOnClickListener {
+            val curLat = etLat.text?.toString()?.trim()?.toDoubleOrNull() ?: 0.0
+            val curLng = etLng.text?.toString()?.trim()?.toDoubleOrNull() ?: 0.0
+            pickMap.launch(MapPickActivity.intent(requireContext(), curLat, curLng))
         }
 
         return MotoDialog.builder(requireContext())
@@ -94,10 +123,12 @@ class PlaceEditDialog : DialogFragment() {
     companion object {
         private const val ARG_DEFAULT_LAT = "default_lat"
         private const val ARG_DEFAULT_LNG = "default_lng"
+        private const val ARG_DEFAULT_NAME = "default_name"
 
         fun newInstance(
             place: SavedPlaceEntity? = null,
-            defaultLatLng: Pair<Double, Double>? = null
+            defaultLatLng: Pair<Double, Double>? = null,
+            defaultName: String? = null
         ): PlaceEditDialog =
             PlaceEditDialog().apply {
                 arguments = Bundle().apply {
@@ -113,6 +144,7 @@ class PlaceEditDialog : DialogFragment() {
                         putDouble(ARG_DEFAULT_LAT, it.first)
                         putDouble(ARG_DEFAULT_LNG, it.second)
                     }
+                    defaultName?.let { putString(ARG_DEFAULT_NAME, it) }
                 }
             }
     }

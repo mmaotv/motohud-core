@@ -12,9 +12,14 @@ import com.motohud.ble.amap.TipItem
 
 /**
  * POI 搜索结果适配器（高德输入提示）。
- * 点击 → 直接开始导航（由 NavigationFragment 跳转 GuidanceActivity）。
+ * 点击 → 由 NavigationFragment 在主页弹出地点卡。
+ *
+ * [originProvider] 提供当前定位，用来把"距离"补成"方位 + 距离"：
+ * 只知道 3.2 公里，用户还得自己判断在哪个方向、顺不顺路；
+ * "东南 3.2 公里"才是完整回答。没定位时退化为只有距离。
  */
 class TipAdapter(
+    private val originProvider: () -> Pair<Double, Double>?,
     private val onClick: (TipItem) -> Unit
 ) : ListAdapter<TipItem, TipAdapter.VH>(DIFF) {
 
@@ -31,7 +36,14 @@ class TipAdapter(
         // 列表按距离排序，地址又长又容易被 ellipsize 吃掉，
         // 距离放末尾等于排序白做了（实测"君亭酒店"的 7.6km 直接被截掉）。
         val parts = mutableListOf<String>()
-        tip.distanceM?.let { parts += formatDistance(it) }
+        tip.distanceM?.let { m ->
+            val dir = originProvider()?.let {
+                com.motohud.ble.navi.CoordConverter.direction8(
+                    it.first, it.second, tip.latitude, tip.longitude
+                )
+            }
+            parts += if (dir != null) "$dir ${formatDistance(m)}" else formatDistance(m)
+        }
         if (tip.district.isNotBlank()) parts += tip.district
         if (tip.address.isNotBlank()) parts += tip.address
         holder.address.text = parts.joinToString(" · ")

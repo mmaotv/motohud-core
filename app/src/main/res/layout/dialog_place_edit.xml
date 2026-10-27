@@ -69,6 +69,18 @@
             android:maxLines="1" />
     </com.google.android.material.textfield.TextInputLayout>
 
+    <!--
+      地图选点：手输经纬度对普通用户形同不可用（没人知道自己家门口的坐标）。
+      点这里开地图，把点挪到针下就回填，比手输靠谱得多。
+    -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_place_pick_map"
+        style="@style/Widget.Moto.Button.Ghost"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="6dp"
+        android:text="@string/place_pick_on_map" />
+
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

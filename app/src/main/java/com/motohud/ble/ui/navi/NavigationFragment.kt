@@ -30,17 +30,24 @@ import androidx.recyclerview.widget.RecyclerView
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.model.BitmapDescriptorFactory
+import com.amap.api.maps.model.CameraPosition
 import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.Marker
 import com.amap.api.maps.model.MarkerOptions
+import com.amap.api.maps.model.Poi
 import com.motohud.ble.ui.common.MotoDialog
 import com.motohud.ble.MotoHudApp
 import com.motohud.ble.R
 import com.motohud.ble.amap.AmapManager
+import com.motohud.ble.amap.AmapRepo
+import com.motohud.ble.amap.TipItem
 import com.motohud.ble.data.NaviPrefs
 import com.motohud.ble.data.SavedPlaceEntity
 import com.motohud.ble.data.SearchHistory
 import com.motohud.ble.ble.BleConnectionManager
+import com.motohud.ble.navi.CoordConverter
+import com.motohud.ble.navi.LocationFilter
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -88,6 +95,30 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
     private lateinit var historyAdapter: SearchHistoryAdapter
     private var historyVisible = false
 
+    // ---------- 地点卡（搜索结果 / 长按地图 / 点 POI 共用一张） ----------
+    private lateinit var placeCard: View
+    private lateinit var pcName: TextView
+    private lateinit var pcAddr: TextView
+    private lateinit var pcDistance: TextView
+    private var placeMarker: Marker? = null
+    private var lastDestMarker: Marker? = null
+    private val amapRepo by lazy { AmapRepo(requireContext().applicationContext) }
+    private var reverseJob: Job? = null
+
+    /** 当前地点卡指向的位置 */
+    private data class PickedPlace(
+        val name: String,
+        val lat: Double,
+        val lng: Double,
+        val address: String?,
+        val district: String?,
+        val distanceM: Int?,
+        /** 名字是否已有明确来源（搜索结果/POI）；长按选点为 false，反查后补名字 */
+        val nameKnown: Boolean = true
+    )
+
+    private var picked: PickedPlace? = null
+
     /** 搜索建议列表的高度上限（屏高 62%） */
     private var tipsMaxHeight = 0
 
@@ -119,6 +150,15 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
         searchArea = view.findViewById(R.id.search_area)
         mapView = view.findViewById(R.id.map_view)
 
+        // ---------- 地点卡 ----------
+        placeCard = view.findViewById(R.id.place_card)
+        pcName = view.findViewById(R.id.pc_name)
+        pcAddr = view.findViewById(R.id.pc_addr)
+        pcDistance = view.findViewById(R.id.pc_distance)
+        view.findViewById<View>(R.id.pc_close).setOnClickListener { hidePlaceCard() }
+        view.findViewById<View>(R.id.pc_nav).setOnClickListener { picked?.let { goRoute(it) } }
+        view.findViewById<View>(R.id.pc_save).setOnClickListener { picked?.let { saveAsPlace(it) } }
+
         historyBlock = view.findViewById(R.id.search_history_block)
         rvHistory = view.findViewById(R.id.rv_search_history)
         historyAdapter = SearchHistoryAdapter(
@@ -126,7 +166,7 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
                 hideHistory()
                 etSearch.setText("")
                 etSearch.clearFocus()
-                openPlaceDetail(item.name, item.lat, item.lng)
+                showPlaceCard(item.name, item.lat, item.lng, null, null, null)
             },
             onDelete = { item ->
                 SearchHistory.remove(requireContext(), item.name)
@@ -155,7 +195,16 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
         setupMap(savedInstanceState)
 
         // ---------- 搜索 ----------
-        tipAdapter = TipAdapter { tip -> openPlaceDetail(tip.name.ifBlank { getString(R.string.place_detail_default_name) }, tip.latitude, tip.longitude, tip.address, tip.district, tip.distanceM) }
+        // 点搜索建议 → 主页内联地点卡（不再跳独立页面）
+        tipAdapter = TipAdapter(
+            originProvider = { vm.currentLocation },
+            onClick = { tip ->
+                showPlaceCard(
+                    tip.name.ifBlank { getString(R.string.place_detail_default_name) },
+                    tip.latitude, tip.longitude, tip.address, tip.district, tip.distanceM
+                )
+            }
+        )
         rvTips.layoutManager = LinearLayoutManager(requireContext())
         rvTips.adapter = tipAdapter
         rvTips.layoutAnimation = android.view.animation.LayoutAnimationController(
@@ -240,14 +289,16 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
                 launch {
                     vm.tips.collect { list ->
                         tipAdapter.submitList(list)
-                        val active = list.isNotEmpty()
+                        val cardOpen = placeCard.visibility == View.VISIBLE
+                        val active = list.isNotEmpty() && !cardOpen
                         rvTips.visibility = if (active) View.VISIBLE else View.GONE
                         // 有结果就把状态行收掉，否则"搜索中…"会压在结果列表上方
                         if (active) tvTipsState.visibility = View.GONE
-                        // 搜索建议展开时收起底部地址卡与浮动按钮，避免列表被遮挡
-                        chipsScroll.visibility = if (active) View.GONE else View.VISIBLE
-                        cardBottom.visibility = if (active) View.GONE else View.VISIBLE
-                        fabLocation.visibility = if (active) View.GONE else View.VISIBLE
+                        // 搜索建议展开 / 地点卡打开时收起底部地址卡与浮动按钮，避免被遮挡
+                        val hideBottom = active || cardOpen
+                        chipsScroll.visibility = if (hideBottom) View.GONE else View.VISIBLE
+                        cardBottom.visibility = if (hideBottom) View.GONE else View.VISIBLE
+                        fabLocation.visibility = if (hideBottom) View.GONE else View.VISIBLE
                         if (active) {
                             // 按条目数估高，避免结果很少时拉出一大块空卡片
                             val d = resources.displayMetrics.density
@@ -337,11 +388,86 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
             renderTrafficButton()
             // 权限检查放到地图准备好之后：没权限时 SDK 初始化会抛异常
             enableMyLocation()
-            moveToMyLocation()
+            // 恢复上次视野（首次使用才定位到当前位置）——每次都被拽回自己身上很烦
+            restoreCamera()
+            setupMapInteractions()
         } catch (e: Exception) {
             // 地图没起来时不再弹 Toast（用户看不懂，也关不掉）；
             // 日志留痕，界面保持"地图空白 + 搜索仍可用"的状态
             android.util.Log.w("NavigationFragment", "地图初始化失败", e)
+        }
+    }
+
+    /**
+     * 地图上的三个「看一眼」入口，全部落到同一张地点卡：
+     *  长按空白处（选点）、点高德自带的 POI 图标、点上次目的地图钉。
+     */
+    private fun setupMapInteractions() {
+        val map = aMap ?: return
+        // 长按 → 反查地址后弹地点卡（无地址也能用，坐标照样能导航）
+        map.setOnMapLongClickListener { latLng ->
+            showPlaceCard(null, latLng.latitude, latLng.longitude, null, null, null)
+        }
+        // 点地图上的 POI：高德只给名称与坐标，地址由我们自己反查
+        map.setOnPOIClickListener(object : AMap.OnPOIClickListener {
+            override fun onPOIClick(poi: Poi?) {
+                val p = poi ?: return
+                val c = p.coordinate ?: return
+                showPlaceCard(p.name, c.latitude, c.longitude, null, null, null)
+            }
+        })
+        // 上次目的地图钉：点一下就能「再去一次」
+        map.setOnMarkerClickListener { marker ->
+            val dest = NaviPrefs.lastDest()
+            if (dest != null && marker == lastDestMarker) {
+                showPlaceCard(dest.name, dest.lat, dest.lng, null, null, null)
+                true
+            } else {
+                false
+            }
+        }
+        // 视野记忆：拖动/缩放停下来后记一次，下次进来原地恢复
+        map.setOnCameraChangeListener(object : AMap.OnCameraChangeListener {
+            override fun onCameraChange(pos: CameraPosition?) = Unit
+            override fun onCameraChangeFinish(pos: CameraPosition?) {
+                val c = pos ?: return
+                NaviPrefs.setMapCamera(c.target.latitude, c.target.longitude, c.zoom)
+            }
+        })
+        drawLastDestMarker()
+    }
+
+    /** 上次导航的目的地：一个淡一点的图钉，不抢当前位置的视觉焦点 */
+    private fun drawLastDestMarker() {
+        val map = aMap ?: return
+        val dest = NaviPrefs.lastDest() ?: return
+        lastDestMarker?.remove()
+        lastDestMarker = runCatching {
+            map.addMarker(
+                MarkerOptions()
+                    .position(LatLng(dest.lat, dest.lng))
+                    .title(dest.name)
+                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE))
+                    .alpha(0.75f)
+                    .zIndex(6f)
+            )
+        }.getOrNull()
+    }
+
+    /**
+     * 上次的视野 vs 当前位置。
+     *
+     * 优先恢复记忆：用户常看的是固定一片区域，每次进页面都被拽回自己身上很烦。
+     * 首次使用（没有记忆）才定位。想看自己在哪，点定位按钮即可。
+     */
+    private fun restoreCamera() {
+        val memo = NaviPrefs.mapCamera()
+        if (memo != null) {
+            aMap?.moveCamera(
+                CameraUpdateFactory.newLatLngZoom(LatLng(memo.lat, memo.lng), memo.zoom)
+            )
+        } else {
+            moveToMyLocation()
         }
     }
 
@@ -423,6 +549,8 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
     private fun locateNow() {
         ensureLocationPermission()
         if (!vm.hasLocationPermission()) return
+        // 用户主动要"我在哪"：把地点卡收掉，别让上一张卡挡着
+        hidePlaceCard()
         vm.refreshLocation(force = true)
         viewLifecycleOwner.lifecycleScope.launch {
             delay(350)
@@ -452,10 +580,14 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
             return
         }
         vm.refreshLocation(force = true)
-        viewLifecycleOwner.lifecycleScope.launch {
-            delay(400)
-            vm.locating.first { !it }
-            moveToMyLocation()
+        // 只在"还没记住过视野"时把地图拉回当前位置。
+        // 有记忆就原地保留 —— 每次切页都被拽回自己身上，比看到旧位置更烦。
+        if (NaviPrefs.mapCamera() == null) {
+            viewLifecycleOwner.lifecycleScope.launch {
+                delay(400)
+                vm.locating.first { !it }
+                moveToMyLocation()
+            }
         }
     }
 
@@ -538,44 +670,154 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
     // ---------- 导航启动 ----------
 
     /**
-     * 点击搜索结果 / 最近搜索 → 先到「地点详情」页。
+     * 在主页上直接显示地点卡：地图飞到该点 + 底部浮出名称/地址/距离。
      *
-     * 这里只做"看一眼"：地图移到该地址、给出直线距离，由用户在详情页里
-     * 点「导航到这里」才继续进「选择路线」页。
-     * 以前点一下结果就直接算路，用户只是想查个大概位置也会被推进导航流程。
+     * 三个入口共用：搜索结果、长按地图选点、点地图上的 POI。
+     * 以前点搜索结果是跳独立页面，现在全部留在本页 —— 因为绝大多数时候
+     * 用户只是想"看一眼这个地方在哪、离我多远"。
+     *
+     * [name] 传 null 表示"只知道坐标"（长按选点），会先显示占位名再反查地址。
      */
-    private fun openPlaceDetail(
-        name: String,
+    private fun showPlaceCard(
+        name: String?,
         lat: Double,
         lng: Double,
-        address: String? = null,
-        district: String? = null,
-        distanceM: Int? = null
+        address: String?,
+        district: String?,
+        distanceM: Int?
     ) {
-        hideTips()
-        hideHistory()
-        // 只在这里写历史：表示"用户确实查过这个地方"。
-        // 输入过程中写，历史里会塞满打了一半和打错的词。
-        SearchHistory.add(requireContext(), name, lat, lng)
-        etSearch.setText("")
-        // 交出焦点让键盘收掉，否则输入法会把下一页顶上去
-        etSearch.clearFocus()
-        val loc = vm.currentLocation
-        PlaceDetailActivity.start(
-            requireContext(), name, lat, lng,
+        if (lat == 0.0 && lng == 0.0) return
+        val knownName = !name.isNullOrBlank()
+        picked = PickedPlace(
+            name = name?.takeIf { it.isNotBlank() } ?: getString(R.string.place_card_point),
+            lat = lat,
+            lng = lng,
             address = address,
             district = district,
             distanceM = distanceM,
+            nameKnown = knownName
+        )
+        hideTips()
+        hideHistory()
+        etSearch.clearFocus()
+        // 输入法不收掉，地点卡会被键盘顶住看不见（点搜索建议时键盘还开着）
+        runCatching {
+            val imm = requireContext()
+                .getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                    as android.view.inputmethod.InputMethodManager
+            imm.hideSoftInputFromWindow(etSearch.windowToken, 0)
+        }
+        chipsScroll.visibility = View.GONE
+        cardBottom.visibility = View.GONE
+        fabLocation.visibility = View.GONE
+        placeCard.visibility = View.VISIBLE
+        renderPlaceCard()
+
+        // 图钉：每次只保留一枚，避免长按几次在地图上插满图钉
+        runCatching {
+            placeMarker?.remove()
+            placeMarker = aMap?.addMarker(
+                MarkerOptions()
+                    .position(LatLng(lat, lng))
+                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
+                    .zIndex(10f)
+            )
+            aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(lat, lng), 16.5f), 500, null)
+        }
+
+        // 没有地址就先反查（长按选点、点 POI 都缺地址）
+        if (address.isNullOrBlank()) reverseGeocode(lat, lng)
+    }
+
+    private fun renderPlaceCard() {
+        val p = picked ?: return
+        pcName.text = p.name
+        val line = listOf(p.district.orEmpty(), p.address.orEmpty())
+            .filter { it.isNotBlank() }
+            .joinToString(" · ")
+        pcAddr.text = line.ifBlank { getString(R.string.place_card_locating) }
+        val loc = vm.currentLocation
+        val meters = if (loc != null) {
+            LocationFilter.distanceM(loc.first, loc.second, p.lat, p.lng).toInt()
+        } else {
+            p.distanceM
+        }
+        pcDistance.text = meters?.let { CoordConverter.formatDistance(it) } ?: "--"
+    }
+
+    /**
+     * 坐标 → 地址。
+     *
+     * 只发一次请求，且校验"结果回来时地点卡还是不是同一个点"——
+     * 用户连点两处时，先发的请求回来晚了不能把后点的地址盖掉。
+     */
+    private fun reverseGeocode(lat: Double, lng: Double) {
+        reverseJob?.cancel()
+        reverseJob = viewLifecycleOwner.lifecycleScope.launch {
+            val item = amapRepo.reverseGeocode(lat, lng)
+            val cur = picked ?: return@launch
+            if (cur.lat != lat || cur.lng != lng) return@launch
+            if (item == null) {
+                if (cur.address.isNullOrBlank()) pcAddr.text = getString(R.string.place_card_no_address)
+                return@launch
+            }
+            picked = cur.copy(
+                // 长按选点时本没有名字，用反查到的地名补上；POI/搜索结果的名字优先
+                name = if (cur.nameKnown) cur.name else item.name,
+                address = item.address,
+                district = item.district,
+                // 反查成功后名字就有来源了：收藏时能直接预填
+                nameKnown = true
+            )
+            renderPlaceCard()
+        }
+    }
+
+    private fun hidePlaceCard() {
+        reverseJob?.cancel()
+        picked = null
+        placeCard.visibility = View.GONE
+        runCatching { placeMarker?.remove() }
+        placeMarker = null
+        val searching = etSearch.text?.isNotEmpty() == true
+        chipsScroll.visibility = if (searching) View.GONE else View.VISIBLE
+        cardBottom.visibility = if (searching) View.GONE else View.VISIBLE
+        fabLocation.visibility = if (searching) View.GONE else View.VISIBLE
+    }
+
+    /** 点「导航到这里」→ 路线选择页 */
+    private fun goRoute(p: PickedPlace) {
+        // 记下上次目的地：地图上留个图钉，复访时点一下就能再去
+        NaviPrefs.setLastDest(p.name, p.lat, p.lng)
+        SearchHistory.add(requireContext(), p.name, p.lat, p.lng)
+        val loc = vm.currentLocation
+        RouteSelectActivity.start(
+            requireContext(), p.name, p.lat, p.lng,
             fromLat = loc?.first ?: 0.0,
             fromLng = loc?.second ?: 0.0
         )
+    }
+
+    /** 点「收藏」→ 常用地址编辑框（名称与坐标都已填好，只需选个类型） */
+    private fun saveAsPlace(p: PickedPlace) {
+        val dialog = PlaceEditDialog.newInstance(
+            place = null,
+            defaultLatLng = p.lat to p.lng,
+            defaultName = if (p.nameKnown) p.name else null
+        )
+        dialog.onSave = { name, lat, lng, type, remark ->
+            vm.addPlace(name, lat, lng, type, remark)
+            Toast.makeText(requireContext(), R.string.place_card_saved, Toast.LENGTH_SHORT).show()
+            hidePlaceCard()
+        }
+        dialog.show(childFragmentManager, "place_edit")
     }
 
     /**
      * 常用地址 chips / 地址管理 → 直接进「选择路线」页。
      *
      * 这些是**用户自己存下来的**快捷入口（回家 / 去公司），点它就是要去，
-     * 再插一层详情页反而多一步。
+     * 再插一层地点卡反而多一步。
      */
     private fun openGuidance(name: String, lat: Double, lng: Double) {
         hideTips()

@@ -49,6 +49,27 @@ object CoordConverter {
     fun formatDistance(m: Int): String =
         if (m < 1000) "$m 米" else String.format("%.1f 公里", m / 1000.0)
 
+    /**
+     * 八方位（北/东北/东/…）。
+     *
+     * 搜索结果只给"3.2 公里"时，用户还得自己判断在哪个方向、顺不顺路。
+     * 加上方位（"东南 3.2 公里"）才是「这地方离我多远、在哪边」的完整回答。
+     */
+    fun direction8(fromLat: Double, fromLng: Double, toLat: Double, toLng: Double): String {
+        val dLat = Math.toRadians(toLat - fromLat)
+        val dLng = Math.toRadians(toLng - fromLng)
+        val mLat = Math.toRadians((fromLat + toLat) / 2.0)
+        // 米制平面分量：x 向东、y 向北
+        val x = dLng * cos(mLat)
+        val y = dLat
+        if (x == 0.0 && y == 0.0) return "正前方"
+        var deg = Math.toDegrees(atan2(x, y))
+        if (deg < 0) deg += 360.0
+        val names = arrayOf("北", "东北", "东", "东南", "南", "西南", "西", "西北")
+        val idx = (((deg + 22.5) / 45.0).toInt()) % 8
+        return names[idx]
+    }
+
     /** 时间格式化：秒 -> "x 分钟" / "x 小时 x 分钟" */
     fun formatEta(seconds: Int): String {
         if (seconds <= 0) return "--"

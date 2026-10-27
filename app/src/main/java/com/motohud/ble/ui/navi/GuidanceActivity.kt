@@ -17,7 +17,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.speech.tts.TextToSpeech
 import android.util.Rational
 import android.view.Gravity
 import android.view.View
@@ -56,10 +55,13 @@ import com.motohud.ble.ble.BleConnectionManager
 import com.motohud.ble.data.NaviPrefs
 import com.motohud.ble.data.NaviTrack
 import com.motohud.ble.navi.CoordConverter
+import com.motohud.ble.navi.IconType
 import com.motohud.ble.navi.NaviEngine
 import com.motohud.ble.navi.RouteData
 import com.motohud.ble.navi.RouteHandoff
 import com.motohud.ble.navi.RouteNaviEngine
+import com.motohud.ble.navi.VoicePack
+import com.motohud.ble.navi.VoicePackPlayer
 import com.motohud.ble.ui.common.MotoDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
@@ -144,10 +146,14 @@ class GuidanceActivity : AppCompatActivity() {
     private lateinit var betterRouteCard: View
     private lateinit var tvBetterRoute: TextView
 
-    private var tts: TextToSpeech? = null
-    private var ttsReady = false
-    /** 系统里没有可用 TTS 引擎：语音按钮压暗，避免用户以为开关坏了 */
-    private var ttsFailed = false
+    /**
+     * 语音播报：内置语音包（[com.motohud.ble.navi.VoicePackPlayer]）。
+     *
+     * 不再用系统 `TextToSpeech` —— 车机和部分国产 ROM 上它根本调不通
+     * （无引擎 / 缺中文数据 / 只支持 synthesizeToFile），表现就是"导航全程哑巴"。
+     * 语音包是构建期合成好的片段，运行期拼装播放，任何设备都能出声。
+     */
+    private var voice: com.motohud.ble.navi.VoicePackPlayer? = null
     private var route: RouteData? = null
     private var destName: String = "目的地"
     private var destLat = 0.0
@@ -179,6 +185,9 @@ class GuidanceActivity : AppCompatActivity() {
     /** 转向提前预告防重放：bit0=500m 档已播、bit1=200m 档已播 */
     private var remindStepIndex = -1
     private var remindFlags = 0
+
+    /** 上一次已播报过的路段序号：进入新路段时播一次「前方 X 米 左/右转」 */
+    private var lastAnnouncedStep = -1
 
     /** 本次导航是否已调用过 engine.start（屏蔽引擎里上一次导航的残留状态） */
     private var started = false
@@ -252,7 +261,7 @@ class GuidanceActivity : AppCompatActivity() {
 
         ensureLocationPermission()
         setupMap(savedInstanceState)
-        initTts()
+        initVoice()
         bindActions()
         updateModeBadge()
         updateVoiceButton()
@@ -369,22 +378,17 @@ class GuidanceActivity : AppCompatActivity() {
         }
 
         btnVoice.setOnClickListener {
-            // 没有语音引擎时按钮是压暗的：点了不切换开关，改为说明原因，
-            // 避免「按了没反应」的困惑（这也替代了原先每次进页面的常驻 Toast）
-            if (ttsFailed) {
-                Toast.makeText(this, R.string.navi_tts_missing, Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
             val on = !NaviPrefs.voice.value
             NaviPrefs.setVoice(on)
             updateVoiceButton()
-            if (!on) {
-                pendingSpeech.clear()
-                runCatching { tts?.stop() }
-            } else {
-                // 开着车看不见屏幕，用一声确认代替「开了吗？」的犹豫
-                speak(getString(R.string.navi_voice_on))
-            }
+            voice?.setMuted(!on)
+            // 开着车看不见屏幕，用一声确认代替「开了吗？」的犹豫
+            speakClips(if (on) VoicePack.voiceOn() else VoicePack.voiceOff())
+        }
+        // 长按选播报档位（详细/简洁/只播转弯）：单击是最高频的开/关，不该被设置项挤掉
+        btnVoice.setOnLongClickListener {
+            showVoiceModeDialog()
+            true
         }
         tvModeBadge.setOnClickListener { showRoutePrefsDialog() }
         findViewById<View>(R.id.btn_overview).setOnClickListener {
@@ -401,11 +405,35 @@ class GuidanceActivity : AppCompatActivity() {
         btnVoice.setImageResource(
             if (NaviPrefs.voice.value) R.drawable.ic_volume_on else R.drawable.ic_volume_off
         )
-        btnVoice.alpha = when {
-            ttsFailed -> 0.35f
-            NaviPrefs.voice.value -> 1f
-            else -> 0.55f
-        }
+        btnVoice.alpha = if (NaviPrefs.voice.value) 1f else 0.55f
+        // 档位不是「详细」时角标提示一下，否则用户不知道长按改过什么
+        btnVoice.contentDescription = getString(
+            when (NaviPrefs.voiceMode.value) {
+                NaviPrefs.VOICE_MODE_BRIEF -> R.string.navi_voice_mode_brief
+                NaviPrefs.VOICE_MODE_TURN_ONLY -> R.string.navi_voice_mode_turn_only
+                else -> R.string.navi_voice
+            }
+        )
+    }
+
+    /** 播报档位选择 */
+    private fun showVoiceModeDialog() {
+        val modes = arrayOf(
+            getString(R.string.navi_voice_mode_detail),
+            getString(R.string.navi_voice_mode_brief),
+            getString(R.string.navi_voice_mode_turn_only)
+        )
+        com.motohud.ble.ui.common.MotoDialog.builder(this)
+            .setTitle(R.string.navi_voice_mode_title)
+            .setSingleChoiceItems(modes, NaviPrefs.voiceMode.value) { d, which ->
+                NaviPrefs.setVoiceMode(which)
+                updateVoiceButton()
+                // 立刻用一声实测让用户听到档位效果，不用等下一个路口
+                speakClips(VoicePack.turn(IconType.RIGHT, 300))
+                d.dismiss()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun updateModeBadge() {
@@ -504,26 +532,19 @@ class GuidanceActivity : AppCompatActivity() {
     private fun begin(start: Pair<Double, Double>?, r: RouteData?) {
         turnBanner.visibility = View.VISIBLE
         arrivedOverlay.visibility = View.GONE
-        engine.onStepChanged = { instruction -> speak(instruction) }
+        engine.onStepChanged = null   // 播报改由 render 按 stepIndex 驱动，见 announceStepEntered
         // 引擎为全局共享实例，上一次导航的 arrived=true 仍留在 StateFlow 里，
         // 必须先置位再 start，避免首帧按旧状态误判「已到达」。
         started = true
         stopped = false
         remindStepIndex = -1
         remindFlags = 0
+        lastAnnouncedStep = -1
         naviStartMs = System.currentTimeMillis()
-        // 开始播报：骑行中不看屏幕也能确认导航已启动、大概多久到
-        speak(
-            if (r != null && r.distanceM > 0f) {
-                getString(
-                    R.string.navi_tts_start,
-                    CoordConverter.formatDistance(r.distanceM.toInt()),
-                    CoordConverter.formatEta(r.durationS.toInt())
-                )
-            } else {
-                getString(R.string.navi_tts_start_plain)
-            }
-        )
+        // 开始播报：骑行中不看屏幕也能确认导航已启动、大概多远
+        if (NaviPrefs.voiceMode.value != NaviPrefs.VOICE_MODE_TURN_ONLY) {
+            speakClips(VoicePack.start(r?.distanceM ?: 0f))
+        }
         engine.start(destName, destLat, destLng, start, r)
         // 前台服务：**每次导航都启动**，它承载通知栏导航条（息屏/兜里瞥一眼方向）；
         // 唤醒锁只由「息屏导航」开关决定，见 NaviForegroundService.updateWakeLock
@@ -1046,14 +1067,28 @@ class GuidanceActivity : AppCompatActivity() {
 
         renderProgress(s.traveled)
 
-        // 临近路口的短提醒（长路段场景下，进入步骤时那句引导语早被忘了）
+        // 进入新路段 → 播一次（老实现靠引擎抛整句引导语，语音包念不了路名，改由这里触发）
+        if (s.stepIndex != lastAnnouncedStep) {
+            lastAnnouncedStep = s.stepIndex
+            remindStepIndex = s.stepIndex
+            remindFlags = 0
+            val spoke = announceStepEntered(s)
+            // 刚进入路段那句已经带了距离，同一档位不要再复读一遍（否则两句话会互相打断）
+            if (spoke) {
+                when {
+                    s.stepRemain <= 250 -> remindFlags = remindFlags or 2
+                    s.stepRemain <= 500 -> remindFlags = remindFlags or 1
+                }
+            }
+        }
+        // 临近路口的短提醒（长路段场景下，进入路段时那句早被忘了）
         announceTurnReminders(s)
 
         if (s.arrived) {
             if (!stopped) {
                 stopped = true
                 app.naviForwarder.forwardFinish()
-                speak(getString(R.string.hud_arrived))
+                speakClips(VoicePack.arrived())
                 // 导航历史：到达即结束这条记录（轨迹在这里压缩写回）
                 finishHistory()
             }
@@ -1132,30 +1167,55 @@ class GuidanceActivity : AppCompatActivity() {
     }
 
     /**
-     * 转向提前预告。
+     * 转向提醒（原来叫"提前预告"）。
      *
-     * 步骤切换时播的是整句引导语（「沿望京路行驶 500 米后右转」），发生在进入步骤那一刻；
-     * 长路段隔几分钟就忘了，所以临近路口再补两次短提醒：
-     * 500m 档只给 >=800m 的长步骤（短步骤的引导语本身就是预告，再播就是复读），
-     * 200m 档所有转向都播，相当于「该并线了」的最后提醒。
+     * 改名是因为播报源变了：以前播的是高德给的整句引导语（含路名），
+     * 现在播的是语音包片段「前方 + 300米 + 右转」，所以这里只需要
+     * **图标类型**和**距路口的距离**，不再依赖文本。
+     *
+     * 三档详细度：
+     *  - 详细：500m 档（仅 >=800m 的长路段）+ 200m 档
+     *  - 简洁：只留 200m 档
+     *  - 只播转弯：只留 200m 档（与简洁的差别在于进入路段时不播）
      */
     private fun announceTurnReminders(s: NaviEngine.NaviState) {
         if (!s.running || s.arrived || s.stepIndex < 0) return
         if (!TurnIcons.isTurn(s.iconType)) return
-        if (s.stepIndex != remindStepIndex) {
-            remindStepIndex = s.stepIndex
-            remindFlags = 0
-        }
-        val step = route?.steps?.getOrNull(s.stepIndex) ?: return
-        val action = step.action
-        if (action.isBlank()) return
-        if (remindFlags and 1 == 0 && s.stepRemain in 201..500 && step.distanceM >= 800f) {
+        val mode = NaviPrefs.voiceMode.value
+        val step = route?.steps?.getOrNull(s.stepIndex)
+        if (mode == NaviPrefs.VOICE_MODE_DETAIL &&
+            remindFlags and 1 == 0 &&
+            s.stepRemain in 201..500 &&
+            (step?.distanceM ?: 0f) >= 800f
+        ) {
             remindFlags = remindFlags or 1
-            speak(getString(R.string.navi_tts_turn_soon, 500, action))
+            speakClips(VoicePack.turn(s.iconType, s.stepRemain))
         }
         if (remindFlags and 2 == 0 && s.stepRemain in 1..200) {
             remindFlags = remindFlags or 2
-            speak(getString(R.string.navi_tts_turn_soon, 200, action))
+            speakClips(VoicePack.turn(s.iconType, s.stepRemain))
+        }
+    }
+
+    /**
+     * 进入新路段时的播报。
+     *
+     * 以前由引擎的 onStepChanged 抛高德原文来播；语音包念不了路名，
+     * 改成自己按「转向图标 + 本段剩余」拼一句话，所以改在渲染里按 stepIndex 变化触发。
+     */
+    private fun announceStepEntered(s: NaviEngine.NaviState): Boolean {
+        if (!s.running || s.arrived) return false
+        if (s.stepIndex < 0 || !TurnIcons.isTurn(s.iconType)) return false
+        return when (NaviPrefs.voiceMode.value) {
+            NaviPrefs.VOICE_MODE_DETAIL -> {
+                // 不抢播：让「开始导航，全程 6 公里」先说完，别把话切成半句
+                speakClips(VoicePack.turn(s.iconType, s.stepRemain), interrupt = false); true
+            }
+            // 简洁：只在"马上要转"时才在进入路段那一刻多说一句，避免长路段上一句话反复播
+            NaviPrefs.VOICE_MODE_BRIEF -> if (s.stepRemain <= 600f) {
+                speakClips(VoicePack.turn(s.iconType, s.stepRemain), interrupt = false); true
+            } else false
+            else -> false
         }
     }
 
@@ -1308,86 +1368,26 @@ class GuidanceActivity : AppCompatActivity() {
         historyId = null
     }
 
-    // ---------- TTS ----------
+    // ---------- 语音播报（内置语音包） ----------
     //
-    // 旧实现两个致命问题，症状都是「导航全程哑巴」：
-    // ① initTts 回调是异步的，引擎就绪前的播报被静默丢弃——第一条指令基本必丢；
-    // ② setLanguage(Locale.CHINA) 一旦返回 LANG_MISSING_DATA，ttsReady 永远 false——
-    //    而很多手机的 TTS 引擎没装中文数据包，装了别的语言照样能出声。
-    // 现在：就绪前排队、语言三级回退、语言全失败也允许播报。
+    // 历史教训：这里原来是系统 TextToSpeech，两个致命问题都表现为"导航全程哑巴"：
+    // ① initTts 回调异步，就绪前的播报被丢弃；② 引擎缺中文数据时 ttsReady 永远 false。
+    // 更根本的是——车机上根本没有可用的 TTS 引擎，怎么修都是哑巴。
+    // 现在换成构建期合成的语音包（VoicePack + VoicePackPlayer）：
+    // 片段拼装、完全离线、不依赖系统任何组件。见 VoicePack 的类注释。
 
-    /** 就绪前攒下的播报（只留最后 2 条：开始导航 + 第一条指令） */
-    private val pendingSpeech = ArrayDeque<String>()
-    private var lastSpokenText = ""
-    private var lastSpokenAt = 0L
-
-    private fun initTts() {
-        tts = TextToSpeech(this) { status ->
-            if (status != TextToSpeech.SUCCESS) {
-                // 系统里没有任何 TTS 引擎：播报不可能工作。
-                // 静默降级：按钮压暗（alpha 0.35），点按钮时才解释原因——
-                // 不再每次进导航都弹长 Toast 打断用户。
-                android.util.Log.w("GuidanceTts", "TextToSpeech init failed: $status")
-                ttsFailed = true
-                runOnUiThread { updateVoiceButton() }
-                return@TextToSpeech
-            }
-            // 导航语音走「导航播报」音频通道：与媒体/铃声音量分开，符合导航 App 习惯
-            runCatching {
-                tts?.setAudioAttributes(
-                    android.media.AudioAttributes.Builder()
-                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build()
-                )
-            }
-            // 语言回退链：中文 → 系统默认 → 英语
-            val langs = listOf(Locale.CHINA, Locale.getDefault(), Locale.US)
-            var langOk = false
-            for (loc in langs) {
-                val r = runCatching { tts?.setLanguage(loc) }.getOrNull() ?: continue
-                if (r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED) {
-                    langOk = true
-                    break
-                }
-            }
-            if (!langOk) {
-                android.util.Log.w("GuidanceTts", "no matched language, use engine default")
-            }
-            // 语言都不匹配也置 true：不少引擎照样能读，别把播报整个掐死
-            ttsReady = true
-            flushPendingSpeech()
-        }
+    private fun initVoice() {
+        voice = VoicePackPlayer(this).also { it.setMuted(!NaviPrefs.voice.value) }
     }
 
-    /** 排队播报。步骤切换、提前预告都走队列，保证顺序自然（开始 → 指令 → 预告 → 到达） */
-    private fun speak(text: String) {
-        if (text.isBlank() || !NaviPrefs.voice.value) return
-        // 引擎状态抖动时 onStepChanged 可能重复触发同一句，3 秒内去重
-        val now = System.currentTimeMillis()
-        if (text == lastSpokenText && now - lastSpokenAt < 3_000L) return
-        lastSpokenText = text
-        lastSpokenAt = now
-        val eng = tts
-        if (eng == null || !ttsReady) {
-            if (pendingSpeech.size >= 2) pendingSpeech.removeFirst()
-            pendingSpeech.addLast(text)
-            return
-        }
-        runCatching {
-            eng.speak(text, TextToSpeech.QUEUE_ADD, null, "navi_$now")
-        }
-    }
-
-    private fun flushPendingSpeech() {
-        if (!NaviPrefs.voice.value) {
-            pendingSpeech.clear()
-            return
-        }
-        while (pendingSpeech.isNotEmpty()) {
-            val t = pendingSpeech.removeFirst()
-            runCatching { tts?.speak(t, TextToSpeech.QUEUE_ADD, null, "navi_pending") }
-        }
+    /**
+     * 播一串语音片段（主线程调用）。
+     *
+     * [interrupt] 见 [VoicePackPlayer.speak]：路口提醒要抢播，进入路段的播报要排队。
+     */
+    private fun speakClips(clips: List<Int>, interrupt: Boolean = true) {
+        if (clips.isEmpty() || !NaviPrefs.voice.value) return
+        voice?.speak(clips, interrupt)
     }
 
     // ---------- 权限 ----------
@@ -1531,11 +1531,8 @@ class GuidanceActivity : AppCompatActivity() {
         mapView?.onDestroy()
         mapView = null
         aMap = null
-        runCatching {
-            tts?.stop()
-            tts?.shutdown()
-        }
-        tts = null
+        runCatching { voice?.release() }
+        voice = null
         super.onDestroy()
     }
 

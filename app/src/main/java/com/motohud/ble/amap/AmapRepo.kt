@@ -6,6 +6,10 @@ import com.amap.api.services.help.Inputtips
 import com.amap.api.services.help.InputtipsQuery
 import com.amap.api.services.help.Tip
 import com.amap.api.services.core.PoiItem
+import com.amap.api.services.geocoder.GeocodeResult
+import com.amap.api.services.geocoder.GeocodeSearch
+import com.amap.api.services.geocoder.RegeocodeQuery
+import com.amap.api.services.geocoder.RegeocodeResult
 import com.amap.api.services.poisearch.PoiResult
 import com.amap.api.services.poisearch.PoiSearch
 import com.amap.api.services.route.DrivePath
@@ -204,6 +208,49 @@ class AmapRepo(private val context: Context) {
      * 原先两者混用（只用 Inputtips 就当成结果列表），导致同名地点只能按
      * 服务端相关性排序、跨城市混排 —— 搜"万达广场"排在前面的是外地那个。
      */
+    /**
+     * 逆地理编码：坐标 → 地址。
+     *
+     * 用途：地图长按选点、点地图上的 POI 时，屏幕上的一个点只有经纬度，
+     * 必须翻译成人能看懂的地址才有意义（也才能拿去收藏）。
+     *
+     * 这里只取「格式化地址 + 区县」两个字段，不取 POI 列表 ——
+     * 用户要的是"这是哪儿"，不是"附近有哪些店"。
+     */
+    suspend fun reverseGeocode(lat: Double, lng: Double): TipItem? {
+        return runCatching {
+            suspendCancellableCoroutine { cont ->
+                val query = RegeocodeQuery(
+                    com.amap.api.services.core.LatLonPoint(lat, lng), 200f, GeocodeSearch.AMAP
+                )
+                val search = GeocodeSearch(context)
+                search.setOnGeocodeSearchListener(object : GeocodeSearch.OnGeocodeSearchListener {
+                    override fun onRegeocodeSearched(result: RegeocodeResult?, rCode: Int) {
+                        val addr = result?.regeocodeAddress
+                        val text = addr?.formatAddress.orEmpty()
+                        if (rCode == 1000 && addr != null && text.isNotBlank()) {
+                            cont.resume(
+                                TipItem(
+                                    name = addr.township?.takeIf { it.isNotBlank() }
+                                        ?: text.take(12),
+                                    address = text,
+                                    district = addr.district.orEmpty(),
+                                    latitude = lat,
+                                    longitude = lng
+                                )
+                            )
+                        } else {
+                            cont.resume(null)
+                        }
+                    }
+
+                    override fun onGeocodeSearched(result: GeocodeResult?, rCode: Int) = Unit
+                })
+                search.getFromLocationAsyn(query)
+            }
+        }.getOrNull()
+    }
+
     suspend fun searchPoi(
         keyword: String,
         city: String = "",

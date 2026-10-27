@@ -30,16 +30,28 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object NaviPrefs {
 
+    /** 播报详细度：详细 / 简洁 / 只播转弯 */
+    const val VOICE_MODE_DETAIL = 0
+    const val VOICE_MODE_BRIEF = 1
+    const val VOICE_MODE_TURN_ONLY = 2
+
     private const val PREFS = "navi_prefs"
     private const val KEY_MOTORCYCLE = "motorcycle_mode"
     private const val KEY_AVOID_HIGHWAY = "avoid_highway"
     private const val KEY_VOICE = "voice_on"
+    private const val KEY_VOICE_MODE = "voice_mode"
     private const val KEY_PHONE_MODE = "phone_mode"   // 旧键：仅用于迁移读取
     private const val KEY_CAST = "cast_enabled"
     private const val KEY_SCREEN_OFF = "screen_off_navi"
     private const val KEY_MAP_TRAFFIC = "map_traffic_layer"
 
     private const val KEY_SMART = "route_smart"
+    private const val KEY_MAP_CAM_LAT = "map_cam_lat"
+    private const val KEY_MAP_CAM_LNG = "map_cam_lng"
+    private const val KEY_MAP_CAM_ZOOM = "map_cam_zoom"
+    private const val KEY_LAST_DEST_NAME = "last_dest_name"
+    private const val KEY_LAST_DEST_LAT = "last_dest_lat"
+    private const val KEY_LAST_DEST_LNG = "last_dest_lng"
     private const val KEY_AVOID_JAM = "route_avoid_jam"
     private const val KEY_AVOID_TOLL = "route_avoid_toll"
     private const val KEY_HIGHWAY_FIRST = "route_highway_first"
@@ -57,6 +69,17 @@ object NaviPrefs {
 
     private val _voice = MutableStateFlow(true)
     val voice: StateFlow<Boolean> = _voice.asStateFlow()
+
+    /**
+     * 播报详细度（[VOICE_MODE_DETAIL] / [VOICE_MODE_BRIEF] / [VOICE_MODE_TURN_ONLY]）。
+     *
+     * 语音包是片段拼装的，播报量完全可控，所以给三档：
+     *  - 详细：开始导航 + 每次进入路段 + 500m 预告 + 200m 提醒 + 到达
+     *  - 简洁：开始导航 + 进入路段时若已在 600m 内 + 200m 提醒 + 到达
+     *  - 只播转弯：仅在 200m 内提醒转弯 + 到达（跑熟路的人只要这一档）
+     */
+    private val _voiceMode = MutableStateFlow(VOICE_MODE_DETAIL)
+    val voiceMode: StateFlow<Int> = _voiceMode.asStateFlow()
 
     /**
      * 是否把导航信息投到车机（BLE 转发开关）。
@@ -108,6 +131,7 @@ object NaviPrefs {
         _motorcycle.value = prefs.getBoolean(KEY_MOTORCYCLE, true)
         _avoidHighway.value = prefs.getBoolean(KEY_AVOID_HIGHWAY, true)
         _voice.value = prefs.getBoolean(KEY_VOICE, true)
+        _voiceMode.value = prefs.getInt(KEY_VOICE_MODE, VOICE_MODE_DETAIL)
         // 「投屏」从页面改成开关：默认开（连了车机就是要投），忽略已废弃的 phone_mode
         _castEnabled.value = prefs.getBoolean(KEY_CAST, true)
         _screenOffNavi.value = prefs.getBoolean(KEY_SCREEN_OFF, true)
@@ -133,6 +157,11 @@ object NaviPrefs {
     fun setVoice(on: Boolean) {
         _voice.value = on
         prefs.edit().putBoolean(KEY_VOICE, on).apply()
+    }
+
+    fun setVoiceMode(mode: Int) {
+        _voiceMode.value = mode
+        prefs.edit().putInt(KEY_VOICE_MODE, mode).apply()
     }
 
     fun setCastEnabled(on: Boolean) {
@@ -217,8 +246,55 @@ object NaviPrefs {
         }
     }
 
-    /** 当前偏好的简短摘要，用于界面徽章 */
-    fun summary(): String {
+    // ---------- 地图视野 / 上次目的地 ----------
+    //
+    // 地图页每次进来都弹回当前位置很烦：用户常看的是固定一片区域（家附近、常跑的路线）。
+    // 记住上次的中心与缩放，下次进来原地恢复；想看自己在哪，点一下定位按钮即可。
+    // 上次导航的目的地也留一个图钉，复访时点一下就再去一次，比翻导航历史快。
+
+    data class CameraMemo(val lat: Double, val lng: Double, val zoom: Float)
+
+    data class DestMemo(val name: String, val lat: Double, val lng: Double)
+
+    /** 没有记录（首次使用）时返回 null */
+    fun mapCamera(): CameraMemo? {
+        if (!::prefs.isInitialized) return null
+        val lat = prefs.getFloat(KEY_MAP_CAM_LAT, Float.NaN)
+        val lng = prefs.getFloat(KEY_MAP_CAM_LNG, Float.NaN)
+        val zoom = prefs.getFloat(KEY_MAP_CAM_ZOOM, Float.NaN)
+        if (lat.isNaN() || lng.isNaN() || zoom.isNaN()) return null
+        return CameraMemo(lat.toDouble(), lng.toDouble(), zoom)
+    }
+
+    fun setMapCamera(lat: Double, lng: Double, zoom: Float) {
+        if (!::prefs.isInitialized) return
+        prefs.edit()
+            .putFloat(KEY_MAP_CAM_LAT, lat.toFloat())
+            .putFloat(KEY_MAP_CAM_LNG, lng.toFloat())
+            .putFloat(KEY_MAP_CAM_ZOOM, zoom)
+            .apply()
+    }
+
+    fun lastDest(): DestMemo? {
+        if (!::prefs.isInitialized) return null
+        val name = prefs.getString(KEY_LAST_DEST_NAME, null) ?: return null
+        val lat = prefs.getFloat(KEY_LAST_DEST_LAT, Float.NaN)
+        val lng = prefs.getFloat(KEY_LAST_DEST_LNG, Float.NaN)
+        if (name.isBlank() || lat.isNaN() || lng.isNaN()) return null
+        return DestMemo(name, lat.toDouble(), lng.toDouble())
+    }
+
+    fun setLastDest(name: String, lat: Double, lng: Double) {
+        if (!::prefs.isInitialized) return
+        if (name.isBlank() || lat == 0.0 || lng == 0.0) return
+        prefs.edit()
+            .putString(KEY_LAST_DEST_NAME, name)
+            .putFloat(KEY_LAST_DEST_LAT, lat.toFloat())
+            .putFloat(KEY_LAST_DEST_LNG, lng.toFloat())
+            .apply()
+    }
+
+    /** 当前偏好的简短摘要，用于界面徽章 */    fun summary(): String {
         if (_smart.value) return "智能推荐"
         val parts = mutableListOf<String>()
         if (_avoidHighway.value) parts += "不走高速"

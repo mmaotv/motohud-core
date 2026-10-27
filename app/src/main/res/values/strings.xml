@@ -202,13 +202,11 @@
     <string name="navi_mode_motorcycle_desc">避开高速 / 快速路，绕行地面道路（近似规避禁摩路段）</string>
     <string name="navi_mode_car_desc">标准驾车路线，可上高速与快速路</string>
     <string name="navi_voice">语音播报</string>
-    <string name="navi_voice_on">语音已开启</string>
-    <string name="navi_voice_off">语音已关闭</string>
+    <string name="navi_voice_mode_title">播报详细度</string>
+    <string name="navi_voice_mode_detail">详细：开始导航 + 每个路口</string>
+    <string name="navi_voice_mode_brief">简洁：只在临近路口播</string>
+    <string name="navi_voice_mode_turn_only">只播转弯：其余静音</string>
     <!-- TTS 播报文案 -->
-    <string name="navi_tts_start">开始导航，全程 %1$s，大约需要 %2$s</string>
-    <string name="navi_tts_start_plain">开始导航</string>
-    <string name="navi_tts_turn_soon">前方 %1$d 米 %2$s</string>
-    <string name="navi_tts_missing">未检测到语音引擎，语音播报不可用。可在系统设置 → 文字转语音 中安装引擎后恢复</string>
     <string name="navi_signal_weak">GPS 信号弱，正按路线方向继续引导</string>
     <string name="navi_overview">全览路线</string>
     <string name="navi_recenter">回到当前位置</string>
@@ -346,6 +344,16 @@
     <string name="route_pref_traffic_first">路况优先</string>
     <string name="route_pref_time_first">时间优先</string>
     <string name="route_prefs_motor_note">骑行提示：多数城市禁摩针对快速路与高架，选「不走高速」能避开大部分限行路段；能否通行仍以现场标志与当地法规为准。</string>
+
+    <!-- ============ 地点卡（主页内联） ============ -->
+    <string name="place_card_navigate">导航到这里</string>
+    <string name="place_card_save">收藏</string>
+    <string name="place_card_straight">直线距离（驾车里程在路线页算）</string>
+    <string name="place_card_locating">正在获取地址…</string>
+    <string name="place_card_no_address">该位置暂无地址信息</string>
+    <string name="place_card_saved">已加入常用地址</string>
+    <string name="place_card_point">地图选点</string>
+    <string name="place_pick_on_map">在地图上选点</string>
 
     <!-- ============ 地点详情（搜索结果的第一站） ============ -->
     <string name="place_detail_default_name">目的地</string>

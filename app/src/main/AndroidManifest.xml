@@ -151,13 +151,6 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.MotoHeadUnit" />
 
-        <!-- 地点详情：搜索结果先看位置与距离，再决定要不要导航 -->
-        <activity
-            android:name=".ui.navi.PlaceDetailActivity"
-            android:exported="false"
-            android:screenOrientation="portrait"
-            android:theme="@style/Theme.MotoHeadUnit" />
-
         <!-- 地图选点：给「起点 ≠ 当前位置」用 -->
         <activity
             android:name=".ui.navi.MapPickActivity"
