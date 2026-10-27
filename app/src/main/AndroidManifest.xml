@@ -87,11 +87,13 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.MotoHeadUnit" />
 
-        <!-- 手机端专业导航页（地图 + 转向引导 + TTS 播报 + 画中画） -->
+        <!-- 手机端专业导航页（地图 + 转向引导 + TTS 播报 + 画中画）
+             screenOrientation=user：跟随系统自动旋转开关——开着就横竖屏跟随手机，
+             关着保持竖屏。不写死 portrait：摩托车横置手机导航是常态场景。 -->
         <activity
             android:name=".ui.navi.GuidanceActivity"
             android:exported="false"
-            android:screenOrientation="portrait"
+            android:screenOrientation="user"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.MotoHeadUnit" />

@@ -24,8 +24,10 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 顶部渐变（保证状态栏、顶栏在任意底图上可读） -->
+    <!-- 顶部渐变（保证状态栏、顶栏在任意底图上可读）
+         高度运行时按横竖屏调整：横屏屏矮，220dp 会盖掉大半张地图 -->
     <View
+        android:id="@+id/top_scrim"
         android:layout_width="match_parent"
         android:layout_height="220dp"
         android:layout_gravity="top"

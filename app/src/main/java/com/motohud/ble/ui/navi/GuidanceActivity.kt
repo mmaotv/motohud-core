@@ -17,7 +17,10 @@ import android.os.Build
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.util.Rational
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
@@ -129,6 +132,7 @@ class GuidanceActivity : AppCompatActivity() {
     private lateinit var planningOverlay: View
     private lateinit var arrivedOverlay: View
     private lateinit var mapActions: View
+    private lateinit var topScrim: View
     private lateinit var btnPip: View
     private lateinit var tvArriveSub: TextView
     private lateinit var tvArriveDistance: TextView
@@ -137,6 +141,8 @@ class GuidanceActivity : AppCompatActivity() {
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    /** 系统里没有可用 TTS 引擎：语音按钮压暗，避免用户以为开关坏了 */
+    private var ttsFailed = false
     private var route: RouteData? = null
     private var destName: String = "目的地"
     private var destLat = 0.0
@@ -147,6 +153,10 @@ class GuidanceActivity : AppCompatActivity() {
     private var lastFollowLat = 0.0
     private var lastFollowLng = 0.0
     private var stopped = false
+
+    /** 转向提前预告防重放：bit0=500m 档已播、bit1=200m 档已播 */
+    private var remindStepIndex = -1
+    private var remindFlags = 0
 
     /** 本次导航是否已调用过 engine.start（屏蔽引擎里上一次导航的残留状态） */
     private var started = false
@@ -202,6 +212,10 @@ class GuidanceActivity : AppCompatActivity() {
         NaviPrefs.init(this)
         bindViews()
         applyWindowInsets()
+        // 旋转不重建 Activity，布局形态（横屏右下面板 / 竖屏底部通栏）由这里统一施加
+        applyOrientationLayout(
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        )
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         destName = intent.getStringExtra(EXTRA_NAME).orEmpty().ifBlank { "目的地" }
@@ -257,6 +271,7 @@ class GuidanceActivity : AppCompatActivity() {
         planningOverlay = findViewById(R.id.planning_overlay)
         arrivedOverlay = findViewById(R.id.arrived_overlay)
         mapActions = findViewById(R.id.map_actions)
+        topScrim = findViewById(R.id.top_scrim)
         btnPip = findViewById(R.id.btn_pip)
         tvArriveSub = findViewById(R.id.tv_arrive_sub)
         tvArriveDistance = findViewById(R.id.tv_arrive_distance)
@@ -272,6 +287,7 @@ class GuidanceActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val baseTop = (4 * resources.displayMetrics.density).roundToInt()
         val baseBottom = (12 * resources.displayMetrics.density).roundToInt()
+        val baseEnd = (18 * resources.displayMetrics.density).roundToInt()
         ViewCompat.setOnApplyWindowInsetsListener(topBar) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.updatePadding(top = bars.top + baseTop)
@@ -279,7 +295,8 @@ class GuidanceActivity : AppCompatActivity() {
         }
         ViewCompat.setOnApplyWindowInsetsListener(bottomInfo) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.updatePadding(bottom = bars.bottom + baseBottom)
+            // right 也吃 inset：横屏时它是右下角定宽面板，要避开侧边手势条/挖孔
+            v.updatePadding(bottom = bars.bottom + baseBottom, right = bars.right + baseEnd)
             insets
         }
     }
@@ -310,7 +327,13 @@ class GuidanceActivity : AppCompatActivity() {
             val on = !NaviPrefs.voice.value
             NaviPrefs.setVoice(on)
             updateVoiceButton()
-            if (!on) runCatching { tts?.stop() }
+            if (!on) {
+                pendingSpeech.clear()
+                runCatching { tts?.stop() }
+            } else {
+                // 开着车看不见屏幕，用一声确认代替「开了吗？」的犹豫
+                speak(getString(R.string.navi_voice_on))
+            }
         }
         tvModeBadge.setOnClickListener { showRoutePrefsDialog() }
         findViewById<View>(R.id.btn_overview).setOnClickListener {
@@ -327,7 +350,11 @@ class GuidanceActivity : AppCompatActivity() {
         btnVoice.setImageResource(
             if (NaviPrefs.voice.value) R.drawable.ic_volume_on else R.drawable.ic_volume_off
         )
-        btnVoice.alpha = if (NaviPrefs.voice.value) 1f else 0.55f
+        btnVoice.alpha = when {
+            ttsFailed -> 0.35f
+            NaviPrefs.voice.value -> 1f
+            else -> 0.55f
+        }
     }
 
     private fun updateModeBadge() {
@@ -431,7 +458,21 @@ class GuidanceActivity : AppCompatActivity() {
         // 必须先置位再 start，避免首帧按旧状态误判「已到达」。
         started = true
         stopped = false
+        remindStepIndex = -1
+        remindFlags = 0
         naviStartMs = System.currentTimeMillis()
+        // 开始播报：骑行中不看屏幕也能确认导航已启动、大概多久到
+        speak(
+            if (r != null && r.distanceM > 0f) {
+                getString(
+                    R.string.navi_tts_start,
+                    CoordConverter.formatDistance(r.distanceM.toInt()),
+                    CoordConverter.formatEta(r.durationS.toInt())
+                )
+            } else {
+                getString(R.string.navi_tts_start_plain)
+            }
+        )
         engine.start(destName, destLat, destLng, start, r)
         // 前台服务：**每次导航都启动**，它承载通知栏导航条（息屏/兜里瞥一眼方向）；
         // 唤醒锁只由「息屏导航」开关决定，见 NaviForegroundService.updateWakeLock
@@ -815,6 +856,9 @@ class GuidanceActivity : AppCompatActivity() {
 
         renderProgress(s.traveled)
 
+        // 临近路口的短提醒（长路段场景下，进入步骤时那句引导语早被忘了）
+        announceTurnReminders(s)
+
         if (s.arrived) {
             if (!stopped) {
                 stopped = true
@@ -894,6 +938,34 @@ class GuidanceActivity : AppCompatActivity() {
         val h = totalSec / 3600
         val m = (totalSec % 3600) / 60
         return if (h > 0) "${h}h${m}m" else "${m}min"
+    }
+
+    /**
+     * 转向提前预告。
+     *
+     * 步骤切换时播的是整句引导语（「沿望京路行驶 500 米后右转」），发生在进入步骤那一刻；
+     * 长路段隔几分钟就忘了，所以临近路口再补两次短提醒：
+     * 500m 档只给 >=800m 的长步骤（短步骤的引导语本身就是预告，再播就是复读），
+     * 200m 档所有转向都播，相当于「该并线了」的最后提醒。
+     */
+    private fun announceTurnReminders(s: NaviEngine.NaviState) {
+        if (!s.running || s.arrived || s.stepIndex < 0) return
+        if (!TurnIcons.isTurn(s.iconType)) return
+        if (s.stepIndex != remindStepIndex) {
+            remindStepIndex = s.stepIndex
+            remindFlags = 0
+        }
+        val step = route?.steps?.getOrNull(s.stepIndex) ?: return
+        val action = step.action
+        if (action.isBlank()) return
+        if (remindFlags and 1 == 0 && s.stepRemain in 201..500 && step.distanceM >= 800f) {
+            remindFlags = remindFlags or 1
+            speak(getString(R.string.navi_tts_turn_soon, 500, action))
+        }
+        if (remindFlags and 2 == 0 && s.stepRemain in 1..200) {
+            remindFlags = remindFlags or 2
+            speak(getString(R.string.navi_tts_turn_soon, 200, action))
+        }
     }
 
     private fun naviAgain() {
@@ -1042,21 +1114,90 @@ class GuidanceActivity : AppCompatActivity() {
     }
 
     // ---------- TTS ----------
+    //
+    // 旧实现两个致命问题，症状都是「导航全程哑巴」：
+    // ① initTts 回调是异步的，引擎就绪前的播报被静默丢弃——第一条指令基本必丢；
+    // ② setLanguage(Locale.CHINA) 一旦返回 LANG_MISSING_DATA，ttsReady 永远 false——
+    //    而很多手机的 TTS 引擎没装中文数据包，装了别的语言照样能出声。
+    // 现在：就绪前排队、语言三级回退、语言全失败也允许播报。
+
+    /** 就绪前攒下的播报（只留最后 2 条：开始导航 + 第一条指令） */
+    private val pendingSpeech = ArrayDeque<String>()
+    private var lastSpokenText = ""
+    private var lastSpokenAt = 0L
 
     private fun initTts() {
         tts = TextToSpeech(this) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                val r = runCatching { tts?.setLanguage(Locale.CHINA) }
-                ttsReady = r.isSuccess && r.getOrNull() != TextToSpeech.LANG_MISSING_DATA &&
-                    r.getOrNull() != TextToSpeech.LANG_NOT_SUPPORTED
+            if (status != TextToSpeech.SUCCESS) {
+                // 系统里没有任何 TTS 引擎：播报不可能工作。
+                // 按钮压暗 + 一次性提示（这是「为什么没声音」的关键解释，不是冗余 Toast）
+                android.util.Log.w("GuidanceTts", "TextToSpeech init failed: $status")
+                ttsFailed = true
+                runOnUiThread {
+                    updateVoiceButton()
+                    Toast.makeText(
+                        this@GuidanceActivity,
+                        R.string.navi_tts_missing,
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                return@TextToSpeech
             }
+            // 导航语音走「导航播报」音频通道：与媒体/铃声音量分开，符合导航 App 习惯
+            runCatching {
+                tts?.setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+            }
+            // 语言回退链：中文 → 系统默认 → 英语
+            val langs = listOf(Locale.CHINA, Locale.getDefault(), Locale.US)
+            var langOk = false
+            for (loc in langs) {
+                val r = runCatching { tts?.setLanguage(loc) }.getOrNull() ?: continue
+                if (r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED) {
+                    langOk = true
+                    break
+                }
+            }
+            if (!langOk) {
+                android.util.Log.w("GuidanceTts", "no matched language, use engine default")
+            }
+            // 语言都不匹配也置 true：不少引擎照样能读，别把播报整个掐死
+            ttsReady = true
+            flushPendingSpeech()
         }
     }
 
+    /** 排队播报。步骤切换、提前预告都走队列，保证顺序自然（开始 → 指令 → 预告 → 到达） */
     private fun speak(text: String) {
-        if (!ttsReady || text.isBlank() || !NaviPrefs.voice.value) return
+        if (text.isBlank() || !NaviPrefs.voice.value) return
+        // 引擎状态抖动时 onStepChanged 可能重复触发同一句，3 秒内去重
+        val now = System.currentTimeMillis()
+        if (text == lastSpokenText && now - lastSpokenAt < 3_000L) return
+        lastSpokenText = text
+        lastSpokenAt = now
+        val eng = tts
+        if (eng == null || !ttsReady) {
+            if (pendingSpeech.size >= 2) pendingSpeech.removeFirst()
+            pendingSpeech.addLast(text)
+            return
+        }
         runCatching {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "guidance")
+            eng.speak(text, TextToSpeech.QUEUE_ADD, null, "navi_$now")
+        }
+    }
+
+    private fun flushPendingSpeech() {
+        if (!NaviPrefs.voice.value) {
+            pendingSpeech.clear()
+            return
+        }
+        while (pendingSpeech.isNotEmpty()) {
+            val t = pendingSpeech.removeFirst()
+            runCatching { tts?.speak(t, TextToSpeech.QUEUE_ADD, null, "navi_pending") }
         }
     }
 
@@ -1091,6 +1232,8 @@ class GuidanceActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (!inPip) mapView?.onResume()
+        // 设置面板里可能刚改过语音开关，回前台时同步按钮状态
+        updateVoiceButton()
         // 导航可能是在通知栏 / 画中画里被"结束导航"停掉的：那边只停了引擎，
         // 本页的 stopped 不会跟着变，回到这里还会显示"导航中"，用户以为没停掉。
         if (!stopped && !engine.state.value.running && started) {
@@ -1102,6 +1245,57 @@ class GuidanceActivity : AppCompatActivity() {
     override fun onPause() {
         if (!inPip) mapView?.onPause()
         super.onPause()
+    }
+
+    /**
+     * 横竖屏切换（Manifest 的 configChanges 含 orientation，Activity 不重建）。
+     *
+     * 横屏屏矮（约 360dp），竖屏那套「底部通栏信息卡」会把地图挤得只剩一条缝，
+     * 所以横屏把信息卡挪到右下角、顶部渐变收窄、地图操作键挪到左下——
+     * 地图拿回高度方向的全部空间，这也是车载导航横屏的通行布局。
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val landscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (landscape && ::bottomExtra.isInitialized && bottomExtra.visibility == View.VISIBLE) {
+            cardExpanded = false
+            bottomExtra.visibility = View.GONE
+        }
+        applyOrientationLayout(landscape)
+        lastCameraMs = 0L
+    }
+
+    private fun applyOrientationLayout(landscape: Boolean) {
+        val dm = resources.displayMetrics
+        fun dp(v: Int): Int = (v * dm.density).toInt()
+
+        // 顶部渐变：横屏收窄，否则盖掉大半张图
+        topScrim.layoutParams = topScrim.layoutParams.apply {
+            height = if (landscape) dp(128) else dp(220)
+        }
+
+        val card = bottomInfo.layoutParams as FrameLayout.LayoutParams
+        val acts = mapActions.layoutParams as FrameLayout.LayoutParams
+        if (landscape) {
+            // 信息卡：右下角定宽面板，高度方向全让给地图
+            card.gravity = Gravity.END or Gravity.BOTTOM
+            card.width = dp(340)
+            // 地图操作键：挪到左下角，避开右侧面板
+            acts.gravity = Gravity.START or Gravity.BOTTOM
+            acts.marginStart = dp(14)
+            acts.marginEnd = 0
+            acts.bottomMargin = dp(16)
+        } else {
+            // 竖屏：恢复底部通栏 + 右侧悬浮操作键
+            card.gravity = Gravity.BOTTOM
+            card.width = ViewGroup.LayoutParams.MATCH_PARENT
+            acts.gravity = Gravity.END or Gravity.BOTTOM
+            acts.marginStart = 0
+            acts.marginEnd = dp(14)
+            acts.bottomMargin = dp(212)
+        }
+        bottomInfo.layoutParams = card
+        mapActions.layoutParams = acts
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

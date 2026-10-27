@@ -204,6 +204,11 @@
     <string name="navi_voice">语音播报</string>
     <string name="navi_voice_on">语音已开启</string>
     <string name="navi_voice_off">语音已关闭</string>
+    <!-- TTS 播报文案 -->
+    <string name="navi_tts_start">开始导航，全程 %1$s，大约需要 %2$s</string>
+    <string name="navi_tts_start_plain">开始导航</string>
+    <string name="navi_tts_turn_soon">前方 %1$d 米 %2$s</string>
+    <string name="navi_tts_missing">未检测到语音引擎，语音播报不可用</string>
     <string name="navi_signal_weak">GPS 信号弱，正按路线方向继续引导</string>
     <string name="navi_overview">全览路线</string>
     <string name="navi_recenter">回到当前位置</string>
