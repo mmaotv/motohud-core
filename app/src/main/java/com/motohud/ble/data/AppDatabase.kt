@@ -12,9 +12,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SearchHistoryEntity::class,
         SavedPlaceEntity::class,
         NaviHistoryEntity::class,
-        NaviTrackPointEntity::class
+        NaviTrackPointEntity::class,
+        AvoidZoneEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -22,6 +23,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun savedPlaceDao(): SavedPlaceDao
     abstract fun naviHistoryDao(): NaviHistoryDao
     abstract fun naviTrackPointDao(): NaviTrackPointDao
+    abstract fun avoidZoneDao(): AvoidZoneDao
 
     companion object {
         /** v1 -> v2：新增 saved_place 表（搜索历史不丢） */
@@ -104,6 +106,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v4 -> v5：新增 avoid_zone 表（避让区）。
+         *
+         * 纯新增表，不改任何既有表结构 —— 老用户的导航历史/常用地址/搜索历史都不动。
+         */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS avoid_zone (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "name TEXT NOT NULL, " +
+                        "polygon TEXT NOT NULL, " +
+                        "enabled INTEGER NOT NULL DEFAULT 1, " +
+                        "createdAt INTEGER NOT NULL DEFAULT 0)"
+                )
+            }
+        }
+
         @Volatile private var instance: AppDatabase? = null
 
         fun get(context: Context): AppDatabase =
@@ -113,7 +133,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "motohud.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }

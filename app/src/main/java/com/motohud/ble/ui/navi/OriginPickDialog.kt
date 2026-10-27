@@ -38,6 +38,9 @@ class OriginPickDialog : BottomSheetDialogFragment() {
     /** 当前是否有可用定位（没有就得把"当前位置"那行灰掉） */
     private var currentLocation: Pair<Double, Double>? = null
 
+    /** 面板标题资源 id，默认「选择起点」 */
+    private var titleRes: Int = R.string.origin_pick_title
+
     private val savedAdapter by lazy {
         PlaceListAdapter { place ->
             onPicked?.invoke(place.name, place.latitude, place.longitude)
@@ -56,6 +59,13 @@ class OriginPickDialog : BottomSheetDialogFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        b.originTitle.setText(titleRes)
+        // 「拖动地图，把起点对准屏幕中心」——途经点时得说"途经点"，
+        // 沿用同一份布局所以副标题也要跟着换
+        if (titleRes == R.string.route_waypoint_pick_title) {
+            b.originMapSub.setText(R.string.route_waypoint_map_pick_sub)
+        }
 
         // 没有定位时，"当前位置"不可用 —— 不隐藏，只置灰并写清原因
         val loc = currentLocation
@@ -101,8 +111,17 @@ class OriginPickDialog : BottomSheetDialogFragment() {
     }
 
     companion object {
-        fun newInstance(currentLocation: Pair<Double, Double>?): OriginPickDialog =
-            OriginPickDialog().apply { this.currentLocation = currentLocation }
+        /**
+         * @param titleRes 面板标题。起点和途经点复用同一个面板，
+         *                 标题不对用户会以为自己点错了行。
+         */
+        fun newInstance(
+            currentLocation: Pair<Double, Double>?,
+            titleRes: Int = R.string.origin_pick_title
+        ): OriginPickDialog = OriginPickDialog().apply {
+            this.currentLocation = currentLocation
+            this.titleRes = titleRes
+        }
     }
 }
 

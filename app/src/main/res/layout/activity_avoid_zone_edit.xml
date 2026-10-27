@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 避让区圈选：地图选中心 + 调半径，比拖多边形好操作得多 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_window">
+
+    <com.amap.api.maps.MapView
+        android:id="@+id/aze_map"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 固定准星：地图移动时准星不动，它指的就是"区域中心" -->
+    <ImageView
+        android:id="@+id/aze_cross"
+        android:layout_width="26dp"
+        android:layout_height="26dp"
+        android:layout_gravity="center"
+        android:contentDescription="@string/avoid_zone_pick_center"
+        android:src="@drawable/ic_my_location"
+        android:tint="@color/accent" />
+
+    <ImageView
+        android:id="@+id/aze_btn_back"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/bg_navi_circle"
+        android:contentDescription="@string/cancel"
+        android:padding="11dp"
+        android:src="@drawable/ic_arrow_back"
+        android:tint="@color/text_primary" />
+
+    <!-- 底部编辑卡 -->
+    <LinearLayout
+        android:id="@+id/aze_panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_card"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/inter"
+            android:text="@string/avoid_zone_name_label"
+            android:textColor="@color/text_tertiary"
+            android:textSize="11sp" />
+
+        <EditText
+            android:id="@+id/aze_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:background="@null"
+            android:fontFamily="@font/inter"
+            android:hint="@string/avoid_zone_name_hint"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:maxLength="20"
+            android:maxLines="1"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="16sp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="10dp"
+            android:background="@color/divider" />
+
+        <!-- 宽 / 高 分开调：禁摩范围常常是长条（沿江路、高架、主干道），
+             正方形不是框不满就是把旁边能走的路也禁了 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/inter"
+                android:text="@string/avoid_zone_width"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+            <SeekBar
+                android:id="@+id/aze_width"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:max="18"
+                android:progress="7" />
+
+            <TextView
+                android:id="@+id/aze_width_value"
+                android:layout_width="72dp"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/inter"
+                android:gravity="end"
+                android:textColor="@color/accent"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/inter"
+                android:text="@string/avoid_zone_height"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+            <SeekBar
+                android:id="@+id/aze_height"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:max="18"
+                android:progress="7" />
+
+            <TextView
+                android:id="@+id/aze_height_value"
+                android:layout_width="72dp"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/inter"
+                android:gravity="end"
+                android:textColor="@color/accent"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/aze_warn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/avoid_zone_too_large"
+            android:textColor="@color/red"
+            android:textSize="11sp"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/aze_save"
+            style="@style/Widget.Moto.Button.Accent"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="12dp"
+            android:text="@string/save"
+            android:textSize="15sp" />
+    </LinearLayout>
+</FrameLayout>

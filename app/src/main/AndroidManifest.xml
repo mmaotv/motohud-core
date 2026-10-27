@@ -158,6 +158,26 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.MotoHeadUnit" />
 
+        <!-- 避让区管理 / 圈选：用户自己标「这块不能进」 -->
+        <activity
+            android:name=".ui.navi.AvoidZoneActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.MotoHeadUnit" />
+        <activity
+            android:name=".ui.navi.AvoidZoneEditActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.MotoHeadUnit"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- 离线语音引擎：模型下载 / 试听 / 删除 -->
+        <activity
+            android:name=".ui.navi.TtsModelActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.MotoHeadUnit" />
+
         <!-- 车况（二级页）：底部页签收成两个之后，从导航页「车况」按钮进入 -->
         <activity
             android:name=".ui.vehicle.VehicleActivity"

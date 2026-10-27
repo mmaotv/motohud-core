@@ -54,6 +54,38 @@ sealed class TipsResult {
 }
 
 /**
+ * 算路的附加约束 —— 对应「自定义路线」三件套（见《摩托车导航方案-轻量版》）。
+ *
+ * 三者的分工必须说清楚，否则容易以为只配途经点就够了：
+ *  - [waypoints] 途经点：只保证**经过**这些点，两点之间怎么走仍由高德选；
+ *  - [avoidPolygons] 避让区：约束**中间段**绕开某些块（补途经点管不到的地方）；
+ *  - [excludeMotorway] 排除高速/快速路：全局兜底。
+ *
+ * 坐标一律 GCJ-02（高德搜索 SDK 的入参坐标系），与 AmapLocator / 地图选点一致。
+ */
+data class RouteQueryOptions(
+    val waypoints: List<Pair<Double, Double>> = emptyList(),
+    val avoidPolygons: List<List<Pair<Double, Double>>> = emptyList(),
+    val excludeMotorway: Boolean = false
+) {
+    val isEmpty: Boolean
+        get() = waypoints.isEmpty() && avoidPolygons.isEmpty() && !excludeMotorway
+
+    companion object {
+        /**
+         * 途经点上限 5 个。
+         *
+         * 这不是高德的上限（SDK 允许更多），而是**体验上限**：途经点越多，
+         * 算路越慢、路线越绕、界面上也放不下。骑手通常只需要 1~2 个"必须经过的路口"。
+         */
+        const val MAX_WAYPOINTS = 5
+
+        /** 高德限制：避让区最多 100 个，这里按实际可用性收得更紧 */
+        const val MAX_AVOID_ZONES = 20
+    }
+}
+
+/**
  * 高德搜索封装：POI 输入提示 + 驾车路线规划。
  *
  * 调用方需先通过 [AmapManager.initSearch] 完成 Key 与隐私合规。
@@ -105,9 +137,10 @@ class AmapRepo(private val context: Context) {
         toLat: Double,
         toLng: Double,
         strategy: Int = RouteSearch.DrivingDefault,
-        modeLabel: String = ""
+        modeLabel: String = "",
+        options: RouteQueryOptions = RouteQueryOptions()
     ): RoutePlanResult {
-        val paths = requestPaths(fromLat, fromLng, toLat, toLng, strategy)
+        val paths = requestPaths(fromLat, fromLng, toLat, toLng, strategy, options)
         return when {
             paths.first != 1000 -> RoutePlanResult.Failure(errorText(paths.first))
             paths.second.isEmpty() -> RoutePlanResult.Failure(errorText(1000))
@@ -131,9 +164,10 @@ class AmapRepo(private val context: Context) {
         toLng: Double,
         strategy: Int = RouteSearch.DRIVING_MULTI_STRATEGY_FASTEST_SHORTEST_AVOID_CONGESTION,
         modeLabel: String = "",
-        limit: Int = 3
+        limit: Int = 3,
+        options: RouteQueryOptions = RouteQueryOptions()
     ): RoutePlanResult {
-        val paths = requestPaths(fromLat, fromLng, toLat, toLng, strategy)
+        val paths = requestPaths(fromLat, fromLng, toLat, toLng, strategy, options)
         if (paths.first != 1000) return RoutePlanResult.Failure(errorText(paths.first))
         val list = paths.second
         if (list.isEmpty()) return RoutePlanResult.Failure(errorText(1000))
@@ -143,13 +177,22 @@ class AmapRepo(private val context: Context) {
         return if (routes.size == 1) RoutePlanResult.Many(routes) else RoutePlanResult.Many(routes)
     }
 
-    /** 发起一次驾车算路，返回 (rCode, paths) */
+    /**
+     * 发起一次驾车算路，返回 (rCode, paths)。
+     *
+     * 三个「自定义路线」参数以前全传 `null` / `""`（等于没接），现在按
+     * [RouteQueryOptions] 填入。注意高德的两个硬限制：
+     *  - `avoidpolygons` 最多 **100 个区域、每区 16 个点**，超了直接算不出；
+     *  - 避让区面积过大会让算路返回空（用户会以为"导航坏了"），
+     *    所以调用方必须先做面积校验，见 `AvoidZoneStore.checkPolygon`。
+     */
     private suspend fun requestPaths(
         fromLat: Double,
         fromLng: Double,
         toLat: Double,
         toLng: Double,
-        strategy: Int
+        strategy: Int,
+        options: RouteQueryOptions = RouteQueryOptions()
     ): Pair<Int, List<DrivePath>> {
         return suspendCancellableCoroutine { cont ->
             try {
@@ -158,12 +201,32 @@ class AmapRepo(private val context: Context) {
                     LatLonPoint(fromLat, fromLng),
                     LatLonPoint(toLat, toLng)
                 )
-                val query = RouteSearch.DriveRouteQuery(fromAndTo, strategy, null, null, "")
+                val passedBy = options.waypoints
+                    .take(RouteQueryOptions.MAX_WAYPOINTS)
+                    .map { LatLonPoint(it.first, it.second) }
+                    .takeIf { it.isNotEmpty() }
+                val avoid = options.avoidPolygons
+                    .take(RouteQueryOptions.MAX_AVOID_ZONES)
+                    .map { poly -> poly.map { LatLonPoint(it.first, it.second) } }
+                    .filter { it.size >= 3 }
+                    .takeIf { it.isNotEmpty() }
+                val query = RouteSearch.DriveRouteQuery(fromAndTo, strategy, passedBy, avoid, "")
+                // 显式按道路等级排除高速/快速路，与 strategy 的 no_highway 双保险
+                if (options.excludeMotorway) {
+                    query.setExclude(RouteSearch.DRIVING_EXCLUDE_MOTORWAY)
+                }
                 routeSearch.setRouteSearchListener(object : RouteSearch.OnRouteSearchListener {
                     override fun onDriveRouteSearched(
                         result: com.amap.api.services.route.DriveRouteResult?,
                         rCode: Int
                     ) {
+                        // 途经点/避让区参数出错时高德只回一个错误码，不打日志根本查不出
+                        // 「设置了没反应」到底是没生效还是算不出路
+                        android.util.Log.i(
+                            "AmapRepo",
+                            "算路 rCode=$rCode 方案=${result?.paths?.size ?: 0} " +
+                                "途经=${passedBy?.size ?: 0} 避让=${avoid?.size ?: 0}"
+                        )
                         cont.resume(rCode to result?.paths.orEmpty())
                     }
 

@@ -92,9 +92,34 @@ class SettingsSheetDialog : BottomSheetDialogFragment() {
             dismiss()
             act.openClearCache()
         }
+        b.setAvoidZone.setOnClickListener {
+            dismiss()
+            com.motohud.ble.ui.navi.AvoidZoneActivity.start(ctx)
+        }
+        b.setVoiceEngine.setOnClickListener {
+            dismiss()
+            com.motohud.ble.ui.navi.TtsModelActivity.start(ctx)
+        }
         b.setAbout.setOnClickListener {
             dismiss()
             startActivity(Intent(ctx, AboutActivity::class.java))
+        }
+
+        renderVoiceEngineState()
+    }
+
+    /** 语音引擎装没装、占多少空间 —— 在设置列表里直接显示，省得点进去才知道 */
+    private fun renderVoiceEngineState() {
+        val installed = com.motohud.ble.navi.tts.TtsModelStore.isInstalled(requireContext())
+        b.setVoiceEngineState.text = if (installed) {
+            getString(
+                R.string.tts_engine_state_on,
+                com.motohud.ble.data.AppCache.human(
+                    com.motohud.ble.navi.tts.TtsModelStore.installedBytes(requireContext())
+                )
+            )
+        } else {
+            getString(R.string.tts_engine_state_off)
         }
     }
 

@@ -56,5 +56,11 @@ class MotoHudApp : Application() {
             AmapManager.initSearch(this)
             AmapManager.initLocation(this)
         }
+
+        // 离线语音模型装了就先在后台加载好（约 3 秒）。
+        // 拖到进导航再加载的话，头几句只能退回预录语音包，听感上"路名时有时无"。
+        if (com.motohud.ble.navi.tts.TtsModelStore.isInstalled(this)) {
+            com.motohud.ble.navi.tts.SherpaSpeaker.warmUp(this)
+        }
     }
 }

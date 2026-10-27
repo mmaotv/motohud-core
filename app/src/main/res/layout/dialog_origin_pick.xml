@@ -24,6 +24,7 @@
         android:background="@drawable/bg_grabber" />
 
     <TextView
+        android:id="@+id/origin_title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:fontFamily="@font/inter"
@@ -95,6 +96,7 @@
             android:textSize="14sp" />
 
         <TextView
+            android:id="@+id/origin_map_sub"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/origin_map_pick_sub"

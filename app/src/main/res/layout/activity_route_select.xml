@@ -47,6 +47,26 @@
       但很多时候用户只是**查路线** —— 从公司到家多久、A 到 B 怎么走，
       这时候必须能指定起点。
     -->
+    <!--
+      可滚动区：起点 / 途经点 / 目的地 / 偏好 / 避让区 / 预览图 / 方案列表。
+
+      途经点最多 5 个，每行 72dp，全塞进固定高度会把方案列表压成 0 高
+      （方案一条都看不见，只剩个"开始导航"按钮）。所以整块改成可滚动，
+      底部按钮区仍然固定，保证随时能点开始。
+    -->
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/rs_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
     <LinearLayout
         android:id="@+id/rs_origin_row"
         android:layout_width="match_parent"
@@ -98,11 +118,69 @@
             android:textSize="12sp" />
     </LinearLayout>
 
+    <!--
+      途经点（必经）。
+
+      用户自己知道哪条路能过：把必经的路口/路段加进来，算路就会依次穿过它们。
+      只保证"经过这些点"，两点之间仍由高德选路 —— 真正要锁死中间段还得配合
+      避让区（见 AvoidZone）。所以下面还有一个「避让区」入口。
+    -->
+    <LinearLayout
+        android:id="@+id/rs_waypoint_box"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:orientation="vertical" />
+
+    <LinearLayout
+        android:id="@+id/rs_add_waypoint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="6dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_chip"
+        android:gravity="center_vertical"
+        android:minHeight="40dp"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="8dp">
+
+        <ImageView
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:contentDescription="@string/route_waypoint_add"
+            android:src="@drawable/ic_add"
+            android:tint="@color/accent" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:fontFamily="@font/inter"
+            android:text="@string/route_waypoint_add"
+            android:textColor="@color/accent"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/rs_waypoint_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/inter"
+            android:textColor="@color/text_tertiary"
+            android:textSize="11sp" />
+    </LinearLayout>
+
     <!-- 目的地 + 路线偏好入口 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginStart="16dp"
+        android:layout_marginTop="6dp"
         android:layout_marginEnd="16dp"
         android:background="@drawable/bg_card"
         android:orientation="vertical"
@@ -163,6 +241,46 @@
                 android:textColor="@color/accent"
                 android:textSize="12sp" />
         </LinearLayout>
+
+        <!--
+          避让区入口：圈出"这块地方我不能进"。
+
+          和途经点是互补关系 —— 途经点只管"必须经过哪"，管不到两点之间怎么走；
+          避让区才是把中间段锁死的那个。所以两个入口都给，用户按需用。
+        -->
+        <LinearLayout
+            android:id="@+id/rs_avoid_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/inter"
+                android:text="@string/route_avoid_zones"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/rs_avoid_value"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip"
+                android:ellipsize="end"
+                android:fontFamily="@font/inter"
+                android:maxLines="1"
+                android:paddingStart="10dp"
+                android:paddingTop="5dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="5dp"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- 路线预览图：多条方案同屏画出，颜色区分；
@@ -213,12 +331,15 @@
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rs_list"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
+        android:layout_height="wrap_content"
         android:layout_marginStart="16dp"
         android:layout_marginEnd="16dp"
-        android:layout_weight="1"
         android:clipToPadding="false"
+        android:nestedScrollingEnabled="false"
         android:paddingBottom="12dp" />
+
+    </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
 
     <ProgressBar
         android:id="@+id/rs_loading"

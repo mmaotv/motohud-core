@@ -23,6 +23,8 @@ import com.motohud.ble.amap.AmapLocator
 import com.motohud.ble.amap.AmapManager
 import com.motohud.ble.amap.AmapRepo
 import com.motohud.ble.amap.RoutePlanResult
+import com.motohud.ble.amap.RouteQueryOptions
+import com.motohud.ble.data.AvoidZoneStore
 import com.motohud.ble.data.NaviPrefs
 import com.motohud.ble.navi.CoordConverter
 import com.motohud.ble.navi.RouteData
@@ -56,6 +58,9 @@ class RouteSelectActivity : AppCompatActivity() {
     private var routes: List<RouteData> = emptyList()
     private var selected = 0
 
+    /** 当前生效的避让区数量，用于路线卡片回显（"避开 N 区"） */
+    private var avoidZoneCount = 0
+
     /**
      * 起点：默认「当前位置」（有存档坐标时直接用，不再每次都去gps取一次，
      * 那既慢又会让"原地反复查同一段路"的请求缓存永远命中不了）。
@@ -63,8 +68,28 @@ class RouteSelectActivity : AppCompatActivity() {
      */
     private var originName: String = ""
 
+    /**
+     * 途经点（必经）。
+     *
+     * 只保证"经过这些点"，两点之间怎么走仍由高德决定 —— 这也是为什么
+     * 还要配避让区。上限 [RouteQueryOptions.MAX_WAYPOINTS]，不是 SDK 限制，
+     * 是"点越多算路越慢、路线越绕"的体验上限。
+     */
+    private data class Waypoint(val name: String, val lat: Double, val lng: Double)
+
+    private val waypoints = mutableListOf<Waypoint>()
+
+    /** 正在为哪个目标选点：-1 = 起点，>=0 = 途经点下标 */
+    private var pickingForWaypoint = -1
+
     private val mapPickLauncher = registerMapPick { lat, lng ->
-        setOrigin(getString(R.string.origin_map_pick), lat, lng)
+        val target = pickingForWaypoint
+        pickingForWaypoint = -1
+        if (target >= 0) {
+            setWaypoint(target, getString(R.string.waypoint_map_pick), lat, lng)
+        } else {
+            setOrigin(getString(R.string.origin_map_pick), lat, lng)
+        }
     }
 
     // ---------- 路线预览图 ----------
@@ -123,6 +148,7 @@ class RouteSelectActivity : AppCompatActivity() {
                 updateStartButton()
                 // 点哪条，地图就把哪条加粗并转过去（fitAll=false）
                 drawRoutes(fitAll = false)
+                prefetchSpeech()
             }
         )
         list.layoutManager = LinearLayoutManager(this)
@@ -136,6 +162,13 @@ class RouteSelectActivity : AppCompatActivity() {
         findViewById<View>(R.id.rs_origin_row).setOnClickListener { showOriginPicker() }
         findViewById<View>(R.id.rs_start).setOnClickListener { startNavi() }
         findViewById<View>(R.id.rs_other_map).setOnClickListener { showThirdPartyMaps() }
+        findViewById<View>(R.id.rs_add_waypoint).setOnClickListener { addWaypoint() }
+        findViewById<View>(R.id.rs_avoid_row).setOnClickListener {
+            startActivity(Intent(this, AvoidZoneActivity::class.java))
+        }
+
+        renderWaypoints()
+        renderAvoidZones()
 
         setupMap(savedInstanceState)
         ensureLocationPermissionThenPlan()
@@ -259,6 +292,9 @@ class RouteSelectActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         runCatching { mapView?.onResume() }
+        // 从避让区管理页 / 路线偏好页回来时，计数与摘要可能已经变了
+        renderAvoidZones()
+        renderPref()
     }
 
     override fun onPause() {
@@ -293,6 +329,142 @@ class RouteSelectActivity : AppCompatActivity() {
 
     private fun renderOrigin() {
         findViewById<TextView>(R.id.rs_origin_name).text = originName
+    }
+
+    // ---------- 途经点 ----------
+
+    /**
+     * 添加一个途经点：先插一个「点击选择」的空位，再立刻弹选点面板。
+     *
+     * 先加行再选点（而不是选完再加）是为了让用户看到"点加了几个了"——
+     * 上限提示才有落点，也随时能取消这一条。
+     */
+    private fun addWaypoint() {
+        if (waypoints.size >= RouteQueryOptions.MAX_WAYPOINTS) {
+            Toast.makeText(
+                this,
+                getString(R.string.route_waypoint_limit, RouteQueryOptions.MAX_WAYPOINTS),
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        waypoints += Waypoint(getString(R.string.route_waypoint_empty), 0.0, 0.0)
+        renderWaypoints()
+        showWaypointPicker(waypoints.lastIndex)
+    }
+
+    private fun showWaypointPicker(index: Int) {
+        if (index !in waypoints.indices) return
+        pickingForWaypoint = index
+        val wp = waypoints[index]
+        val dialog = OriginPickDialog.newInstance(
+            currentLocation = if (wp.lat != 0.0 && wp.lng != 0.0) wp.lat to wp.lng else currentFix(),
+            titleRes = R.string.route_waypoint_pick_title
+        )
+        dialog.onPicked = { name, lat, lng -> setWaypoint(index, name, lat, lng) }
+        dialog.onPickOnMap = {
+            pickingForWaypoint = index
+            // 途经点还没选过时坐标是 0，直接传 0 会让选点页停在高德默认城市（北京）。
+            // 退到起点 / 上次地图位置，至少让用户落在自己所在的城市。
+            val clat: Double
+            val clng: Double
+            if (wp.lat != 0.0 && wp.lng != 0.0) {
+                clat = wp.lat
+                clng = wp.lng
+            } else {
+                val base = currentFix() ?: com.motohud.ble.data.NaviPrefs.mapCamera()
+                    ?.let { it.lat to it.lng }
+                clat = base?.first ?: 0.0
+                clng = base?.second ?: 0.0
+            }
+            mapPickLauncher.launch(MapPickActivity.intent(this, clat, clng))
+        }
+        dialog.show(supportFragmentManager, "waypoint_pick")
+    }
+
+    private fun setWaypoint(index: Int, name: String, lat: Double, lng: Double) {
+        if (index !in waypoints.indices) return
+        waypoints[index] = Waypoint(name, lat, lng)
+        renderWaypoints()
+        plan()
+    }
+
+    private fun removeWaypoint(index: Int) {
+        if (index !in waypoints.indices) return
+        waypoints.removeAt(index)
+        renderWaypoints()
+        plan()
+    }
+
+    /**
+     * 重绘途经点列表。
+     *
+     * 用动态 inflate 而不是 RecyclerView：最多 5 条、且跟页面一起滚动，
+     * 套一层 RecyclerView 只会带来嵌套滚动的麻烦，没有收益。
+     */
+    private fun renderWaypoints() {
+        val box = findViewById<android.widget.LinearLayout>(R.id.rs_waypoint_box)
+        box.removeAllViews()
+        waypoints.forEachIndexed { index, wp ->
+            val row = layoutInflater.inflate(R.layout.item_route_waypoint, box, false)
+            row.findViewById<TextView>(R.id.wp_index).text = "${index + 1}"
+            row.findViewById<TextView>(R.id.wp_name).text = wp.name
+            row.findViewById<View>(R.id.wp_remove).setOnClickListener { removeWaypoint(index) }
+            row.setOnClickListener { showWaypointPicker(index) }
+            // 长按排序：影响路线顺序，必须让用户能调
+            row.setOnLongClickListener {
+                showWaypointOrderMenu(index)
+                true
+            }
+            box.addView(row)
+        }
+        findViewById<TextView>(R.id.rs_waypoint_count).text =
+            if (waypoints.isEmpty()) "" else "${waypoints.size}/${RouteQueryOptions.MAX_WAYPOINTS}"
+    }
+
+    /** 排序用「上移/下移」菜单：小屏上拖拽比菜单更难点中 */
+    private fun showWaypointOrderMenu(index: Int) {
+        val wp = waypoints.getOrNull(index) ?: return
+        val items = arrayOf(
+            getString(R.string.route_waypoint_move_up),
+            getString(R.string.route_waypoint_move_down),
+            getString(R.string.route_waypoint_repick),
+            getString(R.string.delete)
+        )
+        com.motohud.ble.ui.common.MotoDialog.builder(this)
+            .setTitle(wp.name)
+            .setItems(items) { d, which ->
+                when (which) {
+                    0 -> if (index > 0) {
+                        waypoints.add(index - 1, waypoints.removeAt(index))
+                        renderWaypoints(); plan()
+                    }
+                    1 -> if (index < waypoints.lastIndex) {
+                        waypoints.add(index + 1, waypoints.removeAt(index))
+                        renderWaypoints(); plan()
+                    }
+                    2 -> showWaypointPicker(index)
+                    else -> removeWaypoint(index)
+                }
+                d.dismiss()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    // ---------- 避让区 ----------
+
+    /** 避让区是本地数据，进入页面/返回时刷新一次计数即可 */
+    private fun renderAvoidZones() {
+        lifecycleScope.launch {
+            val zones = AvoidZoneStore.enabled(this@RouteSelectActivity)
+            val tv = findViewById<TextView>(R.id.rs_avoid_value)
+            tv.text = if (zones.isEmpty()) {
+                getString(R.string.route_avoid_none)
+            } else {
+                getString(R.string.route_avoid_count, zones.size, zones.take(2).joinToString("、") { it.name })
+            }
+        }
     }
 
     private fun showOriginPicker() {
@@ -394,8 +566,25 @@ class RouteSelectActivity : AppCompatActivity() {
             val strategy = NaviPrefs.strategy()
             val summary = NaviPrefs.summary()
 
-            // 同一段路 10 分钟内复用上次算路结果：不产生网络请求，直接省掉最贵的一次调用
-            val cacheKey = AmapCache.routeKey(fromLat, fromLng, destLat, destLng, strategy, LIMIT)
+            // 「自定义路线」三件套：途经点（必经）+ 避让区（必绕）+ 排除高速（全局）
+            val avoidZones = AvoidZoneStore.enabled(this@RouteSelectActivity).map { it.polygon }
+            avoidZoneCount = avoidZones.size
+            val options = RouteQueryOptions(
+                waypoints = waypoints.filter { it.lat != 0.0 && it.lng != 0.0 }
+                    .map { it.lat to it.lng },
+                avoidPolygons = avoidZones,
+                excludeMotorway = NaviPrefs.excludeMotorway()
+            )
+
+            // 同一段路 10 分钟内复用上次算路结果：不产生网络请求，直接省掉最贵的一次调用。
+            // 注意 optionsTag 必须参与 key —— 否则改了途经点会命中旧缓存，
+            // 表现就是"设置了没反应"。
+            val optionsTag = AmapCache.optionsTag(
+                options.waypoints, options.avoidPolygons, options.excludeMotorway
+            )
+            val cacheKey = AmapCache.routeKey(
+                fromLat, fromLng, destLat, destLng, strategy, LIMIT, optionsTag
+            )
             val cached = AmapCache.get<RoutePlanResult>(cacheKey, AmapCache.TTL_ROUTE_MS)
             if (cached != null) {
                 loading.visibility = View.GONE
@@ -406,7 +595,9 @@ class RouteSelectActivity : AppCompatActivity() {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     AmapRepo(this@RouteSelectActivity)
-                        .planCandidates(fromLat, fromLng, destLat, destLng, strategy, summary, LIMIT)
+                        .planCandidates(
+                            fromLat, fromLng, destLat, destLng, strategy, summary, LIMIT, options
+                        )
                 }
             }.getOrNull()
 
@@ -418,6 +609,19 @@ class RouteSelectActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 卡片上回显"用户自己设了什么"。
+     *
+     * 不做合规审计（我们不敢替用户保证哪条路能走），只如实反映：
+     * 你设了 2 个途经点、1 个避让区 —— 用户自己看得懂，也知道设置生效了。
+     */
+    private fun routeOptionsSummary(): String {
+        val parts = mutableListOf<String>()
+        if (waypoints.isNotEmpty()) parts += "途经 ${waypoints.size} 点"
+        if (avoidZoneCount > 0) parts += "避开 $avoidZoneCount 区"
+        return parts.joinToString(" · ")
+    }
+
     /** 算路结果的统一落渲染处：缓存命中与真实网络两条路都走这里 */
     private fun applyResult(result: RoutePlanResult?) {
         when (result) {
@@ -426,18 +630,22 @@ class RouteSelectActivity : AppCompatActivity() {
                 // 统一按耗时升序排，让第一项就是"最快"，默认选中它也符合直觉。
                 routes = result.routes.sortedBy { it.durationS }
                 selected = 0
-                adapter.submit(routes, 0)
+                adapter.submit(routes, 0, routeOptionsSummary())
                 list.visibility = View.VISIBLE
                 updateStartButton()
                 drawRoutes(fitAll = true)
+                revealRouteList()
+                prefetchSpeech()
             }
             is RoutePlanResult.Success -> {
                 routes = listOf(result.route)
                 selected = 0
-                adapter.submit(routes, 0)
+                adapter.submit(routes, 0, routeOptionsSummary())
                 list.visibility = View.VISIBLE
                 updateStartButton()
                 drawRoutes(fitAll = true)
+                revealRouteList()
+                prefetchSpeech()
             }
             is RoutePlanResult.Failure -> {
                 empty.visibility = View.VISIBLE
@@ -447,6 +655,36 @@ class RouteSelectActivity : AppCompatActivity() {
                 empty.visibility = View.VISIBLE
                 empty.setText(R.string.guidance_plan_failed_short)
             }
+        }
+    }
+
+    /**
+     * 预合成当前方案的前两句引导语。
+     *
+     * 算完路线到用户点「开始导航」通常有几秒，正好够离线引擎合成前两句；
+     * 不提前做的话，进导航后的第一句必然赶不上（合成 700ms+，看门狗 800ms
+     * 一到就退回语音包，路名又没了）。
+     */
+    private fun prefetchSpeech() {
+        if (!com.motohud.ble.data.NaviPrefs.voice.value) return
+        val r = routes.getOrNull(selected) ?: return
+        com.motohud.ble.navi.tts.SherpaSpeaker.prefetch(
+            this,
+            r.steps.take(2).mapNotNull { it.instruction?.takeIf { s -> s.isNotBlank() } }
+        )
+    }
+
+    /**
+     * 让方案列表进入视野。
+     *
+     * 上半部分（起点 / 途经点 / 目的地 / 预览图）内容多时可以滚动，
+     * 算完路线如果不滚一下，用户看到的是"为你找到以下方案"却看不到方案。
+     */
+    private fun revealRouteList() {
+        val sv = findViewById<androidx.core.widget.NestedScrollView>(R.id.rs_scroll)
+        sv.post {
+            val need = list.bottom - sv.height
+            if (need > sv.scrollY) sv.smoothScrollTo(0, need)
         }
     }
 
@@ -526,10 +764,14 @@ private class RouteOptionAdapter(
     /** 每条方案的角标文案，见 [buildBadges] */
     private var badges: List<String> = emptyList()
 
-    fun submit(list: List<RouteData>, sel: Int) {
+    /** "途经 2 点 · 避开 1 区" —— 用户自己设的东西，如实回显 */
+    private var optionsSummary: String = ""
+
+    fun submit(list: List<RouteData>, sel: Int, optionsSummary: String = "") {
         data = list
         selected = sel
         badges = buildBadges(list)
+        this.optionsSummary = optionsSummary
         notifyDataSetChanged()
     }
 
@@ -595,6 +837,10 @@ private class RouteOptionAdapter(
             if (r.modeLabel.isNotBlank()) {
                 append(" · ")
                 append(r.modeLabel)
+            }
+            if (optionsSummary.isNotBlank()) {
+                append(" · ")
+                append(optionsSummary)
             }
         }
         val ctx = holder.itemView.context

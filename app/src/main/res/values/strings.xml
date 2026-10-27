@@ -565,4 +565,68 @@
     <!-- 搜索历史 -->
     <string name="search_history_clear">清空</string>
     <string name="search_history_delete">删除这条历史</string>
+
+    <!-- 自定义路线：途经点 + 避让区 -->
+    <string name="route_waypoint">途经点</string>
+    <string name="route_waypoint_add">添加途经点（必经）</string>
+    <string name="route_waypoint_pick_title">选择途经点</string>
+    <string name="route_waypoint_map_pick_sub">拖动地图，把途经点对准屏幕中心</string>
+    <string name="route_waypoint_remove">删除途经点</string>
+    <string name="route_waypoint_empty">点击选择地点</string>
+    <string name="route_waypoint_limit">最多添加 %1$d 个途经点</string>
+    <string name="route_waypoint_move_up">上移</string>
+    <string name="route_waypoint_move_down">下移</string>
+    <string name="route_waypoint_repick">重新选点</string>
+    <string name="waypoint_map_pick">地图选点</string>
+    <string name="route_avoid_zones">避让区</string>
+    <string name="route_avoid_none">未设置 · 点此圈选</string>
+    <string name="route_avoid_count">已启用 %1$d 个（%2$s…）</string>
+
+    <string name="avoid_zone_title">避让区</string>
+    <string name="avoid_zone_hint">圈出「这块地方不能进」，算路会绕开它。可以圈多个，重叠也没关系——拼起来就是更大的范围；长方形适合框一条路、一座桥。</string>
+    <string name="avoid_zone_empty">还没有避让区。点下面按钮，在地图上圈一块禁摩区或某座不能上的桥。</string>
+    <string name="avoid_zone_add">在地图上圈选</string>
+    <string name="avoid_zone_on">已启用</string>
+    <string name="avoid_zone_off">已关闭</string>
+    <string name="avoid_zone_delete_title">删除避让区</string>
+    <string name="avoid_zone_delete_msg">确定删除「%1$s」吗？删除后算路不再绕开这块区域。</string>
+    <string name="avoid_zone_name_label">名称</string>
+    <string name="avoid_zone_name_hint">例如：南滨路、观音桥商圈</string>
+    <string name="avoid_zone_default_name">避让区</string>
+    <string name="avoid_zone_size">区域大小</string>
+    <string name="avoid_zone_width">宽</string>
+    <string name="avoid_zone_height">高</string>
+    <string name="avoid_zone_size_value">%1$s × %2$s m</string>
+    <string name="avoid_zone_overlap_hint">可以圈多个区域，重叠也没问题 —— 拼起来就是更大的范围</string>
+    <string name="avoid_zone_too_large">区域太大，算不出路线。建议缩小到 2 公里以内。</string>
+    <string name="avoid_zone_need_center">请先在地图上选择区域中心</string>
+    <string name="avoid_zone_save_fail">保存失败，请重试</string>
+    <string name="avoid_zone_pick_center">拖动地图选择区域中心</string>
+
+    <!-- 离线语音引擎（TTS 模型下载） -->
+    <string name="settings_voice_engine">离线语音引擎</string>
+    <string name="tts_intro">内置语音包是预先录好的短语拼接，所以只会说「前方 300 米右转」，念不出路名。装上离线语音引擎后，能念完整句子：「沿黄桷坪正街行驶 500 米后右转」。\n\n模型约 27MB，只在需要时下载，不占安装包。</string>
+    <string name="tts_model_info">模型：AISHELL-3 多说话人（174 个说话人，这里挑了 8 个差别明显的）\n许可：Apache-2.0，可商用\n下载后完全离线运行，不会把你的位置或路名发到任何服务器。</string>
+    <string name="tts_voice_title">音色</string>
+    <string name="tts_voice_hint">点一下就能听，选你听着舒服的那个</string>
+    <string name="tts_speed_title">语速</string>
+    <string name="tts_speed_value">%1$s×</string>
+    <string name="tts_download">下载语音模型（约 27MB）</string>
+    <string name="tts_delete">删除语音模型</string>
+    <string name="tts_delete_msg">删除后将退回内置语音包（只会说「前方 300 米右转」，念不出路名）。需要时可以重新下载。</string>
+    <string name="tts_test">试听一句</string>
+    <string name="tts_test_text">沿黄桷坪正街行驶五百米后右转进入南滨路</string>
+    <string name="tts_test_preparing">正在准备语音引擎…</string>
+    <string name="tts_test_fail">引擎启动超时，请重试或重新下载模型</string>
+    <string name="tts_state_installed">已安装</string>
+    <string name="tts_state_installed_sub">离线语音可用，导航会念出路名。占用空间 %1$s</string>
+    <string name="tts_state_missing">未安装</string>
+    <string name="tts_state_missing_sub">当前使用内置语音包（不含路名）。下载模型后可念完整句子。</string>
+    <string name="tts_state_downloading">正在下载…</string>
+    <string name="tts_connecting">连接服务器…</string>
+    <string name="tts_unzipping">正在解压…</string>
+    <string name="tts_download_ok">语音模型已就绪，导航时生效</string>
+    <string name="tts_download_fail">下载失败：%1$s</string>
+    <string name="tts_engine_state_on">已启用 · %1$s</string>
+    <string name="tts_engine_state_off">未安装</string>
 </resources>

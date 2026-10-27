@@ -295,6 +295,51 @@
             android:textSize="14sp" />
     </LinearLayout>
 
+    <!--
+      离线语音：下载中文 TTS 模型。
+
+      内置语音包是预录片段，念不出路名；装上模型后能念完整句子
+      （「沿黄桷坪正街行驶 500 米后右转」）。模型约 27MB，按需下载，不进 APK。
+    -->
+    <LinearLayout
+        android:id="@+id/set_voice_engine"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/settings_voice_engine"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/set_voice_engine_state"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/text_tertiary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- 避让区：用户自己圈「这块地方不能进」 -->
+    <LinearLayout
+        android:id="@+id/set_avoid_zone"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/avoid_zone_title"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+    </LinearLayout>
+
     <LinearLayout
         android:id="@+id/set_clear_cache"
         android:layout_width="match_parent"

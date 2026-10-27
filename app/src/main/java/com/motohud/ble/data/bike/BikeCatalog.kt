@@ -20,7 +20,7 @@ object BikeCatalog {
         brand = BikeBrand.APRILIA,
         name = "SR Max 250",
         subtitle = "运动型大踏板 · 244cc",
-        image = "sr_max.png",
+        image = "sr_max.webp",
         accent = 0xFFFF3B30,
         highlights = listOf("TFT 全彩仪表", "无钥匙启动", "双通道 ABS"),
         specs = listOf(
@@ -41,7 +41,7 @@ object BikeCatalog {
         brand = BikeBrand.APRILIA,
         name = "SR Max 300",
         subtitle = "运动型大踏板 · 278cc",
-        image = "sr_max.png",
+        image = "sr_max.webp",
         accent = 0xFFFF3B30,
         highlights = listOf("TFT 全彩仪表", "ASR 牵引力控制", "双通道 ABS"),
         specs = listOf(
@@ -62,7 +62,7 @@ object BikeCatalog {
         brand = BikeBrand.APRILIA,
         name = "GPR 150",
         subtitle = "入门级仿赛 · 149cc",
-        image = "gpr.png",
+        image = "gpr.webp",
         accent = 0xFFFF453A,
         highlights = listOf("双翼梁车架", "倒置前叉", "赛道化坐姿"),
         specs = listOf(
@@ -83,7 +83,7 @@ object BikeCatalog {
         brand = BikeBrand.APRILIA,
         name = "GPR 250",
         subtitle = "轻量级仿赛 · 249cc",
-        image = "gpr.png",
+        image = "gpr.webp",
         accent = 0xFFFF453A,
         highlights = listOf("铝合金后摇臂", "滑动离合", "LED 双透镜大灯"),
         specs = listOf(
@@ -104,7 +104,7 @@ object BikeCatalog {
         brand = BikeBrand.VESPA,
         name = "Primavera 150",
         subtitle = "复古踏板 · 155cc",
-        image = "vespa.png",
+        image = "vespa.webp",
         accent = 0xFF64B5F6,
         highlights = listOf("钢制承载式车身", "i-get 水冷引擎", "无钥匙启动"),
         specs = listOf(
@@ -125,7 +125,7 @@ object BikeCatalog {
         brand = BikeBrand.VESPA,
         name = "GTS 300",
         subtitle = "复古踏板 · 278cc",
-        image = "vespa.png",
+        image = "vespa.webp",
         accent = 0xFF64B5F6,
         highlights = listOf("钢制承载式车身", "ASR 牵引力控制", "ABS 防抱死"),
         specs = listOf(
@@ -146,7 +146,7 @@ object BikeCatalog {
         brand = BikeBrand.PIAGGIO,
         name = "Beverly 300",
         subtitle = "大轮踏板 · 278cc",
-        image = "beverly.png",
+        image = "beverly.webp",
         accent = 0xFF9E9E9E,
         highlights = listOf("16 英寸大轮", "ASR + ABS", "大容量座桶"),
         specs = listOf(
@@ -167,7 +167,7 @@ object BikeCatalog {
         brand = BikeBrand.PIAGGIO,
         name = "Medley 150",
         subtitle = "大轮踏板 · 155cc",
-        image = "beverly.png",
+        image = "beverly.webp",
         accent = 0xFF9E9E9E,
         highlights = listOf("16 英寸大轮", "启停系统", "低油耗通勤"),
         specs = listOf(

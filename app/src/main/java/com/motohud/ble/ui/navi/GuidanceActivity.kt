@@ -60,6 +60,7 @@ import com.motohud.ble.navi.NaviEngine
 import com.motohud.ble.navi.RouteData
 import com.motohud.ble.navi.RouteHandoff
 import com.motohud.ble.navi.RouteNaviEngine
+import com.motohud.ble.navi.SpeechPriority
 import com.motohud.ble.navi.VoicePack
 import com.motohud.ble.navi.VoicePackPlayer
 import com.motohud.ble.ui.common.MotoDialog
@@ -147,13 +148,14 @@ class GuidanceActivity : AppCompatActivity() {
     private lateinit var tvBetterRoute: TextView
 
     /**
-     * 语音播报：内置语音包（[com.motohud.ble.navi.VoicePackPlayer]）。
+     * 语音播报：走 [com.motohud.ble.navi.Speaker] 接口。
      *
-     * 不再用系统 `TextToSpeech` —— 车机和部分国产 ROM 上它根本调不通
+     * 不再直接用系统 `TextToSpeech` —— 车机和部分国产 ROM 上它根本调不通
      * （无引擎 / 缺中文数据 / 只支持 synthesizeToFile），表现就是"导航全程哑巴"。
-     * 语音包是构建期合成好的片段，运行期拼装播放，任何设备都能出声。
+     * 现在默认实现是内置语音包（[com.motohud.ble.navi.ClipSpeaker]），
+     * 离线合成引擎就绪后由 [com.motohud.ble.navi.SpeechRouter] 自动接管。
      */
-    private var voice: com.motohud.ble.navi.VoicePackPlayer? = null
+    private var voice: com.motohud.ble.navi.Speaker? = null
     private var route: RouteData? = null
     private var destName: String = "目的地"
     private var destLat = 0.0
@@ -188,6 +190,13 @@ class GuidanceActivity : AppCompatActivity() {
 
     /** 上一次已播报过的路段序号：进入新路段时播一次「前方 X 米 左/右转」 */
     private var lastAnnouncedStep = -1
+
+    /**
+     * 预合成去重：记录已经交给引擎预热的「路段序号 + 文本」。
+     * 只认文本不认序号，是因为重新算路后序号会重排，同一序号可能换了路名。
+     */
+    private var prewarmedStep = -1
+    private var prewarmedText = ""
 
     /** 本次导航是否已调用过 engine.start（屏蔽引擎里上一次导航的残留状态） */
     private var started = false
@@ -383,7 +392,7 @@ class GuidanceActivity : AppCompatActivity() {
             updateVoiceButton()
             voice?.setMuted(!on)
             // 开着车看不见屏幕，用一声确认代替「开了吗？」的犹豫
-            speakClips(if (on) VoicePack.voiceOn() else VoicePack.voiceOff())
+            say("", if (on) VoicePack.voiceOn() else VoicePack.voiceOff(), SpeechPriority.INFO)
         }
         // 长按选播报档位（详细/简洁/只播转弯）：单击是最高频的开/关，不该被设置项挤掉
         btnVoice.setOnLongClickListener {
@@ -429,7 +438,7 @@ class GuidanceActivity : AppCompatActivity() {
                 NaviPrefs.setVoiceMode(which)
                 updateVoiceButton()
                 // 立刻用一声实测让用户听到档位效果，不用等下一个路口
-                speakClips(VoicePack.turn(IconType.RIGHT, 300))
+                say("", VoicePack.turn(IconType.RIGHT, 300))
                 d.dismiss()
             }
             .setNegativeButton(R.string.cancel, null)
@@ -543,9 +552,13 @@ class GuidanceActivity : AppCompatActivity() {
         naviStartMs = System.currentTimeMillis()
         // 开始播报：骑行中不看屏幕也能确认导航已启动、大概多远
         if (NaviPrefs.voiceMode.value != NaviPrefs.VOICE_MODE_TURN_ONLY) {
-            speakClips(VoicePack.start(r?.distanceM ?: 0f))
+            say("", VoicePack.start(r?.distanceM ?: 0f), SpeechPriority.INFO)
         }
         engine.start(destName, destLat, destLng, start, r)
+        // 前两段引导语提前预合成：起步后第一句就已经是「前方 xx 右转」，
+        // 等渲染循环走到那一步再合成必然慢半拍
+        prewarmStep(0)
+        prewarmStep(1)
         // 前台服务：**每次导航都启动**，它承载通知栏导航条（息屏/兜里瞥一眼方向）；
         // 唤醒锁只由「息屏导航」开关决定，见 NaviForegroundService.updateWakeLock
         com.motohud.ble.service.NaviForegroundService.start(this)
@@ -1083,12 +1096,14 @@ class GuidanceActivity : AppCompatActivity() {
         }
         // 临近路口的短提醒（长路段场景下，进入路段时那句早被忘了）
         announceTurnReminders(s)
+        // 趁还在当前路段，把下一段的引导语先合成好（进入下一段直接命中缓存）
+        prewarmStep(s.stepIndex + 1)
 
         if (s.arrived) {
             if (!stopped) {
                 stopped = true
                 app.naviForwarder.forwardFinish()
-                speakClips(VoicePack.arrived())
+                say("", VoicePack.arrived(), SpeechPriority.INFO)
                 // 导航历史：到达即结束这条记录（轨迹在这里压缩写回）
                 finishHistory()
             }
@@ -1189,11 +1204,12 @@ class GuidanceActivity : AppCompatActivity() {
             (step?.distanceM ?: 0f) >= 800f
         ) {
             remindFlags = remindFlags or 1
-            speakClips(VoicePack.turn(s.iconType, s.stepRemain))
+            // text 给离线合成用（含路名），clips 给语音包兜底
+            say(step?.instruction.orEmpty(), VoicePack.turn(s.iconType, s.stepRemain))
         }
         if (remindFlags and 2 == 0 && s.stepRemain in 1..200) {
             remindFlags = remindFlags or 2
-            speakClips(VoicePack.turn(s.iconType, s.stepRemain))
+            say(step?.instruction.orEmpty(), VoicePack.turn(s.iconType, s.stepRemain))
         }
     }
 
@@ -1209,11 +1225,21 @@ class GuidanceActivity : AppCompatActivity() {
         return when (NaviPrefs.voiceMode.value) {
             NaviPrefs.VOICE_MODE_DETAIL -> {
                 // 不抢播：让「开始导航，全程 6 公里」先说完，别把话切成半句
-                speakClips(VoicePack.turn(s.iconType, s.stepRemain), interrupt = false); true
+                say(
+                    currentInstruction(s.stepIndex),
+                    VoicePack.turn(s.iconType, s.stepRemain),
+                    interrupt = false
+                )
+                true
             }
             // 简洁：只在"马上要转"时才在进入路段那一刻多说一句，避免长路段上一句话反复播
             NaviPrefs.VOICE_MODE_BRIEF -> if (s.stepRemain <= 600f) {
-                speakClips(VoicePack.turn(s.iconType, s.stepRemain), interrupt = false); true
+                say(
+                    currentInstruction(s.stepIndex),
+                    VoicePack.turn(s.iconType, s.stepRemain),
+                    interrupt = false
+                )
+                true
             } else false
             else -> false
         }
@@ -1377,17 +1403,51 @@ class GuidanceActivity : AppCompatActivity() {
     // 片段拼装、完全离线、不依赖系统任何组件。见 VoicePack 的类注释。
 
     private fun initVoice() {
-        voice = VoicePackPlayer(this).also { it.setMuted(!NaviPrefs.voice.value) }
+        voice = com.motohud.ble.navi.SpeechRouter.create(this)
+            .also { it.setMuted(!NaviPrefs.voice.value) }
     }
 
     /**
-     * 播一串语音片段（主线程调用）。
+     * 播一句导航语音（主线程调用）。
      *
-     * [interrupt] 见 [VoicePackPlayer.speak]：路口提醒要抢播，进入路段的播报要排队。
+     * @param text 含路名的完整文本，只有支持合成的引擎（离线 TTS）会用它；
+     *             语音包实现会忽略它、只播 [clips]。
+     * @param clips 预录片段，任何引擎都有的兜底。
+     * @param interrupt false = 接在后面播（进入路段的播报不该把「开始导航」切成半句）。
      */
-    private fun speakClips(clips: List<Int>, interrupt: Boolean = true) {
-        if (clips.isEmpty() || !NaviPrefs.voice.value) return
-        voice?.speak(clips, interrupt)
+    private fun say(
+        text: String,
+        clips: List<Int>,
+        priority: com.motohud.ble.navi.SpeechPriority =
+            com.motohud.ble.navi.SpeechPriority.TURN,
+        interrupt: Boolean = true
+    ) {
+        if (!NaviPrefs.voice.value) return
+        if (text.isBlank() && clips.isEmpty()) return
+        android.util.Log.i("GuidanceVoice", "播报：${text.ifBlank { "（仅片段 ${clips.size} 个）" }}")
+        voice?.speak(text, clips, priority, interrupt)
+    }
+
+    /** 当前路段的完整引导语（含路名），给离线合成用；取不到就返回空串 */
+    private fun currentInstruction(stepIndex: Int): String =
+        route?.steps?.getOrNull(stepIndex)?.instruction.orEmpty()
+
+    /**
+     * 预合成某一段的引导语（主线程调用，内部转后台）。
+     *
+     * 离线引擎单句合成要 0.5~1.5s，正好卡在「该播了」的那一刻才合成必然滞后。
+     * 所以一边在当前段骑行，一边就把下一段先合成进缓存；进入下一段直接出声音。
+     * 同一个（序号 + 文本）只提交一次，渲染循环每帧调用也无副作用。
+     */
+    private fun prewarmStep(stepIndex: Int) {
+        if (stepIndex < 0) return
+        if (!NaviPrefs.voice.value) return
+        val text = currentInstruction(stepIndex)
+        if (text.isBlank()) return
+        if (stepIndex == prewarmedStep && text == prewarmedText) return
+        prewarmedStep = stepIndex
+        prewarmedText = text
+        voice?.prewarm(text)
     }
 
     // ---------- 权限 ----------

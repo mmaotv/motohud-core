@@ -74,8 +74,34 @@ object AmapCache {
         fromLat: Double, fromLng: Double,
         toLat: Double, toLng: Double,
         strategy: Int,
-        limit: Int
-    ): String = "route|${grid(fromLat)},${grid(fromLng)}|${precise(toLat)},${precise(toLng)}|$strategy|$limit"
+        limit: Int,
+        optionsTag: String = ""
+    ): String = buildString {
+        append("route|${grid(fromLat)},${grid(fromLng)}|${precise(toLat)},${precise(toLng)}|$strategy|$limit")
+        // 途经点 / 避让区不同 → 是**完全不同的一条路线**，必须参与 key。
+        // 漏了这一段的话，用户改途经点后会直接命中上一次的缓存，看到的路线上
+        // 根本不经过他新加的点 —— 表现为"设置了没反应"。
+        if (optionsTag.isNotBlank()) append("|").append(optionsTag)
+    }
+
+    /**
+     * 把「自定义路线」约束压成一个短的稳定标签，供 [routeKey] 使用。
+     *
+     * 用坐标的 4 位小数（约 11m）而不是原始 double：既能把不同的点区分开，
+     * 又不会因为 GPS 抖动导致缓存永远不命中。
+     */
+    fun optionsTag(
+        waypoints: List<Pair<Double, Double>>,
+        avoidZones: List<List<Pair<Double, Double>>>,
+        excludeMotorway: Boolean
+    ): String {
+        if (waypoints.isEmpty() && avoidZones.isEmpty() && !excludeMotorway) return ""
+        val wp = waypoints.joinToString(",") { "${precise(it.first)},${precise(it.second)}" }
+        val az = avoidZones.joinToString(";") { poly ->
+            poly.joinToString(",") { "${precise(it.first)},${precise(it.second)}" }
+        }
+        return "w[$wp]a[$az]x${if (excludeMotorway) 1 else 0}"
+    }
 
     /** POI 搜索缓存键 */
     fun poiKey(

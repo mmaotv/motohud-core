@@ -58,6 +58,12 @@ object NaviPrefs {
     private const val KEY_TIME_FIRST = "route_time_first"
     private const val KEY_TRAFFIC_FIRST = "route_traffic_first"
 
+    /** 离线语音音色（AISHELL-3 是多说话人模型，值就是 speakerId） */
+    private const val KEY_TTS_SPEAKER = "tts_speaker"
+
+    /** 离线语音语速倍率 */
+    private const val KEY_TTS_SPEED = "tts_speed"
+
     private lateinit var prefs: SharedPreferences
 
     /** 骑行模式（保留：影响默认偏好与界面文案，不再单独做算路分支） */
@@ -80,6 +86,24 @@ object NaviPrefs {
      */
     private val _voiceMode = MutableStateFlow(VOICE_MODE_DETAIL)
     val voiceMode: StateFlow<Int> = _voiceMode.asStateFlow()
+
+    /**
+     * 离线语音音色：AISHELL-3 是 174 说话人模型，这里存 speakerId。
+     *
+     * 挑的是一组听感差别明显的编号（见 [TtsVoice.ALL]），
+     * 用户挨个试听选一个，不用自己输数字。
+     */
+    private val _ttsSpeaker = MutableStateFlow(0)
+    val ttsSpeaker: StateFlow<Int> = _ttsSpeaker.asStateFlow()
+
+    /**
+     * 离线语音语速倍率（0.7~1.4）。
+     *
+     * 8kHz 的合成音本身偏闷，语速稍快一点听感会更清楚 ——
+     * 而且市区骑行时本来就希望播报短一些。
+     */
+    private val _ttsSpeed = MutableStateFlow(1.0f)
+    val ttsSpeed: StateFlow<Float> = _ttsSpeed.asStateFlow()
 
     /**
      * 是否把导航信息投到车机（BLE 转发开关）。
@@ -132,6 +156,8 @@ object NaviPrefs {
         _avoidHighway.value = prefs.getBoolean(KEY_AVOID_HIGHWAY, true)
         _voice.value = prefs.getBoolean(KEY_VOICE, true)
         _voiceMode.value = prefs.getInt(KEY_VOICE_MODE, VOICE_MODE_DETAIL)
+        _ttsSpeaker.value = prefs.getInt(KEY_TTS_SPEAKER, 0)
+        _ttsSpeed.value = prefs.getFloat(KEY_TTS_SPEED, 1.0f)
         // 「投屏」从页面改成开关：默认开（连了车机就是要投），忽略已废弃的 phone_mode
         _castEnabled.value = prefs.getBoolean(KEY_CAST, true)
         _screenOffNavi.value = prefs.getBoolean(KEY_SCREEN_OFF, true)
@@ -162,6 +188,16 @@ object NaviPrefs {
     fun setVoiceMode(mode: Int) {
         _voiceMode.value = mode
         prefs.edit().putInt(KEY_VOICE_MODE, mode).apply()
+    }
+
+    fun setTtsSpeaker(id: Int) {
+        _ttsSpeaker.value = id
+        prefs.edit().putInt(KEY_TTS_SPEAKER, id).apply()
+    }
+
+    fun setTtsSpeed(speed: Float) {
+        _ttsSpeed.value = speed
+        prefs.edit().putFloat(KEY_TTS_SPEED, speed).apply()
     }
 
     fun setCastEnabled(on: Boolean) {
@@ -213,10 +249,22 @@ object NaviPrefs {
      * 当前偏好对应的高德驾车 strategy。
      *
      * MULTI_CHOICE 系列会一次返回多套方案，界面因此可以"先选路线再导航"。
+     *
+     * ## 修复：「智能推荐」不再吞掉「不走高速」
+     *
+     * 历史 bug：这里原本是 `if (_smart.value) return 最快最短路`，而 `_smart`
+     * 默认 `true` —— 于是**默认状态下「不走高速」完全无效**，算出来就是含
+     * 内环快速路的最快路线。对摩托车来说这不是"偏好"，是"能不能上路"的问题。
+     *
+     * 现在把「不走高速」视为**硬约束**：只要它开着，无论「智能推荐」是否勾选，
+     * 都走 NO_HIGHWAY 系列策略（这些策略本身也是 MULTI_CHOICE，仍会返回
+     * 2~3 套方案，不会损失"先选路线"的体验）。
      */
     fun strategy(): Int {
-        if (_smart.value) return RouteSearch.DRIVING_MULTI_STRATEGY_FASTEST_SHORTEST_AVOID_CONGESTION
         val noHigh = _avoidHighway.value
+        if (_smart.value && !noHigh) {
+            return RouteSearch.DRIVING_MULTI_STRATEGY_FASTEST_SHORTEST_AVOID_CONGESTION
+        }
         val noToll = _avoidToll.value
         val noJam = _avoidJam.value
         val highFirst = _highwayFirst.value
@@ -246,8 +294,17 @@ object NaviPrefs {
         }
     }
 
+    /**
+     * 算路时要下发的「排除道路类型」参数（高德 `DriveRouteQuery.setExclude`）。
+     *
+     * 和 [strategy] 里的 NO_HIGHWAY 是**双保险**：策略名里的 no_highway 是否
+     * 真的覆盖「城市快速路」（如重庆内环快速路）取决于高德内部的路网分级，
+     * 而 `DRIVING_EXCLUDE_MOTORWAY` 是显式按道路等级排除，更硬。
+     * 两者叠加不会冲突，所以「不走高速」开着时一并下发。
+     */
+    fun excludeMotorway(): Boolean = _avoidHighway.value
+
     // ---------- 地图视野 / 上次目的地 ----------
-    //
     // 地图页每次进来都弹回当前位置很烦：用户常看的是固定一片区域（家附近、常跑的路线）。
     // 记住上次的中心与缩放，下次进来原地恢复；想看自己在哪，点一下定位按钮即可。
     // 上次导航的目的地也留一个图钉，复访时点一下就再去一次，比翻导航历史快。
@@ -294,15 +351,23 @@ object NaviPrefs {
             .apply()
     }
 
-    /** 当前偏好的简短摘要，用于界面徽章 */    fun summary(): String {
-        if (_smart.value) return "智能推荐"
+    /**
+     * 当前偏好的简短摘要，用于界面徽章。
+     *
+     * 「不走高速」是硬约束，**即使「智能推荐」开着也要显示**——
+     * 否则用户在界面上看不到它，会以为设置没生效（上一版就是这个观感）。
+     */
+    fun summary(): String {
         val parts = mutableListOf<String>()
+        if (_smart.value) parts += "智能推荐"
         if (_avoidHighway.value) parts += "不走高速"
-        if (_avoidToll.value) parts += "少收费"
-        if (_avoidJam.value) parts += "避拥堵"
-        if (_highwayFirst.value) parts += "高速优先"
-        if (_timeFirst.value) parts += "时间优先"
-        if (_trafficFirst.value && !_avoidJam.value) parts += "路况优先"
+        if (!_smart.value) {
+            if (_avoidToll.value) parts += "少收费"
+            if (_avoidJam.value) parts += "避拥堵"
+            if (_highwayFirst.value) parts += "高速优先"
+            if (_timeFirst.value) parts += "时间优先"
+            if (_trafficFirst.value && !_avoidJam.value) parts += "路况优先"
+        }
         return if (parts.isEmpty()) "智能推荐" else parts.joinToString("·")
     }
 }
