@@ -33,6 +33,11 @@ class MapPickActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 同 PlaceDetailActivity：高德隐私合规必须早于 MapView 的 inflate，
+        // 否则进程刚起（冷启动）时布局里的 MapView 构造会失败
+        val mapReady = AmapManager.hasKey(this) &&
+            AmapManager.isPrivacyAgreed(this) &&
+            runCatching { AmapManager.initMap(this) }.getOrDefault(false)
         setContentView(R.layout.activity_map_pick)
         coord = findViewById(R.id.pick_coord)
 
@@ -42,13 +47,12 @@ class MapPickActivity : AppCompatActivity() {
         val startLat = intent.getDoubleExtra(EXTRA_LAT, 0.0)
         val startLng = intent.getDoubleExtra(EXTRA_LNG, 0.0)
 
-        if (!AmapManager.hasKey(this) || !AmapManager.isPrivacyAgreed(this)) {
+        if (!mapReady) {
             Toast.makeText(this, R.string.route_select_no_map, Toast.LENGTH_SHORT).show()
             finish()
             return
         }
         runCatching {
-            AmapManager.initMap(this)
             mapView = findViewById(R.id.pick_map)
             mapView?.onCreate(savedInstanceState)
             aMap = mapView?.map?.apply {

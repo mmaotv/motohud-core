@@ -49,9 +49,10 @@ import kotlinx.coroutines.launch
  * 导航主界面（复刻原车机 App 的高德导航入口）：
  *
  *  1. 高德夜间地图 + 定位蓝点 + 实时路况；
- *  2. 顶部搜索栏：POI 输入提示（300ms 防抖），点击结果 → 直接规划路线开始导航；
- *  3. 常用地址 chips（家/公司/其他）：点击 → 直接进入导航流程；
- *  4. 底部操作卡：管理地址 / 输入坐标 / 选择地图 / 高德 Key 配置；
+ *  2. 顶部搜索栏：POI 输入提示（450ms 防抖）→ 点结果先进[PlaceDetailActivity]
+ *     确认位置与距离，再决定是「导航到这里」还是只是看一眼；
+ *  3. 常用地址 chips（家/公司/其他）：点击 → 直接进入路线选择（用户自己存的快捷入口）；
+ *  4. 底部操作卡：管理地址 / 选择地图 / 高德 Key 配置；
  *  5. 未连接车机时给出明确提示；未配置高德 Key 时地图功能优雅降级。
  */
 class NavigationFragment : Fragment(R.layout.fragment_navigation) {
@@ -123,8 +124,9 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
         historyAdapter = SearchHistoryAdapter(
             onPick = { item ->
                 hideHistory()
-                etSearch.setText(item.name)
-                openGuidance(item.name, item.lat, item.lng)
+                etSearch.setText("")
+                etSearch.clearFocus()
+                openPlaceDetail(item.name, item.lat, item.lng)
             },
             onDelete = { item ->
                 SearchHistory.remove(requireContext(), item.name)
@@ -153,7 +155,7 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
         setupMap(savedInstanceState)
 
         // ---------- 搜索 ----------
-        tipAdapter = TipAdapter { tip -> openGuidance(tip.name.ifBlank { "目的地" }, tip.latitude, tip.longitude) }
+        tipAdapter = TipAdapter { tip -> openPlaceDetail(tip.name.ifBlank { getString(R.string.place_detail_default_name) }, tip.latitude, tip.longitude, tip.address, tip.district, tip.distanceM) }
         rvTips.layoutManager = LinearLayoutManager(requireContext())
         rvTips.adapter = tipAdapter
         rvTips.layoutAnimation = android.view.animation.LayoutAnimationController(
@@ -536,17 +538,49 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
     // ---------- 导航启动 ----------
 
     /**
-     * 点击搜索结果 / 常用地址 → 先到「选择路线」页看方案，再决定走哪条。
-     * 不再像以前那样点一下地点就直接进导航。
+     * 点击搜索结果 / 最近搜索 → 先到「地点详情」页。
+     *
+     * 这里只做"看一眼"：地图移到该地址、给出直线距离，由用户在详情页里
+     * 点「导航到这里」才继续进「选择路线」页。
+     * 以前点一下结果就直接算路，用户只是想查个大概位置也会被推进导航流程。
+     */
+    private fun openPlaceDetail(
+        name: String,
+        lat: Double,
+        lng: Double,
+        address: String? = null,
+        district: String? = null,
+        distanceM: Int? = null
+    ) {
+        hideTips()
+        hideHistory()
+        // 只在这里写历史：表示"用户确实查过这个地方"。
+        // 输入过程中写，历史里会塞满打了一半和打错的词。
+        SearchHistory.add(requireContext(), name, lat, lng)
+        etSearch.setText("")
+        // 交出焦点让键盘收掉，否则输入法会把下一页顶上去
+        etSearch.clearFocus()
+        val loc = vm.currentLocation
+        PlaceDetailActivity.start(
+            requireContext(), name, lat, lng,
+            address = address,
+            district = district,
+            distanceM = distanceM,
+            fromLat = loc?.first ?: 0.0,
+            fromLng = loc?.second ?: 0.0
+        )
+    }
+
+    /**
+     * 常用地址 chips / 地址管理 → 直接进「选择路线」页。
+     *
+     * 这些是**用户自己存下来的**快捷入口（回家 / 去公司），点它就是要去，
+     * 再插一层详情页反而多一步。
      */
     private fun openGuidance(name: String, lat: Double, lng: Double) {
         hideTips()
         hideHistory()
-        // 只在这里写历史：表示"用户确实查过这个地方并进了路线页"。
-        // 输入过程中写，历史里会塞满打了一半和打错的词。
-        SearchHistory.add(requireContext(), name, lat, lng)
         etSearch.setText("")
-        // 交出焦点让键盘收掉，否则输入法会把接下来的路线页顶上去
         etSearch.clearFocus()
         val loc = vm.currentLocation
         RouteSelectActivity.start(

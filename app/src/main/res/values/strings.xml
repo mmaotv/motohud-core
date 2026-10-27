@@ -347,6 +347,11 @@
     <string name="route_pref_time_first">时间优先</string>
     <string name="route_prefs_motor_note">骑行提示：多数城市禁摩针对快速路与高架，选「不走高速」能避开大部分限行路段；能否通行仍以现场标志与当地法规为准。</string>
 
+    <!-- ============ 地点详情（搜索结果的第一站） ============ -->
+    <string name="place_detail_default_name">目的地</string>
+    <string name="place_detail_navigate">导航到这里</string>
+    <string name="place_detail_straight_suffix">直线距离（驾车里程在下一步算）</string>
+
     <!-- ============ 路线选择 ============ -->
     <string name="route_select_title">选择路线</string>
     <string name="route_select_pick">为你找到以下方案，选择后开始导航</string>

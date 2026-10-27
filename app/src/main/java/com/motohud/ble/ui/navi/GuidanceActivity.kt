@@ -62,6 +62,7 @@ import com.motohud.ble.navi.RouteHandoff
 import com.motohud.ble.navi.RouteNaviEngine
 import com.motohud.ble.ui.common.MotoDialog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -941,6 +942,23 @@ class GuidanceActivity : AppCompatActivity() {
     private fun observeState() {
         lifecycleScope.launch {
             engine.state.collectLatest { s -> render(s) }
+        }
+        /*
+         * 车机投屏转发：每 tick 一帧（复刻原 App onNaviInfoUpdate 每次都写）。
+         *
+         * 这一段在归档版里写在 HudActivity（横屏投屏 HUD 页）的 render 里。
+         * 做成核心双功能版删掉 HUD 页时，转发调用没有跟着搬到本页 ——
+         * 于是车机只收到握手 HELLO 和退出时的 NO，中间**一帧导航数据都没有**，
+         * 车机屏幕上自然什么都不显示。
+         *
+         * 单独起一条收集器而不是塞进 render()：
+         *  - render() 里有 UI 早退（!started / 未在导航中），转发不该被界面状态左右；
+         *  - 息屏导航 / 画中画时界面已不可见，但车机必须继续收到数据。
+         */
+        lifecycleScope.launch {
+            engine.state.collect { s ->
+                if (started && !stopped) app.naviForwarder.forward(s)
+            }
         }
         lifecycleScope.launch {
             ble.state.collectLatest { st ->
