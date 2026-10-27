@@ -55,14 +55,15 @@ import com.motohud.ble.ble.BleConnectionManager
 import com.motohud.ble.data.NaviPrefs
 import com.motohud.ble.data.NaviTrack
 import com.motohud.ble.navi.CoordConverter
+import com.motohud.ble.navi.IconMapper
 import com.motohud.ble.navi.IconType
 import com.motohud.ble.navi.NaviEngine
 import com.motohud.ble.navi.RouteData
 import com.motohud.ble.navi.RouteHandoff
 import com.motohud.ble.navi.RouteNaviEngine
 import com.motohud.ble.navi.SpeechPriority
-import com.motohud.ble.navi.VoicePack
-import com.motohud.ble.navi.VoicePackPlayer
+import com.motohud.ble.navi.SpeechScript
+import com.motohud.ble.navi.tts.TtsModelStore
 import com.motohud.ble.ui.common.MotoDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
@@ -152,8 +153,9 @@ class GuidanceActivity : AppCompatActivity() {
      *
      * 不再直接用系统 `TextToSpeech` —— 车机和部分国产 ROM 上它根本调不通
      * （无引擎 / 缺中文数据 / 只支持 synthesizeToFile），表现就是"导航全程哑巴"。
-     * 现在默认实现是内置语音包（[com.motohud.ble.navi.ClipSpeaker]），
-     * 离线合成引擎就绪后由 [com.motohud.ble.navi.SpeechRouter] 自动接管。
+     * 现在唯一实现是离线神经 TTS（[com.motohud.ble.navi.tts.SherpaSpeaker]），
+     * 由 [com.motohud.ble.navi.SpeechRouter] 在模型就绪后自动出声；模型未下载时
+     * 回退到 [com.motohud.ble.navi.SilentSpeaker]（静默，提示用户去下载）。
      */
     private var voice: com.motohud.ble.navi.Speaker? = null
     private var route: RouteData? = null
@@ -188,15 +190,19 @@ class GuidanceActivity : AppCompatActivity() {
     private var remindStepIndex = -1
     private var remindFlags = 0
 
+    /** 当前是否横屏：镜头缩放/俯角/前移都要跟着变，横屏和竖屏必须有区别 */
+    private var landscapeNow = false
+
     /** 上一次已播报过的路段序号：进入新路段时播一次「前方 X 米 左/右转」 */
     private var lastAnnouncedStep = -1
 
     /**
-     * 预合成去重：记录已经交给引擎预热的「路段序号 + 文本」。
-     * 只认文本不认序号，是因为重新算路后序号会重排，同一序号可能换了路名。
+     * 预合成去重：记录已经交给引擎预热的路段序号。
+     *
+     * 重新算路时 [resetRoute] 会把它清回 -1 —— 新路线的同一个序号通常是另一条路，
+     * 不清的话下一段永远不会被预热。
      */
     private var prewarmedStep = -1
-    private var prewarmedText = ""
 
     /** 本次导航是否已调用过 engine.start（屏蔽引擎里上一次导航的残留状态） */
     private var started = false
@@ -377,6 +383,8 @@ class GuidanceActivity : AppCompatActivity() {
             if (cand != null && start != null) {
                 applyRoute(cand, start)
                 Toast.makeText(this, R.string.guidance_better_route_adopted, Toast.LENGTH_SHORT).show()
+                // 卡片是给用户看的，声音是给"没在看屏幕"的人听的：两者都要有
+                say("已为您切换到更快路线", SpeechPriority.INFO)
             }
             hideBetterRouteCard()
         }
@@ -392,7 +400,7 @@ class GuidanceActivity : AppCompatActivity() {
             updateVoiceButton()
             voice?.setMuted(!on)
             // 开着车看不见屏幕，用一声确认代替「开了吗？」的犹豫
-            say("", if (on) VoicePack.voiceOn() else VoicePack.voiceOff(), SpeechPriority.INFO)
+            say(if (on) "语音播报已开启" else "语音播报已关闭", SpeechPriority.INFO)
         }
         // 长按选播报档位（详细/简洁/只播转弯）：单击是最高频的开/关，不该被设置项挤掉
         btnVoice.setOnLongClickListener {
@@ -438,7 +446,7 @@ class GuidanceActivity : AppCompatActivity() {
                 NaviPrefs.setVoiceMode(which)
                 updateVoiceButton()
                 // 立刻用一声实测让用户听到档位效果，不用等下一个路口
-                say("", VoicePack.turn(IconType.RIGHT, 300))
+                say("前方 300 米右转，请按语音提示行驶", SpeechPriority.INFO)
                 d.dismiss()
             }
             .setNegativeButton(R.string.cancel, null)
@@ -549,10 +557,11 @@ class GuidanceActivity : AppCompatActivity() {
         remindStepIndex = -1
         remindFlags = 0
         lastAnnouncedStep = -1
+        prewarmedStep = -1
         naviStartMs = System.currentTimeMillis()
-        // 开始播报：骑行中不看屏幕也能确认导航已启动、大概多远
+        // 开始播报：骑行中不看屏幕也能确认导航已启动、大概多远、预计多久
         if (NaviPrefs.voiceMode.value != NaviPrefs.VOICE_MODE_TURN_ONLY) {
-            say("", VoicePack.start(r?.distanceM ?: 0f), SpeechPriority.INFO)
+            say(buildStartText(r), SpeechPriority.INFO)
         }
         engine.start(destName, destLat, destLng, start, r)
         // 前两段引导语提前预合成：起步后第一句就已经是「前方 xx 右转」，
@@ -673,6 +682,9 @@ class GuidanceActivity : AppCompatActivity() {
         tvDestSub.text = routeSummary(r)
         started = true
         stopped = false
+        // 换了路线：路段序号全部重排，预合成去重必须复位，否则新路线的下一段
+        // 永远不会被预热（表现就是重新算路后又只剩语音包在响）
+        prewarmedStep = -1
         engine.start(destName, destLat, destLng, start, r)
     }
 
@@ -705,6 +717,8 @@ class GuidanceActivity : AppCompatActivity() {
     /** 引擎偏航回调：已持续偏离路线，提示并重新规划 */
     private fun requestReroute(lat: Double, lng: Double) {
         Toast.makeText(this, R.string.guidance_rerouting, Toast.LENGTH_SHORT).show()
+        // 偏航是骑行中最需要马上知道的事，但眼睛在看路 —— 必须说出来
+        say("您已偏离路线，正在重新规划", SpeechPriority.SAFETY)
         hideBetterRouteCard()
         planAndReplace(lat to lng)
     }
@@ -775,6 +789,8 @@ class GuidanceActivity : AppCompatActivity() {
         }
         tvBetterRoute.text = msg
         betterRouteCard.visibility = View.VISIBLE
+        // 卡片在顶栏，骑行中未必看得见；说一声才不会错过这次换线机会
+        say("前方路况变化，发现更快路线", SpeechPriority.INFO)
     }
 
     private fun hideBetterRouteCard() {
@@ -947,10 +963,25 @@ class GuidanceActivity : AppCompatActivity() {
         lastCameraMs = now
         lastFollowLat = s.latitude
         lastFollowLng = s.longitude
-        // 路口前（<200m 且要转弯）自动放大到 18.2，过路口回 17.2 —— 免去手动缩放
-        val zoom = if (zoomBoost) 18.2f else 17.2f
+        // 路口前（<200m 且要转弯）自动放大，过路口回退 —— 免去手动缩放。
+        // **横屏基准更高**：横屏就是为"看清前方路口"而存在的，跟竖屏给同样的
+        // 缩放等于浪费掉多出来的横向空间，看起来和竖屏没区别。
+        val zoom = when {
+            landscapeNow && zoomBoost -> 19.8f
+            landscapeNow -> 18.8f
+            zoomBoost -> 18.2f
+            else -> 17.2f
+        }
+        // 横屏俯角更大：3D 透视把前方道路拉长，同样高度能看到更远的路口
+        val tilt = if (landscapeNow) 58f else 45f
         try {
-            val target = LatLng(s.latitude, s.longitude)
+            // 横屏把镜头中心**前移**一段：否则车标永远在屏幕正中，
+            // 前方路口刚冒头就被右侧信息条挡住，等于白放大。
+            val target = if (landscapeNow && s.bearing.isFinite() && s.speedKmh > 8f) {
+                ahead(s.latitude, s.longitude, s.bearing, CAMERA_AHEAD_M)
+            } else {
+                LatLng(s.latitude, s.longitude)
+            }
             if (s.bearing.isFinite() && s.speedKmh > 8f) {
                 map.animateCamera(
                     CameraUpdateFactory.newCameraPosition(
@@ -958,7 +989,7 @@ class GuidanceActivity : AppCompatActivity() {
                             .target(target)
                             .zoom(zoom)
                             .bearing(s.bearing)
-                            .tilt(45f)
+                            .tilt(tilt)
                             .build()
                     ), 800, null
                 )
@@ -969,6 +1000,14 @@ class GuidanceActivity : AppCompatActivity() {
             }
         } catch (_: Exception) {
         }
+    }
+
+    /** 把镜头中心沿行进方向前移 [meters] 米，让车标落在屏幕下方、前方路况看得更远 */
+    private fun ahead(lat: Double, lng: Double, bearingDeg: Float, meters: Double): LatLng {
+        val rad = Math.toRadians(bearingDeg.toDouble())
+        val dLat = meters * Math.cos(rad) / 111_320.0
+        val dLng = meters * Math.sin(rad) / (111_320.0 * Math.cos(Math.toRadians(lat)))
+        return LatLng(lat + dLat, lng + dLng)
     }
 
     // ---------- 状态渲染 ----------
@@ -1103,7 +1142,7 @@ class GuidanceActivity : AppCompatActivity() {
             if (!stopped) {
                 stopped = true
                 app.naviForwarder.forwardFinish()
-                say("", VoicePack.arrived(), SpeechPriority.INFO)
+                say(buildArrivedText(s), SpeechPriority.INFO)
                 // 导航历史：到达即结束这条记录（轨迹在这里压缩写回）
                 finishHistory()
             }
@@ -1204,12 +1243,12 @@ class GuidanceActivity : AppCompatActivity() {
             (step?.distanceM ?: 0f) >= 800f
         ) {
             remindFlags = remindFlags or 1
-            // text 给离线合成用（含路名），clips 给语音包兜底
-            say(step?.instruction.orEmpty(), VoicePack.turn(s.iconType, s.stepRemain))
+            // 距离 + 动作 + 路名，整句交给 TTS 念
+            say(stepText(s.stepIndex, s.stepRemain))
         }
         if (remindFlags and 2 == 0 && s.stepRemain in 1..200) {
             remindFlags = remindFlags or 2
-            say(step?.instruction.orEmpty(), VoicePack.turn(s.iconType, s.stepRemain))
+            say(stepText(s.stepIndex, s.stepRemain))
         }
     }
 
@@ -1224,21 +1263,13 @@ class GuidanceActivity : AppCompatActivity() {
         if (s.stepIndex < 0 || !TurnIcons.isTurn(s.iconType)) return false
         return when (NaviPrefs.voiceMode.value) {
             NaviPrefs.VOICE_MODE_DETAIL -> {
-                // 不抢播：让「开始导航，全程 6 公里」先说完，别把话切成半句
-                say(
-                    currentInstruction(s.stepIndex),
-                    VoicePack.turn(s.iconType, s.stepRemain),
-                    interrupt = false
-                )
+                // 不抢播：让「开始导航，全程 X 公里」先说完，别把话切成半句
+                say(stepText(s.stepIndex, s.stepRemain), interrupt = false)
                 true
             }
             // 简洁：只在"马上要转"时才在进入路段那一刻多说一句，避免长路段上一句话反复播
             NaviPrefs.VOICE_MODE_BRIEF -> if (s.stepRemain <= 600f) {
-                say(
-                    currentInstruction(s.stepIndex),
-                    VoicePack.turn(s.iconType, s.stepRemain),
-                    interrupt = false
-                )
+                say(stepText(s.stepIndex, s.stepRemain), interrupt = false)
                 true
             } else false
             else -> false
@@ -1394,60 +1425,98 @@ class GuidanceActivity : AppCompatActivity() {
         historyId = null
     }
 
-    // ---------- 语音播报（内置语音包） ----------
+    // ---------- 语音播报（离线神经 TTS） ----------
     //
     // 历史教训：这里原来是系统 TextToSpeech，两个致命问题都表现为"导航全程哑巴"：
     // ① initTts 回调异步，就绪前的播报被丢弃；② 引擎缺中文数据时 ttsReady 永远 false。
     // 更根本的是——车机上根本没有可用的 TTS 引擎，怎么修都是哑巴。
-    // 现在换成构建期合成的语音包（VoicePack + VoicePackPlayer）：
-    // 片段拼装、完全离线、不依赖系统任何组件。见 VoicePack 的类注释。
+    // 现在用离线 VITS 模型（SherpaSpeaker）：模型随 App 下载，完全离线、能念任意文本
+    // （含路名）。原来的预录语音包已移除——它念不出路名、内容也太受限。
 
     private fun initVoice() {
         voice = com.motohud.ble.navi.SpeechRouter.create(this)
             .also { it.setMuted(!NaviPrefs.voice.value) }
+        // 离线语音包删掉之后，没装模型就是**一点声音都没有**。
+        // 不提示的话用户只会觉得"软件坏了"—— 说清楚去哪装，比静默好。
+        if (NaviPrefs.voice.value && !TtsModelStore.isInstalled(this)) {
+            Toast.makeText(this, R.string.guidance_voice_no_model, Toast.LENGTH_LONG).show()
+        }
     }
 
     /**
      * 播一句导航语音（主线程调用）。
      *
-     * @param text 含路名的完整文本，只有支持合成的引擎（离线 TTS）会用它；
-     *             语音包实现会忽略它、只播 [clips]。
-     * @param clips 预录片段，任何引擎都有的兜底。
+     * @param text 含路名的完整文本（距离+动作+路名），交给离线 TTS 整句念出来。
      * @param interrupt false = 接在后面播（进入路段的播报不该把「开始导航」切成半句）。
      */
     private fun say(
         text: String,
-        clips: List<Int>,
         priority: com.motohud.ble.navi.SpeechPriority =
             com.motohud.ble.navi.SpeechPriority.TURN,
         interrupt: Boolean = true
     ) {
         if (!NaviPrefs.voice.value) return
-        if (text.isBlank() && clips.isEmpty()) return
-        android.util.Log.i("GuidanceVoice", "播报：${text.ifBlank { "（仅片段 ${clips.size} 个）" }}")
-        voice?.speak(text, clips, priority, interrupt)
+        if (text.isBlank()) return
+        android.util.Log.i("GuidanceVoice", "播报：$text")
+        voice?.speak(text, priority, interrupt)
     }
 
-    /** 当前路段的完整引导语（含路名），给离线合成用；取不到就返回空串 */
-    private fun currentInstruction(stepIndex: Int): String =
-        route?.steps?.getOrNull(stepIndex)?.instruction.orEmpty()
+    /**
+     * 开始导航的开场白：把"全程多远、预计多久"一次说清，
+     * 骑车时不用看屏幕就知道这趟大概多长。
+     */
+    private fun buildStartText(r: RouteData?): String {
+        if (r == null) return "开始导航"
+        val dist = CoordConverter.formatDistance(r.distanceM.toInt())
+        val eta = CoordConverter.formatEta(r.durationS.toInt())
+        return "开始导航，全程约 $dist，预计 $eta 到达"
+    }
 
     /**
-     * 预合成某一段的引导语（主线程调用，内部转后台）。
+     * 到达目的地：报一下这趟走了多远、花了多久（与到达卡片一致）。
+     */
+    private fun buildArrivedText(s: NaviEngine.NaviState): String {
+        val traveled = s.traveled.coerceAtLeast(0)
+        val dist = CoordConverter.formatDistance(traveled)
+        val durMs = (System.currentTimeMillis() - naviStartMs).coerceAtLeast(0L)
+        val dur = formatDuration(durMs)
+        return "已到达目的地，${destName}。本次导航全程约 $dist，用时 $dur"
+    }
+
+    /**
+     * 某一段该念的完整文本：**距离 + 动作 + 目标路名**（见 [SpeechScript]）。
+     *
+     * 为什么不直接念高德的 `instruction`：
+     *  - 长路段那整句写的是「沿XX路行驶 500 米后右转」，而我们是在距路口
+     *    200 米时播报，念「行驶 500 米后」是错的；
+     *  - 简单路口高德只给「右转」两个字，连路名都没有 —— 合成出来比语音包
+     *    的「前方 300 米右转」还短，这就是"合成引擎听着不完整"的根因。
+     *
+     * @param remainM 距该段结束还有多远；预合成时传整段长度
+     */
+    private fun stepText(stepIndex: Int, remainM: Int): String {
+        val step = route?.steps?.getOrNull(stepIndex) ?: return ""
+        val icon = IconMapper.of(step.action, step.orientation, step.instruction)
+        return SpeechScript.turn(icon, remainM, step.road, step.instruction)
+    }
+
+    /**
+     * 预合成某一段要说的话（主线程调用，内部转后台）。
      *
      * 离线引擎单句合成要 0.5~1.5s，正好卡在「该播了」的那一刻才合成必然滞后。
-     * 所以一边在当前段骑行，一边就把下一段先合成进缓存；进入下一段直接出声音。
-     * 同一个（序号 + 文本）只提交一次，渲染循环每帧调用也无副作用。
+     * 所以一边在当前段骑行，一边就把下一段**所有可能要说的版本**先合成进缓存
+     * （进入时用整段距离，500/300/200 米提醒各一句），进入下一段直接出声音。
+     * 同一个序号只提交一次，渲染循环每帧调用也无副作用。
      */
     private fun prewarmStep(stepIndex: Int) {
         if (stepIndex < 0) return
         if (!NaviPrefs.voice.value) return
-        val text = currentInstruction(stepIndex)
-        if (text.isBlank()) return
-        if (stepIndex == prewarmedStep && text == prewarmedText) return
+        val step = route?.steps?.getOrNull(stepIndex) ?: return
+        if (stepIndex == prewarmedStep) return
         prewarmedStep = stepIndex
-        prewarmedText = text
-        voice?.prewarm(text)
+        val icon = IconMapper.of(step.action, step.orientation, step.instruction)
+        SpeechScript.variants(icon, step.distanceM, step.road, step.instruction)
+            .forEach { voice?.prewarm(it) }
     }
 
     // ---------- 权限 ----------
@@ -1515,17 +1584,32 @@ class GuidanceActivity : AppCompatActivity() {
     }
 
     private fun applyOrientationLayout(landscape: Boolean) {
+        landscapeNow = landscape
         val dm = resources.displayMetrics
         fun dp(v: Int): Int = (v * dm.density).toInt()
 
         // 顶部渐变：横屏收窄，否则盖掉大半张图
         topScrim.layoutParams = topScrim.layoutParams.apply {
-            height = if (landscape) dp(128) else dp(220)
+            height = if (landscape) dp(96) else dp(220)
         }
 
-        // 横屏屏高只有 ~360dp：转向横幅与信号提示收到右侧面板左侧，
-        // 否则它们全宽铺开后会和右下角信息面板在空间上打架（任一长高就叠在一起）。
-        val sideZone = dp(352)
+        // ---- 顶栏：横屏收成左上角一簇，不再横穿整屏 ----
+        // 横屏屏宽 806dp，顶栏原来 match_parent 会连转向横幅一起铺满整条，
+        // 地图只剩中间一条缝。收窄后上方 60% 的宽度都还给地图。
+        (topBar.layoutParams as FrameLayout.LayoutParams).apply {
+            width = if (landscape) dp(330) else ViewGroup.LayoutParams.MATCH_PARENT
+            gravity = if (landscape) Gravity.TOP or Gravity.START else Gravity.TOP
+            topBar.layoutParams = this
+        }
+        // 副标题（全程 X 公里·预计 Y）与模式角标在横屏让位：它们不是骑行中要盯的东西
+        tvDestSub.visibility = if (landscape) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.tv_mode_badge).visibility =
+            if (landscape) View.GONE else View.VISIBLE
+
+        // ---- 转向横幅：跟顶栏一起收窄，**不再额外加右边距** ----
+        // 以前顶栏是全宽的，要用右边距把横幅"推"离右侧面板；
+        // 现在顶栏本身就只有 330dp 宽，再加边距会把横幅挤成一条竖缝（实测踩过）。
+        val sideZone = 0
         (turnBanner.layoutParams as ViewGroup.MarginLayoutParams).apply {
             rightMargin = if (landscape) sideZone else 0
             turnBanner.layoutParams = this
@@ -1534,21 +1618,29 @@ class GuidanceActivity : AppCompatActivity() {
             rightMargin = if (landscape) sideZone else 0
             tvSignalWarn.layoutParams = this
         }
+        // 横屏屏高只有 360dp，"下一转弯"是锦上添花，留它会把横幅顶高一大截
+        tvTurnNext.visibility = if (landscape) View.GONE else View.VISIBLE
+
         // 横屏太矮，红绿灯/过路费/路况估算不是骑行时需要的阅读项，折叠手柄隐藏，
         // 避免展开后面板长高吃掉大半个屏；竖屏照常。
         findViewById<View>(R.id.btn_expand).visibility = if (landscape) View.GONE else View.VISIBLE
+        tvTrafficEstimate.visibility = if (landscape) View.GONE else View.VISIBLE
+        // 车机连接提示在横屏也收掉（它会把底部面板顶高一整行），
+        // 但竖屏照常由连接状态控制，这里不能强行改成 GONE
+        if (landscape) tvBleHint.visibility = View.GONE
 
         val card = bottomInfo.layoutParams as FrameLayout.LayoutParams
         val acts = mapActions.layoutParams as FrameLayout.LayoutParams
         if (landscape) {
-            // 信息卡：右下角定宽面板，高度方向全让给地图
+            // 信息卡：右侧**窄条**（不是半屏），高度方向全让给地图
             card.gravity = Gravity.END or Gravity.BOTTOM
-            card.width = dp(340)
+            card.width = dp(DP_PANEL_LAND)
             // 地图操作键：挪到左下角，避开右侧面板
             acts.gravity = Gravity.START or Gravity.BOTTOM
             acts.marginStart = dp(14)
             acts.marginEnd = 0
-            acts.bottomMargin = dp(46)
+            // 面板已经挪到右侧了，不再需要抬到 46dp 躲它
+            acts.bottomMargin = dp(16)
         } else {
             // 竖屏：恢复底部通栏 + 右侧悬浮操作键
             card.gravity = Gravity.BOTTOM
@@ -1614,6 +1706,15 @@ class GuidanceActivity : AppCompatActivity() {
 
         /** 路口前自动放大的触发距离 */
         private const val AUTO_ZOOM_RANGE_M = 200
+
+        /**
+         * 横屏右侧信息条宽度（dp）。
+         * 806dp 宽的屏上占 268dp —— 约 1/3，其余全部留给地图。
+         */
+        private const val DP_PANEL_LAND = 268
+
+        /** 横屏镜头前移距离（米）：把车标压到屏幕下方，前方路口才看得全 */
+        private const val CAMERA_AHEAD_M = 30.0
 
         /** 更优路线检查间隔（4 分钟，兼顾体验与流量节省） */
         private const val BETTER_ROUTE_INTERVAL_MS = 4 * 60_000L

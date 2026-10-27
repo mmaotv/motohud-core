@@ -11,15 +11,14 @@ import android.content.Context
  * 换引擎就得改业务代码。抽成接口后，业务只说「我想说这句话」，
  * 由具体实现决定怎么说。
  *
- * ## 为什么 speak 同时要 text 和 clips
+ * ## 现在只有一种实现
  *
- * 两个实现需要的东西不一样：
- *  - [ClipSpeaker]（现有语音包）只能播预录片段 → 要 `clips`；
- *  - [com.motohud.ble.navi.tts.SherpaSpeaker]（离线合成）能念任意文本 → 要 `text`，
- *    而且**只有它能念出路名**（高德 `DriveStep.instruction` 本来就是含路名的整句）。
+ * [com.motohud.ble.navi.tts.SherpaSpeaker]（离线神经 TTS）是唯一的播报器：
+ * 模型装好后能念任意文本（含路名），完全离线、不依赖系统组件。
+ * 没有模型 / 语音关闭时由 [SilentSpeaker] 顶上，保证调用方不会空指针。
  *
- * 所以两个都传：能合成的用 text，合成不了就退回 clips。这样任何设备上
- * 都保证「至少有声音」，不会出现导航全程哑巴。
+ * 原来的预录语音包（[VoicePack] 片段拼装）已移除：它念不出路名、内容也太受限，
+ * 且与合成引擎会抢着出声。删除后导航只有一种声音，信息更完整、也不会叠音。
  */
 interface Speaker {
 
@@ -27,14 +26,11 @@ interface Speaker {
      * 播一句话。
      *
      * @param text 含路名的完整播报文本（如「沿黄桷坪正街行驶 500 米后右转」）。
-     *             实现方可以不支持文本，此时忽略它。
-     * @param clips 预录片段（`R.raw.vp_*`），**兜底用**。空表示没有可用片段。
      * @param priority 见 [SpeechPriority]
      * @param interrupt true = 抢播（清空正在播的）；false = 接在后面播
      */
     fun speak(
         text: String,
-        clips: List<Int>,
         priority: SpeechPriority = SpeechPriority.TURN,
         interrupt: Boolean = true
     )
@@ -43,7 +39,7 @@ interface Speaker {
      * 提前合成（预热）。
      *
      * 导航引擎知道「下一步是什么」，在距触发点还有十几秒时就可以把这句
-     * 合成好放缓存，真正播报时首字延迟几乎为 0。纯片段播放器实现里是空操作。
+     * 合成好放缓存，真正播报时首字延迟几乎为 0。
      */
     fun prewarm(text: String)
 
@@ -73,32 +69,16 @@ enum class SpeechPriority {
 }
 
 /**
- * 用内置语音包实现的 [Speaker]。
+ * 无语音实现：模型没下载 / 语音开关关闭时使用。
  *
- * **行为与改造前完全一致** —— 只播 `clips`，忽略 `text`
- * （语音包是预录片段，念不出任意文本，这是它设计上的已知代价）。
- * 改造这一层的目的只是给后面的离线合成留出入口，不改变任何听感。
+ * 所有方法都是空操作，仅保证调用方拿到的 [Speaker] 永远非空、不会崩。
+ * 业务侧（[com.motohud.ble.ui.navi.GuidanceActivity]）在调用前也会先判断
+ * `NaviPrefs.voice`，所以这里静默即可。
  */
-class ClipSpeaker(context: Context) : Speaker {
-
-    private val player = VoicePackPlayer(context)
-
-    override fun speak(
-        text: String,
-        clips: List<Int>,
-        priority: SpeechPriority,
-        interrupt: Boolean
-    ) {
-        if (clips.isEmpty()) return
-        player.speak(clips, interrupt)
-    }
-
-    /** 预录片段没有"合成"这一步 */
+object SilentSpeaker : Speaker {
+    override fun speak(text: String, priority: SpeechPriority, interrupt: Boolean) = Unit
     override fun prewarm(text: String) = Unit
-
-    override fun stop() = player.stop()
-
-    override fun setMuted(muted: Boolean) = player.setMuted(muted)
-
-    override fun release() = player.release()
+    override fun stop() = Unit
+    override fun setMuted(muted: Boolean) = Unit
+    override fun release() = Unit
 }

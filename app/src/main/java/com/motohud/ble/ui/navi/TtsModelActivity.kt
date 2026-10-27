@@ -22,7 +22,7 @@ import com.motohud.ble.data.NaviPrefs
 import com.motohud.ble.navi.SpeechPriority
 import com.motohud.ble.navi.tts.SherpaSpeaker
 import com.motohud.ble.navi.tts.TtsModelStore
-import com.motohud.ble.navi.tts.TtsVoice
+import com.motohud.ble.navi.tts.TtsStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,6 +55,15 @@ class TtsModelActivity : AppCompatActivity() {
     private lateinit var voiceBox: android.widget.LinearLayout
     private lateinit var speedBar: SeekBar
     private lateinit var speedValue: TextView
+    private lateinit var volumeBar: SeekBar
+    private lateinit var volumeValue: TextView
+    private lateinit var libCard: View
+    private lateinit var libCount: TextView
+    private lateinit var libProgress: ProgressBar
+    private lateinit var btnLib: TextView
+
+    /** 语音库是否正在生成（生成完之前禁止重复点击） */
+    private var libBuilding = false
 
     /** 试听用的播报器（页面销毁时释放，避免常驻一个 30MB 的模型实例） */
     private var testSpeaker: SherpaSpeaker? = null
@@ -86,12 +95,20 @@ class TtsModelActivity : AppCompatActivity() {
         voiceBox = findViewById(R.id.tts_voice_box)
         speedBar = findViewById(R.id.tts_speed)
         speedValue = findViewById(R.id.tts_speed_value)
+        volumeBar = findViewById(R.id.tts_volume)
+        volumeValue = findViewById(R.id.tts_volume_value)
+        libCard = findViewById(R.id.tts_lib_card)
+        libCount = findViewById(R.id.tts_lib_count)
+        libProgress = findViewById(R.id.tts_lib_progress)
+        btnLib = findViewById(R.id.tts_btn_lib)
 
         findViewById<View>(R.id.tts_btn_back).setOnClickListener { finish() }
         btnDownload.setOnClickListener { download() }
         btnDelete.setOnClickListener { confirmDelete() }
         btnTest.setOnClickListener { test() }
+        btnLib.setOnClickListener { buildLibrary() }
         setupSpeed()
+        setupVolume()
 
         render()
     }
@@ -119,6 +136,34 @@ class TtsModelActivity : AppCompatActivity() {
 
     private fun progressToSpeed(p: Int): Float = 0.7f + p * 0.1f
 
+    /** 音量滑块：0..4 → 1.0×..3.0×，每档 0.5 */
+    private fun setupVolume() {
+        val steps = NaviPrefs.VOLUME_STEPS
+        volumeBar.progress = steps.indexOfFirst { it >= NaviPrefs.ttsVolume.value }
+            .takeIf { it >= 0 } ?: steps.indexOfFirst { it >= NaviPrefs.DEFAULT_TTS_VOLUME }
+        renderVolumeValue()
+        volumeBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                NaviPrefs.setTtsVolume(steps[p.coerceIn(steps.indices)])
+                renderVolumeValue()
+            }
+
+            override fun onStartTrackingTouch(sb: SeekBar?) = Unit
+            override fun onStopTrackingTouch(sb: SeekBar?) = test()
+        })
+        renderVolumeValue()
+    }
+
+    private fun renderVolumeValue() {
+        val steps = NaviPrefs.VOLUME_STEPS
+        val v = steps[volumeBar.progress.coerceIn(steps.indices)]
+        volumeValue.text = getString(
+            R.string.tts_volume_value,
+            String.format(Locale.US, "%.1f", v)
+        )
+    }
+
     private fun renderSpeedValue() {
         speedValue.text = getString(
             R.string.tts_speed_value,
@@ -126,17 +171,17 @@ class TtsModelActivity : AppCompatActivity() {
         )
     }
 
-    /** 音色 chips：点哪个就切到哪个并立刻试听，省得用户来回点两下 */
+    /** 风格 chips：点哪个就切到哪个并立刻试听，省得用户来回点两下 */
     private fun renderVoices() {
         voiceBox.removeAllViews()
-        val current = NaviPrefs.ttsSpeaker.value
-        TtsVoice.ALL.forEachIndexed { i, id ->
+        val current = NaviPrefs.ttsStyle.value
+        TtsStyle.ALL.forEach { style ->
             val chip = TextView(this).apply {
-                text = TtsVoice.label(i)
+                text = style.name
                 setTextColor(
                     ContextCompat.getColor(
                         this@TtsModelActivity,
-                        if (id == current) R.color.text_primary else R.color.text_secondary
+                        if (style.id == current) R.color.text_primary else R.color.text_secondary
                     )
                 )
                 textSize = 13f
@@ -144,15 +189,17 @@ class TtsModelActivity : AppCompatActivity() {
                 setPadding(dp(14), dp(8), dp(14), dp(8))
                 background = ContextCompat.getDrawable(
                     this@TtsModelActivity,
-                    if (id == current) R.drawable.bg_chip_selected else R.drawable.bg_chip
+                    if (style.id == current) R.drawable.bg_chip_selected else R.drawable.bg_chip
                 )
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply { marginEnd = dp(8) }
                 setOnClickListener {
-                    NaviPrefs.setTtsSpeaker(id)
+                    // 换风格 = 换音色 + 语速 + 音调，缓存/语音库都按风格分开存，不会串味
+                    NaviPrefs.setTtsStyle(style.id)
                     renderVoices()
+                    renderLibCount()
                     test()
                 }
             }
@@ -179,7 +226,49 @@ class TtsModelActivity : AppCompatActivity() {
         btnDelete.visibility = if (installed) View.VISIBLE else View.GONE
         btnTest.visibility = if (installed) View.VISIBLE else View.GONE
         tuneCard.visibility = if (installed) View.VISIBLE else View.GONE
-        if (installed) renderVoices()
+        libCard.visibility = if (installed) View.VISIBLE else View.GONE
+        if (installed) {
+            renderVoices()
+            renderLibCount()
+        }
+    }
+
+    private fun renderLibCount() {
+        val n = SherpaSpeaker.libraryCount(this)
+        val size = AppCache.human(SherpaSpeaker.libraryBytes(this))
+        libCount.text = getString(R.string.tts_lib_count, n, size)
+    }
+
+    /**
+     * 生成离线语音库。
+     *
+     * 150 条约 2~3 分钟，所以给进度条而不是转圈；中途退出也无所谓，
+     * 已生成的都落盘了，下次进来接着补（[SherpaSpeaker.buildVoiceLibrary] 会跳过已有的）。
+     */
+    private fun buildLibrary() {
+        if (libBuilding) return
+        libBuilding = true
+        btnLib.isEnabled = false
+        btnLib.alpha = 0.45f
+        libProgress.visibility = View.VISIBLE
+        libProgress.progress = 0
+        SherpaSpeaker.buildVoiceLibrary(this) { done, total ->
+            if (isFinishing || isDestroyed) return@buildVoiceLibrary
+            libProgress.progress = if (total > 0) done * 100 / total else 100
+            libCount.text = getString(R.string.tts_lib_building, done, total)
+            if (done >= total) {
+                libBuilding = false
+                btnLib.isEnabled = true
+                btnLib.alpha = 1f
+                libProgress.visibility = View.GONE
+                renderLibCount()
+                Toast.makeText(
+                    this@TtsModelActivity,
+                    getString(R.string.tts_lib_done, SherpaSpeaker.libraryCount(this@TtsModelActivity)),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
     }
 
     private fun download() {
@@ -220,6 +309,9 @@ class TtsModelActivity : AppCompatActivity() {
                     this@TtsModelActivity, R.string.tts_download_ok, Toast.LENGTH_SHORT
                 ).show()
                 render()
+                // 模型一就绪就顺手把语音库生成了：不生成的话第一次导航的头几句
+                // 都要现合成，用户会以为"这软件反应慢"
+                buildLibrary()
             }.onFailure { e ->
                 Toast.makeText(
                     this@TtsModelActivity,
@@ -274,7 +366,6 @@ class TtsModelActivity : AppCompatActivity() {
             }
             speaker.speak(
                 getString(R.string.tts_test_text),
-                emptyList(),
                 SpeechPriority.INFO
             )
         }

@@ -61,6 +61,11 @@ class MotoHudApp : Application() {
         // 拖到进导航再加载的话，头几句只能退回预录语音包，听感上"路名时有时无"。
         if (com.motohud.ble.navi.tts.TtsModelStore.isInstalled(this)) {
             com.motohud.ble.navi.tts.SherpaSpeaker.warmUp(this)
+            // 语音库没生成全就在后台补：库是空的话第一次导航的前几句都要现合成，
+            // 用户只会觉得"反应慢"。生成期间遇到实时播报会自动让位，不会挡住导航。
+            if (com.motohud.ble.navi.tts.SherpaSpeaker.libraryMissing(this) > 0) {
+                com.motohud.ble.navi.tts.SherpaSpeaker.buildVoiceLibrary(this) { _, _ -> }
+            }
         }
     }
 }

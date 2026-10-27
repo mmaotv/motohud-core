@@ -3,6 +3,7 @@ package com.motohud.ble.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.amap.api.services.route.RouteSearch
+import com.motohud.ble.navi.tts.TtsStyle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +36,10 @@ object NaviPrefs {
     const val VOICE_MODE_BRIEF = 1
     const val VOICE_MODE_TURN_ONLY = 2
 
+    /** 播报音量档位（模型原始输出偏小，必须放大才听得清；默认 2.0×） */
+    val VOLUME_STEPS = floatArrayOf(1.0f, 1.5f, 2.0f, 2.5f, 3.0f)
+    const val DEFAULT_TTS_VOLUME = 2.0f
+
     private const val PREFS = "navi_prefs"
     private const val KEY_MOTORCYCLE = "motorcycle_mode"
     private const val KEY_AVOID_HIGHWAY = "avoid_highway"
@@ -58,11 +63,19 @@ object NaviPrefs {
     private const val KEY_TIME_FIRST = "route_time_first"
     private const val KEY_TRAFFIC_FIRST = "route_traffic_first"
 
-    /** 离线语音音色（AISHELL-3 是多说话人模型，值就是 speakerId） */
-    private const val KEY_TTS_SPEAKER = "tts_speaker"
+    /**
+     * 离线语音**风格**（"御姐音" / "调皮活泼" / "小女孩" …）的标识。
+     *
+     * 存的是风格 id 而不是裸 speakerId：[TtsStyle] 一个风格 = 说话人 + 语速 + 音调，
+     * 单独存编号用户根本选不出来（"音色 3"是谁？）。
+     */
+    private const val KEY_TTS_STYLE = "tts_style"
 
     /** 离线语音语速倍率 */
     private const val KEY_TTS_SPEED = "tts_speed"
+
+    /** 播报音量倍率（引擎原始输出偏小，需要放大才听得清） */
+    private const val KEY_TTS_VOLUME = "tts_volume"
 
     private lateinit var prefs: SharedPreferences
 
@@ -88,13 +101,14 @@ object NaviPrefs {
     val voiceMode: StateFlow<Int> = _voiceMode.asStateFlow()
 
     /**
-     * 离线语音音色：AISHELL-3 是 174 说话人模型，这里存 speakerId。
+     * 当前播报风格 id（见 [TtsStyle]）。
      *
-     * 挑的是一组听感差别明显的编号（见 [TtsVoice.ALL]），
-     * 用户挨个试听选一个，不用自己输数字。
+     * 一个风格同时决定三件事：说话人、语速、音调。
+     * 三者打包成"御姐音/调皮/小女孩"这种有名字的选项，用户听一遍就能记住，
+     * 比让人在 174 个编号里盲选友好得多。
      */
-    private val _ttsSpeaker = MutableStateFlow(0)
-    val ttsSpeaker: StateFlow<Int> = _ttsSpeaker.asStateFlow()
+    private val _ttsStyle = MutableStateFlow(TtsStyle.DEFAULT.id)
+    val ttsStyle: StateFlow<String> = _ttsStyle.asStateFlow()
 
     /**
      * 离线语音语速倍率（0.7~1.4）。
@@ -104,6 +118,15 @@ object NaviPrefs {
      */
     private val _ttsSpeed = MutableStateFlow(1.0f)
     val ttsSpeed: StateFlow<Float> = _ttsSpeed.asStateFlow()
+
+    /**
+     * 播报音量倍率。
+     *
+     * 离线模型原始输出振幅偏小（只有 ±0.3 左右），摩托车上风噪又大，
+     * 不放大基本听不清。默认 2.0×，用户还能按自己的耳机/蓝牙再调。
+     */
+    private val _ttsVolume = MutableStateFlow(DEFAULT_TTS_VOLUME)
+    val ttsVolume: StateFlow<Float> = _ttsVolume.asStateFlow()
 
     /**
      * 是否把导航信息投到车机（BLE 转发开关）。
@@ -156,8 +179,10 @@ object NaviPrefs {
         _avoidHighway.value = prefs.getBoolean(KEY_AVOID_HIGHWAY, true)
         _voice.value = prefs.getBoolean(KEY_VOICE, true)
         _voiceMode.value = prefs.getInt(KEY_VOICE_MODE, VOICE_MODE_DETAIL)
-        _ttsSpeaker.value = prefs.getInt(KEY_TTS_SPEAKER, 0)
+        _ttsStyle.value = prefs.getString(KEY_TTS_STYLE, TtsStyle.DEFAULT.id)
+            ?: TtsStyle.DEFAULT.id
         _ttsSpeed.value = prefs.getFloat(KEY_TTS_SPEED, 1.0f)
+        _ttsVolume.value = prefs.getFloat(KEY_TTS_VOLUME, DEFAULT_TTS_VOLUME)
         // 「投屏」从页面改成开关：默认开（连了车机就是要投），忽略已废弃的 phone_mode
         _castEnabled.value = prefs.getBoolean(KEY_CAST, true)
         _screenOffNavi.value = prefs.getBoolean(KEY_SCREEN_OFF, true)
@@ -190,9 +215,14 @@ object NaviPrefs {
         prefs.edit().putInt(KEY_VOICE_MODE, mode).apply()
     }
 
-    fun setTtsSpeaker(id: Int) {
-        _ttsSpeaker.value = id
-        prefs.edit().putInt(KEY_TTS_SPEAKER, id).apply()
+    fun setTtsVolume(v: Float) {
+        _ttsVolume.value = v
+        prefs.edit().putFloat(KEY_TTS_VOLUME, v).apply()
+    }
+
+    fun setTtsStyle(id: String) {
+        _ttsStyle.value = id
+        prefs.edit().putString(KEY_TTS_STYLE, id).apply()
     }
 
     fun setTtsSpeed(speed: Float) {

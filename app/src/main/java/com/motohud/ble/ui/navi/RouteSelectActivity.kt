@@ -659,19 +659,25 @@ class RouteSelectActivity : AppCompatActivity() {
     }
 
     /**
-     * 预合成当前方案的前两句引导语。
+     * 预合成当前方案的前两段要说的话。
      *
-     * 算完路线到用户点「开始导航」通常有几秒，正好够离线引擎合成前两句；
-     * 不提前做的话，进导航后的第一句必然赶不上（合成 700ms+，看门狗 800ms
-     * 一到就退回语音包，路名又没了）。
+     * 算完路线到用户点「开始导航」通常有几秒，正好够离线引擎合成前几句；
+     * 不提前做的话，进导航后的第一句必然赶不上（合成 700ms+，看门狗一到
+     * 就退回语音包，路名又没了）。
+     *
+     * 文本必须与导航页 `stepText()` **逐字一致**才命中缓存 —— 所以统一走
+     * [SpeechScript]，不要在这里另拼一套。
      */
     private fun prefetchSpeech() {
         if (!com.motohud.ble.data.NaviPrefs.voice.value) return
         val r = routes.getOrNull(selected) ?: return
-        com.motohud.ble.navi.tts.SherpaSpeaker.prefetch(
-            this,
-            r.steps.take(2).mapNotNull { it.instruction?.takeIf { s -> s.isNotBlank() } }
-        )
+        val texts = r.steps.take(2).flatMap { step ->
+            val icon = com.motohud.ble.navi.IconMapper
+                .of(step.action, step.orientation, step.instruction)
+            com.motohud.ble.navi.SpeechScript
+                .variants(icon, step.distanceM, step.road, step.instruction)
+        }
+        com.motohud.ble.navi.tts.SherpaSpeaker.prefetch(this, texts)
     }
 
     /**
