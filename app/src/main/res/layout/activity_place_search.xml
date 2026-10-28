@@ -5,13 +5,24 @@
     android:layout_height="match_parent"
     android:background="@color/bg_window">
 
-    <!-- 顶部搜索栏 -->
+    <!-- 背景地图：途经点 / 顺路搜时画出当前路线，用户能直观看到选的点落在路线的哪个位置 -->
+    <com.amap.api.maps.MapView
+        android:id="@+id/ps_map"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- 顶部搜索栏（半透明压在地图上，保证可读） -->
     <LinearLayout
         android:id="@+id/ps_top"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
+        android:background="#CC0E0E12"
         android:paddingStart="12dp"
         android:paddingTop="10dp"
         android:paddingEnd="12dp"
@@ -70,12 +81,35 @@
         </LinearLayout>
     </LinearLayout>
 
+    <!-- 类型筛选（仅"沿途搜索"模式显示） -->
+    <HorizontalScrollView
+        android:id="@+id/ps_cats"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        android:scrollbars="none"
+        android:background="#CC0E0E12"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/ps_top">
+
+        <LinearLayout
+            android:id="@+id/ps_cats_row"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp" />
+    </HorizontalScrollView>
+
     <TextView
         android:id="@+id/ps_state"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginStart="12dp"
-        android:layout_marginTop="4dp"
+        android:layout_marginTop="8dp"
         android:layout_marginEnd="12dp"
         android:background="@drawable/bg_card"
         android:fontFamily="@font/inter"
@@ -85,18 +119,25 @@
         android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/ps_top" />
+        app:layout_constraintTop_toBottomOf="@id/ps_cats" />
 
+    <!-- 结果列表：底部抽屉，上方露出地图与路线 -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/ps_list"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginTop="8dp"
         android:background="@drawable/bg_card"
         android:padding="4dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/ps_state" />
+        app:layout_constraintTop_toTopOf="@id/ps_guideline" />
+
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/ps_guideline"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        app:layout_constraintGuide_percent="0.42" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

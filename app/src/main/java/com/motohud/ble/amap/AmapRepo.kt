@@ -376,6 +376,77 @@ class AmapRepo(private val context: Context) {
 
     // ---------- 转换 ----------
 
+    /**
+     * 沿途 POI 搜索（顺路搜）。
+     *
+     * 沿给定路线走廊（[polyline]，GCJ-02 路线点）查找指定类型 POI，是"顺路加油 / 顺路充电"
+     * 这类需求的标准做法：高德 [RoutePOISearch] 直接按路线做空间召回，结果自带"离路线距离"。
+     *
+     * @param types 一个或多个 POI 类型（"全部"传多种类型会合并去重）
+     * @param radiusM 沿线搜索半径（米），默认 1000
+     * @param keyword 可选的名称关键字过滤（客户端按标题过滤）
+     */
+    suspend fun routePoiSearch(
+        polyline: List<Pair<Double, Double>>,
+        types: List<com.amap.api.services.routepoisearch.RoutePOISearch.RoutePOISearchType>,
+        radiusM: Int = 1000,
+        keyword: String = ""
+    ): TipsResult {
+        if (polyline.size < 2) return TipsResult.Ok(emptyList())
+        val pts = polyline.map { LatLonPoint(it.first, it.second) }
+        val merged = LinkedHashMap<String, com.amap.api.services.routepoisearch.RoutePOIItem>()
+        for (t in types) {
+            for (item in oneRoutePoi(pts, t, radiusM)) {
+                val id = item.getID().orEmpty()
+                if (id.isNotBlank()) merged.putIfAbsent(id, item)
+            }
+        }
+        val filtered = if (keyword.isNotBlank()) {
+            merged.values.filter { it.getTitle().orEmpty().contains(keyword, true) }
+        } else {
+            merged.values.toList()
+        }
+        val items = filtered.map { it.toRouteTip() }
+            .sortedBy { it.distanceM ?: Int.MAX_VALUE }
+        return TipsResult.Ok(items)
+    }
+
+    private suspend fun oneRoutePoi(
+        pts: List<LatLonPoint>,
+        type: com.amap.api.services.routepoisearch.RoutePOISearch.RoutePOISearchType,
+        radiusM: Int
+    ): List<com.amap.api.services.routepoisearch.RoutePOIItem> =
+        suspendCancellableCoroutine { cont ->
+            try {
+                val query = com.amap.api.services.routepoisearch.RoutePOISearchQuery(pts, type, radiusM)
+                val search = com.amap.api.services.routepoisearch.RoutePOISearch(context, query)
+                search.setPoiSearchListener { result, rCode ->
+                    if (rCode == 1000 && result != null) {
+                        cont.resume(result.routePois.orEmpty())
+                    } else {
+                        cont.resume(emptyList())
+                    }
+                }
+                search.searchRoutePOIAsyn()
+            } catch (e: Exception) {
+                cont.resume(emptyList())
+            }
+        }
+
+    private fun com.amap.api.services.routepoisearch.RoutePOIItem.toRouteTip(): TipItem {
+        val p = point
+        val detour = if (distance > 0f) distance.toInt() else null
+        return TipItem(
+            name = getTitle().orEmpty(),
+            address = if (detour != null) "离路线约 ${detour} 米" else "沿途",
+            district = "",
+            latitude = p?.latitude ?: 0.0,
+            longitude = p?.longitude ?: 0.0,
+            distanceM = detour,
+            adCode = null
+        )
+    }
+
     private fun Tip.toItem(origin: Pair<Double, Double>?): TipItem? {
         val p = point ?: return null
         return TipItem(

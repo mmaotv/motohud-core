@@ -226,6 +226,10 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
         // 只在"点了搜索框、还没开始输入"时展示：
         // 已经有输入内容时屏幕属于联想结果，两者同时出现会互相挤。
         etSearch.setOnFocusChangeListener { _, focused ->
+            // 重新聚焦搜索框时，若地点卡正开着，先收起卡片本体（但保留搜索中心，
+            // "在 X 附近搜索"提示条继续生效），否则结果列表会被地点卡挡住（rvTips 在
+            // cardOpen 时为 GONE），表现为"搜不出来 / 失效"。
+            if (focused && placeCard.visibility == View.VISIBLE) hidePlaceCardKeepCenter()
             if (focused && etSearch.text.isNullOrBlank()) refreshHistory() else hideHistory()
         }
 
@@ -235,6 +239,8 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
             override fun afterTextChanged(s: Editable?) {
                 val text = s?.toString().orEmpty()
                 btnClear.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+                // 正在输入且地点卡还开着 → 收起卡片让结果列表能显示出来（保留搜索中心，附近搜索继续生效）
+                if (text.isNotEmpty() && placeCard.visibility == View.VISIBLE) hidePlaceCardKeepCenter()
                 searchRunnable?.let { searchHandler.removeCallbacks(it) }
                 if (text.isEmpty()) {
                     vm.clearTips()
@@ -801,6 +807,29 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
         picked = null
         // 解除地点钉住，搜索回到"以当前位置为中心"
         vm.resetSearchCenter()
+        placeCard.visibility = View.GONE
+        runCatching { placeMarker?.remove() }
+        placeMarker = null
+        val searching = etSearch.text?.isNotEmpty() == true
+        chipsScroll.visibility = if (searching) View.GONE else View.VISIBLE
+        cardBottom.visibility = if (searching) View.GONE else View.VISIBLE
+        fabLocation.visibility = if (searching) View.GONE else View.VISIBLE
+    }
+
+    /**
+     * 收起地点卡本体，但**保留搜索中心**（"附近搜索"钉住点不动）。
+     *
+     * 用途：用户点了一个结果、地点卡弹出后，想"在这个地点附近再搜一个"。
+     * 这时若直接再敲搜索框，结果列表会被地点卡挡住（[rvTips] 在 cardOpen 时为 GONE），
+     * 表现就是"搜不出来 / 失效"。这里在用户重新聚焦或输入时收起卡片本体，
+     * 让结果能正常显示，同时保留钉住点 —— 后续搜索仍围绕该点展开，
+     * [searchScope] 提示条继续提示"在 X 附近搜索 · 点此回当前位置"。
+     */
+    private fun hidePlaceCardKeepCenter() {
+        if (placeCard.visibility != View.VISIBLE) return
+        reverseJob?.cancel()
+        picked = null
+        // 注意：不调用 vm.resetSearchCenter()，搜索中心（附近搜索）保持不动
         placeCard.visibility = View.GONE
         runCatching { placeMarker?.remove() }
         placeMarker = null

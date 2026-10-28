@@ -574,6 +574,11 @@
     <string name="place_search_loading">搜索中…</string>
     <string name="place_search_empty">没有找到相关地点，换个词试试</string>
     <string name="place_search_current_only">未获取到定位，先在地图上选点</string>
+    <string name="place_search_along_title">沿途搜索</string>
+    <string name="place_search_along_no_route">尚未规划出路线，无法沿路线搜索</string>
+    <string name="cat_all">全部</string>
+    <string name="route_along_search">沿途搜索（顺路加站）</string>
+    <string name="route_along_no_route">请先规划出路线，再顺路搜索</string>
 
     <!-- 搜索历史 -->
     <string name="search_history_clear">清空</string>

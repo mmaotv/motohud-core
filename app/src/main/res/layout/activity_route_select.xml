@@ -175,6 +175,41 @@
             android:textSize="11sp" />
     </LinearLayout>
 
+    <!-- 沿途搜索：在去目的地的路上顺手办件事（加油 / 充电 / 餐饮…），选的点直接加为途经点 -->
+    <LinearLayout
+        android:id="@+id/rs_along_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="6dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_chip"
+        android:gravity="center_vertical"
+        android:minHeight="40dp"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="8dp">
+
+        <ImageView
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:contentDescription="@string/route_along_search"
+            android:src="@drawable/ic_search"
+            android:tint="@color/accent" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:fontFamily="@font/inter"
+            android:text="@string/route_along_search"
+            android:textColor="@color/accent"
+            android:textSize="13sp" />
+    </LinearLayout>
+
     <!-- 目的地 + 路线偏好入口 -->
     <LinearLayout
         android:layout_width="match_parent"

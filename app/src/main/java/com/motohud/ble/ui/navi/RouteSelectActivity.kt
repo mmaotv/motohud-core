@@ -30,6 +30,7 @@ import com.motohud.ble.data.NaviPrefs
 import com.motohud.ble.navi.CoordConverter
 import com.motohud.ble.navi.RouteData
 import com.motohud.ble.navi.RouteHandoff
+import kotlin.math.max
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -109,6 +110,29 @@ class RouteSelectActivity : AppCompatActivity() {
         else setOrigin(name, lat, lng)
     }
 
+    /** 沿路线搜索：选出的 POI 直接**追加**为一个新途经点（顺路办件事） */
+    private val alongRouteLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { r ->
+        if (r.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+        val name = r.data?.getStringExtra(PlaceSearchActivity.EXTRA_NAME)
+            .orEmpty().ifBlank { getString(R.string.place_card_point) }
+        val lat = r.data?.getDoubleExtra(PlaceSearchActivity.EXTRA_LAT, 0.0) ?: 0.0
+        val lng = r.data?.getDoubleExtra(PlaceSearchActivity.EXTRA_LNG, 0.0) ?: 0.0
+        if (lat == 0.0 && lng == 0.0) return@registerForActivityResult
+        if (waypoints.size >= RouteQueryOptions.MAX_WAYPOINTS) {
+            Toast.makeText(
+                this,
+                getString(R.string.route_waypoint_limit, RouteQueryOptions.MAX_WAYPOINTS),
+                Toast.LENGTH_SHORT
+            ).show()
+            return@registerForActivityResult
+        }
+        waypoints += Waypoint(name, lat, lng)
+        renderWaypoints()
+        plan()
+    }
+
     // ---------- 路线预览图 ----------
     private var mapView: com.amap.api.maps.MapView? = null
     private var aMap: com.amap.api.maps.AMap? = null
@@ -180,6 +204,7 @@ class RouteSelectActivity : AppCompatActivity() {
         findViewById<View>(R.id.rs_start).setOnClickListener { startNavi() }
         findViewById<View>(R.id.rs_other_map).setOnClickListener { showThirdPartyMaps() }
         findViewById<View>(R.id.rs_add_waypoint).setOnClickListener { addWaypoint() }
+        findViewById<View>(R.id.rs_along_row).setOnClickListener { openAlongRouteSearch() }
         findViewById<View>(R.id.rs_avoid_row).setOnClickListener {
             startActivity(Intent(this, AvoidZoneActivity::class.java))
         }
@@ -397,13 +422,17 @@ class RouteSelectActivity : AppCompatActivity() {
             mapPickLauncher.launch(MapPickActivity.intent(this, clat, clng))
         }
         dialog.onPickSearch = {
-            // 以路线起点为中心搜途经点，结果天然围绕本程路线，不会搜到别的大城市
+            // 以路线起点为中心搜途经点，结果天然围绕本程路线，不会搜到别的大城市；
+            // 同时把当前路线几何传过去，让搜索页背景地图画出路线，选点看得见落点
             pickingForWaypoint = index
             searchPickLauncher.launch(
                 PlaceSearchActivity.intent(
                     this,
                     getString(R.string.route_waypoint_pick_title),
-                    startLat, startLng
+                    startLat, startLng,
+                    routeLatLng = routePolylineArray(),
+                    startLat = startLat, startLng = startLng,
+                    destLat = destLat, destLng = destLng
                 )
             )
         }
@@ -415,6 +444,55 @@ class RouteSelectActivity : AppCompatActivity() {
         waypoints[index] = Waypoint(name, lat, lng)
         renderWaypoints()
         plan()
+    }
+
+    /**
+     * 沿路线搜索（顺路搜）入口：把当前已算出的路线折线降采样后传给搜索页，
+     * 搜索页在背景地图上画路线，并用 [com.motohud.ble.amap.AmapRepo.routePoiSearch]
+     * 沿路线走廊召回 POI。选中的点作为新途经点追加，实现"顺路办件事"。
+     */
+    private fun openAlongRouteSearch() {
+        val poly = routePolylineArray()
+        if (poly == null) {
+            Toast.makeText(this, R.string.route_along_no_route, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (waypoints.size >= RouteQueryOptions.MAX_WAYPOINTS) {
+            Toast.makeText(
+                this,
+                getString(R.string.route_waypoint_limit, RouteQueryOptions.MAX_WAYPOINTS),
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        alongRouteLauncher.launch(
+            PlaceSearchActivity.intent(
+                this,
+                getString(R.string.place_search_along_title),
+                startLat, startLng,
+                routeLatLng = poly,
+                startLat = startLat, startLng = startLng,
+                destLat = destLat, destLng = destLng,
+                alongRoute = true
+            )
+        )
+    }
+
+    /**
+     * 把当前选中方案的路线折线降采样成 DoubleArray（lat,lng 交替），
+     * 通过 Intent 传给搜索页画背景地图。降采样是为了避免几千个点撑爆 Intent 的事务缓冲区。
+     */
+    private fun routePolylineArray(): DoubleArray? {
+        val r = routes.getOrNull(selected) ?: return null
+        val pts = r.steps.flatMap { it.polyline }
+        if (pts.isEmpty()) return null
+        val maxPts = 120
+        val stepN = max(1, pts.size / maxPts)
+        val sampled = if (stepN <= 1) pts else pts.filterIndexed { i, _ -> i % stepN == 0 }
+        val out = sampled.toMutableList().also { if (it.last() != pts.last()) it.add(pts.last()) }
+        val arr = DoubleArray(out.size * 2)
+        out.forEachIndexed { i, p -> arr[i * 2] = p.first; arr[i * 2 + 1] = p.second }
+        return arr
     }
 
     private fun removeWaypoint(index: Int) {
@@ -512,7 +590,10 @@ class RouteSelectActivity : AppCompatActivity() {
                 PlaceSearchActivity.intent(
                     this,
                     getString(R.string.origin_pick_title),
-                    startLat, startLng
+                    startLat, startLng,
+                    routeLatLng = routePolylineArray(),
+                    startLat = startLat, startLng = startLng,
+                    destLat = destLat, destLng = destLng
                 )
             )
         }
