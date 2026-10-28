@@ -130,6 +130,7 @@ class GuidanceActivity : AppCompatActivity() {
     private lateinit var tvSpeed: TextView
     private lateinit var tvGpsMode: TextView
     private lateinit var tvGpsQuality: TextView
+    private lateinit var statGps: View
     private lateinit var tvSignalWarn: View
     private lateinit var tvBleHint: TextView
     private lateinit var tvLights: TextView
@@ -314,6 +315,7 @@ class GuidanceActivity : AppCompatActivity() {
         tvSpeed = findViewById(R.id.tv_speed_live)
         tvGpsMode = findViewById(R.id.tv_gps_mode)
         tvGpsQuality = findViewById(R.id.tv_gps_quality)
+        statGps = findViewById(R.id.stat_gps)
         tvSignalWarn = findViewById(R.id.tv_signal_warn)
         tvBleHint = findViewById(R.id.tv_guidance_ble_hint)
         tvLights = findViewById(R.id.tv_lights)
@@ -349,8 +351,18 @@ class GuidanceActivity : AppCompatActivity() {
         }
         ViewCompat.setOnApplyWindowInsetsListener(bottomInfo) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            // right 也吃 inset：横屏时它是右下角定宽面板，要避开侧边手势条/挖孔
-            v.updatePadding(bottom = bars.bottom + baseBottom, right = bars.right + baseEnd)
+            if (landscapeNow) {
+                // 横屏侧栏在左侧：按左边系统栏留白，避开手势条/挖孔；右侧留少量内边距
+                v.updatePadding(
+                    left = bars.left + baseEnd,
+                    right = baseEnd,
+                    top = baseTop,
+                    bottom = bars.bottom + baseBottom
+                )
+            } else {
+                // 竖屏底部通栏：右边吃 inset，避开侧边手势条
+                v.updatePadding(bottom = bars.bottom + baseBottom, right = bars.right + baseEnd)
+            }
             insets
         }
     }
@@ -1043,6 +1055,8 @@ class GuidanceActivity : AppCompatActivity() {
                 } else {
                     getString(R.string.guidance_cast_off_hint)
                 }
+                // 横屏极度精简：侧栏不留连接提示，避免顶高一整行
+                if (landscapeNow) tvBleHint.visibility = View.GONE
             }
         }
         lifecycleScope.launch {
@@ -1052,6 +1066,8 @@ class GuidanceActivity : AppCompatActivity() {
                     else View.VISIBLE
                 tvBleHint.text = if (it) getString(R.string.guidance_ble_hint)
                 else getString(R.string.guidance_cast_off_hint)
+                // 横屏极度精简：侧栏不留连接提示
+                if (landscapeNow) tvBleHint.visibility = View.GONE
             }
         }
     }
@@ -1593,53 +1609,58 @@ class GuidanceActivity : AppCompatActivity() {
             height = if (landscape) dp(96) else dp(220)
         }
 
-        // ---- 顶栏：横屏收成左上角一簇，不再横穿整屏 ----
-        // 横屏屏宽 806dp，顶栏原来 match_parent 会连转向横幅一起铺满整条，
-        // 地图只剩中间一条缝。收窄后上方 60% 的宽度都还给地图。
+        // ---- 顶栏 + 信息卡：横屏统一收成「左侧一条侧栏」，地图拿回右侧全部空间 ----
+        // 竖屏恢复顶部通栏 + 底部通栏。横屏就是为「看清前方路口」而生的，
+        // 不该再像竖屏那样把控件摊在两边、把地图挤成一条缝。
         (topBar.layoutParams as FrameLayout.LayoutParams).apply {
-            width = if (landscape) dp(330) else ViewGroup.LayoutParams.MATCH_PARENT
+            width = if (landscape) dp(DP_PANEL_LAND) else ViewGroup.LayoutParams.MATCH_PARENT
             gravity = if (landscape) Gravity.TOP or Gravity.START else Gravity.TOP
             topBar.layoutParams = this
         }
-        // 副标题（全程 X 公里·预计 Y）与模式角标在横屏让位：它们不是骑行中要盯的东西
+        // 副标题（全程 X 公里·预计 Y）与模式角标在横屏让位：不是骑行中要盯的东西
         tvDestSub.visibility = if (landscape) View.GONE else View.VISIBLE
         findViewById<View>(R.id.tv_mode_badge).visibility =
             if (landscape) View.GONE else View.VISIBLE
 
-        // ---- 转向横幅：跟顶栏一起收窄，**不再额外加右边距** ----
-        // 以前顶栏是全宽的，要用右边距把横幅"推"离右侧面板；
-        // 现在顶栏本身就只有 330dp 宽，再加边距会把横幅挤成一条竖缝（实测踩过）。
-        val sideZone = 0
+        // 转向横幅跟顶栏一起收窄，不再额外加右边距（顶栏本身只有面板宽）
         (turnBanner.layoutParams as ViewGroup.MarginLayoutParams).apply {
-            rightMargin = if (landscape) sideZone else 0
+            rightMargin = 0
             turnBanner.layoutParams = this
         }
         (tvSignalWarn.layoutParams as ViewGroup.MarginLayoutParams).apply {
-            rightMargin = if (landscape) sideZone else 0
+            rightMargin = 0
             tvSignalWarn.layoutParams = this
         }
         // 横屏屏高只有 360dp，"下一转弯"是锦上添花，留它会把横幅顶高一大截
         tvTurnNext.visibility = if (landscape) View.GONE else View.VISIBLE
 
-        // 横屏太矮，红绿灯/过路费/路况估算不是骑行时需要的阅读项，折叠手柄隐藏，
-        // 避免展开后面板长高吃掉大半个屏；竖屏照常。
+        // ---- 横屏极度精简：只留导航相关 ----
+        // 隐藏：画中画入口（小窗场景另走通知条）、底部投屏钮（顶栏已有同功能钮）、
+        //       GPS 质量列（诊断项非导航必看）、全览（横屏只留「回中」）。
+        btnPip.visibility = if (landscape) View.GONE else
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.btn_cast_navi).visibility =
+            if (landscape) View.GONE else View.VISIBLE
+        statGps.visibility = if (landscape) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.btn_overview).visibility =
+            if (landscape) View.GONE else View.VISIBLE
+
+        // 折叠手柄 / 路况估算：横屏本就隐藏
         findViewById<View>(R.id.btn_expand).visibility = if (landscape) View.GONE else View.VISIBLE
         tvTrafficEstimate.visibility = if (landscape) View.GONE else View.VISIBLE
-        // 车机连接提示在横屏也收掉（它会把底部面板顶高一整行），
-        // 但竖屏照常由连接状态控制，这里不能强行改成 GONE
+        // 车机连接提示在横屏收掉，避免把侧栏顶高一整行；竖屏照常由连接状态控制
         if (landscape) tvBleHint.visibility = View.GONE
 
         val card = bottomInfo.layoutParams as FrameLayout.LayoutParams
         val acts = mapActions.layoutParams as FrameLayout.LayoutParams
         if (landscape) {
-            // 信息卡：右侧**窄条**（不是半屏），高度方向全让给地图
-            card.gravity = Gravity.END or Gravity.BOTTOM
+            // 信息卡：左侧竖直条，与顶栏同宽对齐成一条侧栏；地图拿回右侧全部空间
+            card.gravity = Gravity.START or Gravity.BOTTOM
             card.width = dp(DP_PANEL_LAND)
-            // 地图操作键：挪到左下角，避开右侧面板
+            // 地图操作键：紧挨侧栏右侧放一个「回中」，全览已隐藏
             acts.gravity = Gravity.START or Gravity.BOTTOM
-            acts.marginStart = dp(14)
+            acts.marginStart = dp(DP_PANEL_LAND + 12)
             acts.marginEnd = 0
-            // 面板已经挪到右侧了，不再需要抬到 46dp 躲它
             acts.bottomMargin = dp(16)
         } else {
             // 竖屏：恢复底部通栏 + 右侧悬浮操作键
@@ -1653,7 +1674,7 @@ class GuidanceActivity : AppCompatActivity() {
         bottomInfo.layoutParams = card
         mapActions.layoutParams = acts
 
-        // 横屏空间窄，转向引导语收成单行，避免双行把横幅顶高与面板相撞
+        // 横屏空间窄，转向引导语收成单行，避免双行把横幅顶高与侧栏相撞
         tvTurnInstruction.maxLines = if (landscape) 1 else 2
     }
 
@@ -1708,10 +1729,10 @@ class GuidanceActivity : AppCompatActivity() {
         private const val AUTO_ZOOM_RANGE_M = 200
 
         /**
-         * 横屏右侧信息条宽度（dp）。
-         * 806dp 宽的屏上占 268dp —— 约 1/3，其余全部留给地图。
+         * 横屏左侧侧栏宽度（dp）。
+         * 806dp 宽的屏上占 300dp —— 约 1/3，其余（右侧）全部留给地图与真实导航位置。
          */
-        private const val DP_PANEL_LAND = 268
+        private const val DP_PANEL_LAND = 300
 
         /** 横屏镜头前移距离（米）：把车标压到屏幕下方，前方路口才看得全 */
         private const val CAMERA_AHEAD_M = 30.0
