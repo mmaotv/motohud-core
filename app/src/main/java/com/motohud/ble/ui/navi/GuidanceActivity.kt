@@ -92,6 +92,25 @@ import kotlin.math.roundToInt
  * 原来的横屏 HUD 页已删除：它画的三项（转向图标 / 本段剩余 / 全程剩余）与车机 100% 重复，
  * 多出来的 ETA/速度撑不起一个独立页面。
  */
+
+/**
+ * 转弯提前播报的距离阶梯（米，降序）：1km → 500 → 300 → 200 → 100 → 50。
+ *
+ * 骑行时最需要的是「快到路口了」的紧迫感，而不是到达后才知道该转。
+ * 这套阶梯与开源 OSRM Text Instructions / Valhalla 的做法一致：
+ * 远处粗（1km 一次）、近处密（200/100/50 连着提醒）。
+ */
+private val TURN_THRESHOLDS = intArrayOf(1_000, 500, 300, 200, 100, 50)
+
+/** 直行路口的提醒档：只保留临到路口的 200/100，长直路不啰嗦 */
+private val STRAIGHT_THRESHOLDS = intArrayOf(200, 100)
+
+/** 简洁模式：砍掉 1km/300，只留 500 与 200 */
+private val BRIEF_THRESHOLDS = intArrayOf(500, 200)
+
+/** 只播转弯模式：只在 200 米处念一句 */
+private val TURN_ONLY_THRESHOLDS = intArrayOf(200)
+
 class GuidanceActivity : AppCompatActivity() {
 
     private lateinit var app: MotoHudApp
@@ -187,9 +206,19 @@ class GuidanceActivity : AppCompatActivity() {
     private var lastFollowLng = 0.0
     private var stopped = false
 
-    /** 转向提前预告防重放：bit0=500m 档已播、bit1=200m 档已播 */
+    /**
+     * 提前播报调度：每个路段按距离阈值逐级提醒，位图记录本段已播过的档位。
+     *
+     * 以前只有「进入路段」和 500m/200m 两个固定点，路口临近时几乎没有提醒；
+     * 现在改成 1km/500m/300m/200m/100m/50m 的阶梯，越接近路口越密。
+     * 这套「多远一档」的模型参考自开源 OSRM Text Instructions（BSD-2）与
+     * Valhalla 的语音提示：`armDistances`/`announcementsDistancesBelow500m` 等。
+     */
     private var remindStepIndex = -1
-    private var remindFlags = 0
+    private var remindMask = 0
+
+    /** 当前路段实际生效的阈值集合（随 voiceMode / 是否转弯而定） */
+    private var activeThresholds: IntArray = TURN_THRESHOLDS
 
     /** 当前是否横屏：镜头缩放/俯角/前移都要跟着变，横屏和竖屏必须有区别 */
     private var landscapeNow = false
@@ -567,7 +596,8 @@ class GuidanceActivity : AppCompatActivity() {
         started = true
         stopped = false
         remindStepIndex = -1
-        remindFlags = 0
+        remindMask = 0
+        activeThresholds = TURN_THRESHOLDS
         lastAnnouncedStep = -1
         prewarmedStep = -1
         naviStartMs = System.currentTimeMillis()
@@ -1135,22 +1165,18 @@ class GuidanceActivity : AppCompatActivity() {
 
         renderProgress(s.traveled)
 
-        // 进入新路段 → 播一次（老实现靠引擎抛整句引导语，语音包念不了路名，改由这里触发）
+        // 进入新路段 → 播一次，并重置本段的阈值调度
         if (s.stepIndex != lastAnnouncedStep) {
             lastAnnouncedStep = s.stepIndex
             remindStepIndex = s.stepIndex
-            remindFlags = 0
-            val spoke = announceStepEntered(s)
-            // 刚进入路段那句已经带了距离，同一档位不要再复读一遍（否则两句话会互相打断）
-            if (spoke) {
-                when {
-                    s.stepRemain <= 250 -> remindFlags = remindFlags or 2
-                    s.stepRemain <= 500 -> remindFlags = remindFlags or 1
-                }
-            }
+            remindMask = 0
+            activeThresholds = thresholdsFor(s)
+            val spokeAt = announceStepEntered(s)
+            // 进入时就已念过的距离，把同一档及更远的档位标记为已播，避免复读/倒着播
+            if (spokeAt > 0) markAnnouncedAt(spokeAt)
         }
-        // 临近路口的短提醒（长路段场景下，进入路段时那句早被忘了）
-        announceTurnReminders(s)
+        // 按距离阈值逐级提前提醒（1km/500/300/200/100/50），越接近路口越密
+        announceApproaching(s)
         // 趁还在当前路段，把下一段的引导语先合成好（进入下一段直接命中缓存）
         prewarmStep(s.stepIndex + 1)
 
@@ -1237,59 +1263,85 @@ class GuidanceActivity : AppCompatActivity() {
     }
 
     /**
-     * 转向提醒（原来叫"提前预告"）。
+     * 当前路段生效的播报阈值集合（降序）。
      *
-     * 改名是因为播报源变了：以前播的是高德给的整句引导语（含路名），
-     * 现在播的是语音包片段「前方 + 300米 + 右转」，所以这里只需要
-     * **图标类型**和**距路口的距离**，不再依赖文本。
-     *
-     * 三档详细度：
-     *  - 详细：500m 档（仅 >=800m 的长路段）+ 200m 档
-     *  - 简洁：只留 200m 档
-     *  - 只播转弯：只留 200m 档（与简洁的差别在于进入路段时不播）
+     * 转弯用完整阶梯 1km/500/300/200/100/50，临近路口越来越密；
+     * 直行只在真有路口（需换路）时用 200/100 两档，避免长直路反复念「直行」。
+     * 详细度选择器仍然有效：简洁砍到 500/200，只播转弯砍到 200。
      */
-    private fun announceTurnReminders(s: NaviEngine.NaviState) {
-        if (!s.running || s.arrived || s.stepIndex < 0) return
-        if (!TurnIcons.isTurn(s.iconType)) return
+    private fun thresholdsFor(s: NaviEngine.NaviState): IntArray {
+        val isTurn = TurnIcons.isTurn(s.iconType)
         val mode = NaviPrefs.voiceMode.value
-        val step = route?.steps?.getOrNull(s.stepIndex)
-        if (mode == NaviPrefs.VOICE_MODE_DETAIL &&
-            remindFlags and 1 == 0 &&
-            s.stepRemain in 201..500 &&
-            (step?.distanceM ?: 0f) >= 800f
-        ) {
-            remindFlags = remindFlags or 1
-            // 距离 + 动作 + 路名，整句交给 TTS 念
-            say(stepText(s.stepIndex, s.stepRemain))
-        }
-        if (remindFlags and 2 == 0 && s.stepRemain in 1..200) {
-            remindFlags = remindFlags or 2
-            say(stepText(s.stepIndex, s.stepRemain))
+        return when {
+            !isTurn -> when (mode) {
+                NaviPrefs.VOICE_MODE_TURN_ONLY -> IntArray(0)
+                // 简洁模式直行只提醒一次，别把长直路念成复读机
+                NaviPrefs.VOICE_MODE_BRIEF -> intArrayOf(200)
+                else -> STRAIGHT_THRESHOLDS
+            }
+            mode == NaviPrefs.VOICE_MODE_BRIEF -> BRIEF_THRESHOLDS
+            mode == NaviPrefs.VOICE_MODE_TURN_ONLY -> TURN_ONLY_THRESHOLDS
+            else -> TURN_THRESHOLDS
         }
     }
 
     /**
-     * 进入新路段时的播报。
+     * 进入新路段时的播报，返回**实际播报时的剩余距离**（没播返回 -1）。
      *
-     * 以前由引擎的 onStepChanged 抛高德原文来播；语音包念不了路名，
-     * 改成自己按「转向图标 + 本段剩余」拼一句话，所以改在渲染里按 stepIndex 变化触发。
+     * 转弯才播；直行靠阈值提醒，不在这里念（否则长直路一进路段就念一句，很吵）。
      */
-    private fun announceStepEntered(s: NaviEngine.NaviState): Boolean {
-        if (!s.running || s.arrived) return false
-        if (s.stepIndex < 0 || !TurnIcons.isTurn(s.iconType)) return false
-        return when (NaviPrefs.voiceMode.value) {
-            NaviPrefs.VOICE_MODE_DETAIL -> {
-                // 不抢播：让「开始导航，全程 X 公里」先说完，别把话切成半句
-                say(stepText(s.stepIndex, s.stepRemain), interrupt = false)
-                true
+    private fun announceStepEntered(s: NaviEngine.NaviState): Int {
+        if (!s.running || s.arrived || s.stepIndex < 0) return -1
+        if (!TurnIcons.isTurn(s.iconType)) return -1
+        val mode = NaviPrefs.voiceMode.value
+        if (mode == NaviPrefs.VOICE_MODE_TURN_ONLY) return -1
+        val r = s.stepRemain.toInt()
+        if (r <= 0) return -1
+        // 详细：进路段就说（不抢播，让「开始导航」先说完）；简洁：只有本段很短才说
+        val should = mode == NaviPrefs.VOICE_MODE_DETAIL || r <= 600
+        if (!should) return -1
+        say(stepText(s.stepIndex, r), interrupt = false)
+        return r
+    }
+
+    /**
+     * 进入路段时已念过的距离 → 把「同档位及更远」的阈值标记为已播。
+     *
+     * 两个条件任一命中就标记：
+     *  - 阈值 >= 刚念的距离（已经在更近处了，不该再报「1 公里」这种更远的档）；
+     *  - 阈值念出来的**字面**和刚念的一致（如刚念「前方 500 米」，500 档就别再念一遍）。
+     */
+    private fun markAnnouncedAt(spokeAt: Int) {
+        val spokeBucket = com.motohud.ble.navi.SpeechScript.distance(spokeAt)
+        for (i in activeThresholds.indices) {
+            val t = activeThresholds[i]
+            if (t >= spokeAt || com.motohud.ble.navi.SpeechScript.distance(t) == spokeBucket) {
+                remindMask = remindMask or (1 shl i)
             }
-            // 简洁：只在"马上要转"时才在进入路段那一刻多说一句，避免长路段上一句话反复播
-            NaviPrefs.VOICE_MODE_BRIEF -> if (s.stepRemain <= 600f) {
-                say(stepText(s.stepIndex, s.stepRemain), interrupt = false)
-                true
-            } else false
-            else -> false
         }
+    }
+
+    /**
+     * 按距离阶梯提前播报。
+     *
+     * 每 tick 找到「已跨过但还没播」的**最紧急**一档（阈值最小、且剩余距离 <= 该阈值），
+     * 播一次并把它及更远的档位标记为已播；这样一次 GPS 跳变也只会说最相关的一句，
+     * 不会把 1km/500m/300m 连着念出来。
+     */
+    private fun announceApproaching(s: NaviEngine.NaviState) {
+        if (!s.running || s.arrived || s.stepIndex < 0) return
+        if (activeThresholds.isEmpty()) return
+        if (s.stepIndex != remindStepIndex) return
+        val rem = s.stepRemain.toInt()
+        if (rem <= 0) return
+        var chosen = -1
+        for (i in activeThresholds.indices) {
+            val t = activeThresholds[i]
+            if (rem <= t && (remindMask and (1 shl i)) == 0) chosen = i
+        }
+        if (chosen < 0) return
+        for (i in 0..chosen) remindMask = remindMask or (1 shl i)
+        say(stepText(s.stepIndex, rem))
     }
 
     private fun naviAgain() {
@@ -1513,7 +1565,12 @@ class GuidanceActivity : AppCompatActivity() {
     private fun stepText(stepIndex: Int, remainM: Int): String {
         val step = route?.steps?.getOrNull(stepIndex) ?: return ""
         val icon = IconMapper.of(step.action, step.orientation, step.instruction)
-        return SpeechScript.turn(icon, remainM, step.road, step.instruction)
+        // 直行路口说「路口直行进入 X 路」，别的动作走通用「前方 X 米 <动作>进入 X 路」
+        return if (icon == com.motohud.ble.navi.IconType.STRAIGHT) {
+            SpeechScript.straight(remainM, step.instruction)
+        } else {
+            SpeechScript.turn(icon, remainM, step.road, step.instruction)
+        }
     }
 
     /**

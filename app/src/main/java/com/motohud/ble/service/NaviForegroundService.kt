@@ -15,7 +15,6 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.motohud.ble.MotoHudApp
 import com.motohud.ble.R
-import com.motohud.ble.data.NaviPrefs
 import com.motohud.ble.navi.CoordConverter
 import com.motohud.ble.navi.NaviEngine
 import com.motohud.ble.ui.navi.GuidanceActivity
@@ -52,6 +51,25 @@ class NaviForegroundService : android.app.Service() {
     private var lastBucket = Int.MIN_VALUE
     private var lastArrived = false
 
+    /** 屏幕是否点亮。息屏才需要 PARTIAL_WAKE_LOCK，亮屏时系统本就醒着 */
+    private var screenOn = true
+
+    /** 跟随屏幕开关切换唤醒锁：骑行时手机放兜里/熄屏，必须保证引擎 tick 不被冻结 */
+    private val screenReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    screenOn = false
+                    refreshWakeLock()
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    screenOn = true
+                    refreshWakeLock()
+                }
+            }
+        }
+    }
+
     private val engine: NaviEngine
         get() = (application as MotoHudApp).naviEngine
 
@@ -59,6 +77,21 @@ class NaviForegroundService : android.app.Service() {
         super.onCreate()
         createChannel()
         startAsForeground()
+        // 记录当前屏幕状态，并挂上开关监听：息屏即持锁，亮屏即放锁
+        screenOn = runCatching {
+            (getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive
+        }.getOrDefault(true)
+        runCatching {
+            ContextCompat.registerReceiver(
+                this,
+                screenReceiver,
+                android.content.IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                    addAction(Intent.ACTION_SCREEN_ON)
+                },
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+        }
         updateWakeLock()
         observeEngine()
     }
@@ -83,6 +116,7 @@ class NaviForegroundService : android.app.Service() {
 
     override fun onDestroy() {
         job?.cancel()
+        runCatching { unregisterReceiver(screenReceiver) }
         releaseWakeLock()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         super.onDestroy()
@@ -209,14 +243,19 @@ class NaviForegroundService : android.app.Service() {
     }
 
     /**
-     * 唤醒锁只在「息屏导航」开启时持有。
+     * 唤醒锁**按屏幕状态**持有，而不是只看「息屏导航」开关。
      *
-     * 通知栏导航条本身是**每次导航都要有**的（息屏/兜里瞥一眼方向），
-     * 但为了让通知存在就长期抓 PARTIAL_WAKE_LOCK 是浪费电 ——
-     * 屏幕亮着的时候主线程不会被冻结，根本不需要它。
+     * 以前只有开了「息屏导航」才持锁；但骑行时手机通常是手动熄屏放兜里/支架上，
+     * 此时没有 PARTIAL_WAKE_LOCK 系统很快进入休眠，主线程的 1s tick 被冻结 ——
+     * 表现就是「路都走完了车机还停在之前的位置，播报也停了」。
+     *
+     * 现在的策略：息屏就持锁、亮屏就放锁（亮屏时系统本就醒着，持锁纯属浪费电）。
+     * 这样无论用户是否开「息屏导航」，息屏骑行都不会停摆。
      */
-    private fun updateWakeLock() {
-        if (NaviPrefs.screenOffNavi.value) acquireWakeLock() else releaseWakeLock()
+    private fun updateWakeLock() = refreshWakeLock()
+
+    private fun refreshWakeLock() {
+        if (screenOn) releaseWakeLock() else acquireWakeLock()
     }
 
     @Suppress("WakelockTimeout")

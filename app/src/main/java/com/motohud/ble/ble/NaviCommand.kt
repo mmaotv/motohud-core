@@ -13,9 +13,15 @@ import com.motohud.ble.ble.BleConstants.DeviceType
  */
 object NaviCommand {
 
-    /** 发送一帧导航信息（onNaviInfoUpdate 等价） */
+    /**
+     * 发送一帧导航信息（onNaviInfoUpdate 等价）。
+     *
+     * [send] 的第二个参数是**指令类型键**（NA/RE/NE/REM/NEXT/NAVI）。
+     * 投屏链路按这个键做「同类只留最新一帧」的覆盖入队，
+     * 防止 BLE 写入慢时队列无限积压、车机越显示越旧。
+     */
     fun forwardInfo(
-        send: (String) -> Unit,
+        send: (String, String) -> Unit,
         deviceName: String?,
         iconType: Int,
         pathRemain: Int,
@@ -23,24 +29,24 @@ object NaviCommand {
     ) {
         when (BleConstants.deviceTypeOf(deviceName)) {
             DeviceType.SR -> {
-                send(BleConstants.cmdRem(pathRemain))
-                send(BleConstants.cmdNext(stepRemain))
-                send(BleConstants.cmdNavi(iconType))
+                send(BleConstants.cmdRem(pathRemain), "REM")
+                send(BleConstants.cmdNext(stepRemain), "NEXT")
+                send(BleConstants.cmdNavi(iconType), "NAVI")
             }
 
             DeviceType.BYQ -> {
-                send(BleConstants.cmdNa(iconType))
-                send(BleConstants.cmdRe(pathRemain))
-                send(BleConstants.cmdNe(stepRemain))
+                send(BleConstants.cmdNa(iconType), "NA")
+                send(BleConstants.cmdRe(pathRemain), "RE")
+                send(BleConstants.cmdNe(stepRemain), "NE")
             }
 
             DeviceType.UNKNOWN -> {
-                send(BleConstants.cmdNa(iconType))
-                send(BleConstants.cmdRe(pathRemain))
-                send(BleConstants.cmdNe(stepRemain))
-                send(BleConstants.cmdRem(pathRemain))
-                send(BleConstants.cmdNext(stepRemain))
-                send(BleConstants.cmdNavi(iconType))
+                send(BleConstants.cmdNa(iconType), "NA")
+                send(BleConstants.cmdRe(pathRemain), "RE")
+                send(BleConstants.cmdNe(stepRemain), "NE")
+                send(BleConstants.cmdRem(pathRemain), "REM")
+                send(BleConstants.cmdNext(stepRemain), "NEXT")
+                send(BleConstants.cmdNavi(iconType), "NAVI")
             }
         }
     }

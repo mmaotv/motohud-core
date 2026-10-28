@@ -45,7 +45,17 @@ object SpeechScript {
         else -> ""
     }
 
-    /** 距离词，分档是为了让同一距离上的文本固定、命中合成缓存 */
+    /**
+     * 距离词。
+     *
+     * 分档一是为了让同一距离上的文本固定、命中合成缓存；二是让**播报阈值**
+     * （[com.motohud.ble.ui.navi.GuidanceActivity] 里的 1km/500/300/200/100/50）
+     * 和念出来的字面对得上：阈值 1000 时这里必须给「前方 1 公里」，
+     * 所以 800 米这一档的上界收到 900，别把 950 米念成「800 米」。
+     *
+     * 这套「多远一档、临到路口加密」的距离模型参考自开源的
+     * OSRM Text Instructions（BSD-2）与 Valhalla 的语音提示设计。
+     */
     fun distance(remainM: Int): String = when {
         remainM <= 0 -> ""
         remainM <= 75 -> "前方 50 米"
@@ -53,11 +63,30 @@ object SpeechScript {
         remainM <= 250 -> "前方 200 米"
         remainM <= 400 -> "前方 300 米"
         remainM <= 650 -> "前方 500 米"
-        remainM <= 1_000 -> "前方 800 米"
+        remainM <= 900 -> "前方 800 米"
         remainM <= 1_500 -> "前方 1 公里"
         remainM <= 3_000 -> "前方 2 公里"
         remainM <= 7_000 -> "前方 5 公里"
         else -> "前方 10 公里"
+    }
+
+    /**
+     * 路口直行播报：「前方 200 米，路口直行进入南滨路」。
+     *
+     * 转弯有 [turn]，但很多路口是**直行穿过**——不提醒的话骑手到路口容易
+     * 跟着车流拐错。这里明确说「直行」，并把接下来的路名带上。
+     */
+    fun straight(remainM: Int, instruction: String): String {
+        val d = distance(remainM)
+        if (d.isEmpty()) return ""
+        // 只有原文明确写了「进入 X 路」才报路名。直行段的 step.road 往往是**当前所在的
+        // 那条路**，拿它来说「直行进入」会把"继续沿本路"说成"进入本路"，反而误导。
+        val target = ENTER_ROAD.find(instruction)?.groupValues?.getOrNull(1)?.trim()
+        return if (!target.isNullOrEmpty() && target.length <= 12) {
+            "$d，路口直行进入$target"
+        } else {
+            "$d，路口直行"
+        }
     }
 
     /**
@@ -106,12 +135,13 @@ object SpeechScript {
         instruction: String
     ): List<String> {
         val total = stepDistanceM.toInt()
-        // 档位要覆盖 [distance] 所有可能输出的距离词：50/100/200/300/500/800米。
-        // 少一档就会缓存未命中 → 进导航后首句要临时合成，慢半拍才出声。
-        val probes = listOf(total, 800, 500, 300, 200, 100, 50)
+        // 探针要覆盖播报阈值 1km/500/300/200/100/50 以及整段距离，
+        // 少一档就会缓存未命中 → 真正该播时临时合成，慢半拍才出声。
+        val probes = listOf(total, 1_000, 500, 300, 200, 100, 50)
             .filter { it in 1..total }
+        val isStraight = iconType == IconType.STRAIGHT
         return probes
-            .map { turn(iconType, it, road, instruction) }
+            .map { if (isStraight) straight(it, instruction) else turn(iconType, it, road, instruction) }
             .filter { it.isNotEmpty() }
             .distinct()
     }

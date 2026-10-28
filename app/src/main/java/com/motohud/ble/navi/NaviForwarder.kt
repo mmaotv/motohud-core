@@ -40,7 +40,8 @@ class NaviForwarder(private val ble: BleConnectionManager) {
         if (!canSend()) return
         if (!state.running && !state.arrived) return
         NaviCommand.forwardInfo(
-            send = { text -> ble.sendCommand(text) },
+            // 走带 navKey 的覆盖入队：同类指令只保留最新一帧，杜绝队列积压导致车机显示滞后
+            send = { text, key -> ble.sendNavCommand(text, key) },
             deviceName = ble.connectedDeviceName,
             iconType = state.iconType,
             pathRemain = state.pathRemain,

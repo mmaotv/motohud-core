@@ -68,8 +68,14 @@ class BleConnectionManager(private val context: Context) {
     private var scanning = false
     private var notifyReadyEmitted = false
 
+    /**
+     * 待写帧。[navKey] 非空表示这是导航帧（NA/RE/NE/REM/NEXT/NAVI），
+     * 同类只保留最新一帧 —— 见 [sendNavCommand]。
+     */
+    private data class PendingWrite(val data: ByteArray, val navKey: String?)
+
     /** Android BLE 一次只能挂一个写操作，原厂 FastBle 内部有队列，这里等价实现 */
-    private val writeQueue = ArrayDeque<ByteArray>()
+    private val writeQueue = ArrayDeque<PendingWrite>()
     private var writeBusy = false
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     /** 记录 CCCD 写入属于哪条通道（A=文本/握手，B=纯遥测），onDescriptorWrite 回调里按顺序取回 */
@@ -598,7 +604,22 @@ class BleConnectionManager(private val context: Context) {
 
     /** 发送文本指令（自动经 0D..0D / 1E 封装，排队串行写出） */
     @SuppressLint("MissingPermission")
-    fun sendCommand(text: String) {
+    fun sendCommand(text: String) = enqueue(text, navKey = null)
+
+    /**
+     * 发送**导航帧**（投屏用）。
+     *
+     * 与 [sendCommand] 的区别：同一 [navKey]（NA / RE / NE / REM / NEXT / NAVI）
+     * 在队列里只保留最新一帧。导航是「最新状态覆盖旧状态」的流，每秒好几帧；
+     * 一旦 BLE 写入比入队慢，纯 FIFO 队列会**无限积压**，车机就越显示越旧
+     * （"路都走完了还停在之前的位置"）。覆盖式入队把队列长度钉死在
+     * 「指令种类数」上，延迟不再随骑行时长累积。
+     */
+    @SuppressLint("MissingPermission")
+    fun sendNavCommand(text: String, navKey: String) = enqueue(text, navKey)
+
+    @SuppressLint("MissingPermission")
+    private fun enqueue(text: String, navKey: String?) {
         val ch = notifyCharacteristic?.let {
             gatt?.getService(UUID.fromString(BleConstants.UUID_SERVICE))
                 ?.getCharacteristic(UUID.fromString(BleConstants.UUID_WRITE))
@@ -611,10 +632,12 @@ class BleConnectionManager(private val context: Context) {
         val data = BleProtocol.encodeCommand(text)
         BleDiagnostic.onSend(text)
         synchronized(writeQueue) {
-            writeQueue.addLast(data)
+            // 导航帧：先把同类未发出的旧帧丢掉，只留这一帧最新的
+            if (navKey != null) writeQueue.removeAll { it.navKey == navKey }
+            writeQueue.addLast(PendingWrite(data, navKey))
         }
         drainWriteQueue()
-        Log.d(TAG, "sendCommand: $text -> ${data.toHexString()}")
+        Log.d(TAG, "sendCommand[$navKey]: $text -> ${data.toHexString()}")
     }
 
     private fun drainWriteQueue() {
@@ -626,12 +649,13 @@ class BleConnectionManager(private val context: Context) {
             synchronized(writeQueue) { writeQueue.clear() }
             return
         }
-        val data = synchronized(writeQueue) {
+        val pending = synchronized(writeQueue) {
             if (writeBusy || writeQueue.isEmpty()) null else {
                 writeBusy = true
                 writeQueue.removeFirst()
             }
         } ?: return
+        val data = pending.data
         // 原厂 0x2345 是 WRITE NO RESPONSE（nRF 实测），按特征属性选类型
         ch.writeType = if (ch.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0) {
             BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
@@ -640,7 +664,9 @@ class BleConnectionManager(private val context: Context) {
         }
         ch.value = data
         mainHandler.removeCallbacks(writeWatchdog)
-        mainHandler.postDelayed(writeWatchdog, 2000L)
+        // 看门狗：NO_RESPONSE 的 onCharacteristicWrite 偶发不回调时靠它推进队列。
+        // 导航帧每秒好几条，2s 太长（会被卡成 2s 一帧），小帧实际几十毫秒就写完了，600ms 够用。
+        mainHandler.postDelayed(writeWatchdog, WRITE_WATCHDOG_MS)
         @Suppress("DEPRECATION") val ok = gatt?.writeCharacteristic(ch) == true
         if (!ok) {
             mainHandler.removeCallbacks(writeWatchdog)
@@ -699,6 +725,13 @@ class BleConnectionManager(private val context: Context) {
 
     companion object {
         private const val TAG = "BleConnMgr"
+
+        /**
+         * 写看门狗超时。原为 2000ms：若 [onCharacteristicWrite] 回调偶发不触发，
+         * 队列会被卡成「2 秒写一帧」，导航投屏就会明显滞后。导航帧都是很小的指令，
+         * 正常几十毫秒写完，600ms 作为「回调丢了」的兜底足够，且不会误伤正常写入。
+         */
+        private const val WRITE_WATCHDOG_MS = 600L
 
         /** 自动连接：直连阶段等待时长 */
         private const val AUTO_DIRECT_TIMEOUT_MS = 6_000L
