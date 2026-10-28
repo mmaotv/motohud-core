@@ -784,17 +784,18 @@ class RouteSelectActivity : AppCompatActivity() {
      * 不提前做的话，进导航后的第一句必然赶不上（合成 700ms+，看门狗一到
      * 就退回语音包，路名又没了）。
      *
-     * 文本必须与导航页 `stepText()` **逐字一致**才命中缓存 —— 所以统一走
-     * [SpeechScript]，不要在这里另拼一套。
+     * 文本必须与导航页**逐字一致**才命中缓存 —— 所以统一走叙事层
+     * ([com.motohud.ble.navi.VoiceGuidance])，不要在这里另拼一套。
      */
     private fun prefetchSpeech() {
         if (!com.motohud.ble.data.NaviPrefs.voice.value) return
         val r = routes.getOrNull(selected) ?: return
-        val texts = r.steps.take(2).flatMap { step ->
-            val icon = com.motohud.ble.navi.IconMapper
-                .of(step.action, step.orientation, step.instruction)
-            com.motohud.ble.navi.SpeechScript
-                .variants(icon, step.distanceM, step.road, step.instruction)
+        // 文本来源必须与导航页完全一致：播报文本现在由叙事层 (VoiceGuidance) 组合，
+        // 进段确认 + 各阈值临门指令都按「下一段有多长」算出不同结果，
+        // 所以在路线页把前两段的**全部可能文本**一次预合成，进导航第一句不用等。
+        val texts = buildList {
+            addAll(com.motohud.ble.navi.VoiceGuidance.prewarmTexts(r.steps, 0))
+            addAll(com.motohud.ble.navi.VoiceGuidance.prewarmTexts(r.steps, 1))
         }
         com.motohud.ble.navi.tts.SherpaSpeaker.prefetch(this, texts)
     }

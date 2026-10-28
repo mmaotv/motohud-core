@@ -1288,19 +1288,34 @@ class GuidanceActivity : AppCompatActivity() {
     /**
      * 进入新路段时的播报，返回**实际播报时的剩余距离**（没播返回 -1）。
      *
-     * 转弯才播；直行靠阈值提醒，不在这里念（否则长直路一进路段就念一句，很吵）。
+     * 说的是「过渡后确认」（Valhalla 的 `verbal_post_transition_instruction`）：
+     *  - 长段：继续沿 X 路行驶 2 公里 —— 告诉你现在不用再动方向；
+     *  - 短段：继续沿 X 路行驶 300 米，然后右转进入 Y 路 —— 一次交代两件事。
+     *
+     * 以前这里念的是「前方 2 公里右转进入 Y 路」，即提前把下一个路口说了，
+     * 但**没说你现在这条对不对**；拐完弯最需要确认的恰恰是这一句。
+     *
+     * 长直路段（≥800m）也播一句，否则一路上只听见"直行"没有路名，同样会走错。
      */
     private fun announceStepEntered(s: NaviEngine.NaviState): Int {
         if (!s.running || s.arrived || s.stepIndex < 0) return -1
-        if (!TurnIcons.isTurn(s.iconType)) return -1
-        val mode = NaviPrefs.voiceMode.value
-        if (mode == NaviPrefs.VOICE_MODE_TURN_ONLY) return -1
+        val step = route?.steps?.getOrNull(s.stepIndex) ?: return -1
         val r = s.stepRemain.toInt()
         if (r <= 0) return -1
-        // 详细：进路段就说（不抢播，让「开始导航」先说完）；简洁：只有本段很短才说
-        val should = mode == NaviPrefs.VOICE_MODE_DETAIL || r <= 600
+        val icon = IconMapper.of(step.action, step.orientation, step.instruction)
+        val isTurn = TurnIcons.isTurn(icon)
+        val mode = NaviPrefs.voiceMode.value
+        // 只播转弯：只在路口段开口；其余模式长直段也报一次路名，短碎段不抢话
+        val should = when {
+            mode == NaviPrefs.VOICE_MODE_TURN_ONLY -> isTurn
+            isTurn -> true
+            r >= 800 -> true
+            else -> false
+        }
         if (!should) return -1
-        say(stepText(s.stepIndex, r), interrupt = false)
+        val text = com.motohud.ble.navi.VoiceGuidance.entry(step, icon, r.toFloat())
+        if (text.isBlank()) return -1
+        say(text, interrupt = false)
         return r
     }
 
@@ -1536,8 +1551,10 @@ class GuidanceActivity : AppCompatActivity() {
     private fun buildStartText(r: RouteData?): String {
         if (r == null) return "开始导航"
         val dist = CoordConverter.formatDistance(r.distanceM.toInt())
-        val eta = CoordConverter.formatEta(r.durationS.toInt())
-        return "开始导航，全程约 $dist，预计 $eta 到达"
+        // formatEta 给的是「16 分钟」「1 小时 20 分钟」这种带空格的展示文本，
+        // 直接拼「到达」会多出一个空格（TTS 断句变怪），所以只在需要时补空格。
+        val eta = CoordConverter.formatEta(r.durationS.toInt()).trim()
+        return "开始导航，全程约 $dist，预计 ${eta}到达"
     }
 
     /**
@@ -1552,7 +1569,11 @@ class GuidanceActivity : AppCompatActivity() {
     }
 
     /**
-     * 某一段该念的完整文本：**距离 + 动作 + 目标路名**（见 [SpeechScript]）。
+     * 某一段在**距路口 remainM 米**时该念的完整文本（临门指令）。
+     *
+     * 由 [com.motohud.ble.navi.VoiceGuidance.pre] 组合：
+     * 距离 + 「第 N 个路口」+ 动作 + 目标路名（+ 环岛第 N 个出口）；
+     * 下一段很短时再补「，然后左转进入 Y 路」。
      *
      * 为什么不直接念高德的 `instruction`：
      *  - 长路段那整句写的是「沿XX路行驶 500 米后右转」，而我们是在距路口
@@ -1563,14 +1584,12 @@ class GuidanceActivity : AppCompatActivity() {
      * @param remainM 距该段结束还有多远；预合成时传整段长度
      */
     private fun stepText(stepIndex: Int, remainM: Int): String {
-        val step = route?.steps?.getOrNull(stepIndex) ?: return ""
+        val steps = route?.steps ?: return ""
+        val step = steps.getOrNull(stepIndex) ?: return ""
         val icon = IconMapper.of(step.action, step.orientation, step.instruction)
-        // 直行路口说「路口直行进入 X 路」，别的动作走通用「前方 X 米 <动作>进入 X 路」
-        return if (icon == com.motohud.ble.navi.IconType.STRAIGHT) {
-            SpeechScript.straight(remainM, step.instruction)
-        } else {
-            SpeechScript.turn(icon, remainM, step.road, step.instruction)
-        }
+        return com.motohud.ble.navi.VoiceGuidance.pre(
+            step, icon, remainM, steps.getOrNull(stepIndex + 1)
+        )
     }
 
     /**
@@ -1578,17 +1597,16 @@ class GuidanceActivity : AppCompatActivity() {
      *
      * 离线引擎单句合成要 0.5~1.5s，正好卡在「该播了」的那一刻才合成必然滞后。
      * 所以一边在当前段骑行，一边就把下一段**所有可能要说的版本**先合成进缓存
-     * （进入时用整段距离，500/300/200 米提醒各一句），进入下一段直接出声音。
+     * （进段确认一句 + 各阈值上的临门指令，带/不带"然后"两种形态）。
      * 同一个序号只提交一次，渲染循环每帧调用也无副作用。
      */
     private fun prewarmStep(stepIndex: Int) {
         if (stepIndex < 0) return
         if (!NaviPrefs.voice.value) return
-        val step = route?.steps?.getOrNull(stepIndex) ?: return
+        val steps = route?.steps ?: return
         if (stepIndex == prewarmedStep) return
         prewarmedStep = stepIndex
-        val icon = IconMapper.of(step.action, step.orientation, step.instruction)
-        SpeechScript.variants(icon, step.distanceM, step.road, step.instruction)
+        com.motohud.ble.navi.VoiceGuidance.prewarmTexts(steps, stepIndex)
             .forEach { voice?.prewarm(it) }
     }
 

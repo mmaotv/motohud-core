@@ -63,6 +63,15 @@ object VoiceLibrary {
         "前方 5 公里", "前方 10 公里"
     )
 
+    /**
+     * 距离词（不带「前方」），与 [SpeechScript.span] 的分档完全一致。
+     * 供「继续沿 X 行驶 **300 米**」这类句式用。
+     */
+    private val SPANS = listOf(
+        "50 米", "100 米", "200 米", "300 米", "500 米",
+        "800 米", "1 公里", "2 公里", "5 公里", "10 公里"
+    )
+
     /** 系统提示语：这些是导航里一定会说、且不含路名的话 */
     private val NOTICES = listOf(
         "开始导航",
@@ -90,10 +99,13 @@ object VoiceLibrary {
      * 少一条就意味着那一句要临时合成，慢半拍才出声。
      */
     fun phrases(): List<String> {
-        val out = ArrayList<String>(160)
+        val out = ArrayList<String>(180)
         for (act in ACTIONS) {
             for (d in DISTANCES) out.add("$d$act")
         }
+        // 不含路名的新句式（见 VoiceGuidance）：过渡后确认兜底 + 环岛出口次序
+        for (s in SPANS) out.add("继续直行 $s")
+        for (n in 2..8) out.add("进入环岛，走第 $n 个出口")
         out.addAll(NOTICES)
         return out.distinct()
     }

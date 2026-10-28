@@ -24,8 +24,8 @@ android {
         targetSdk = 36
         // 开发期版本号：0.0.1 起，每次只递增最后一位（0.0.2 → 0.0.3 …）。
         // 未正式上线，不体现主版本语义。
-        versionCode = 22
-        versionName = "0.0.10"
+        versionCode = 24
+        versionName = "0.0.12"
 
         manifestPlaceholders["AMAP_API_KEY"] = amapApiKey
         buildConfigField("String", "AMAP_API_KEY", "\"$amapApiKey\"")
