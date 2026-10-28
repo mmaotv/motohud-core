@@ -35,6 +35,9 @@ class OriginPickDialog : BottomSheetDialogFragment() {
     /** 「在地图上选点」需要跳另一个页面，交给宿主实现 */
     var onPickOnMap: (() -> Unit)? = null
 
+    /** 「搜索地点」需要跳搜索页，交给宿主实现（起点/途经点都走这个） */
+    var onPickSearch: (() -> Unit)? = null
+
     /** 当前是否有可用定位（没有就得把"当前位置"那行灰掉） */
     private var currentLocation: Pair<Double, Double>? = null
 
@@ -84,6 +87,11 @@ class OriginPickDialog : BottomSheetDialogFragment() {
 
         b.originMap.setOnClickListener {
             onPickOnMap?.invoke()
+            dismiss()
+        }
+
+        b.originSearch.setOnClickListener {
+            onPickSearch?.invoke()
             dismiss()
         }
 

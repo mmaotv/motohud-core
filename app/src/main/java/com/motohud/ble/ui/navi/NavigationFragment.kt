@@ -88,6 +88,7 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
     private lateinit var chipsScroll: View
     private lateinit var cardBottom: View
     private lateinit var searchArea: View
+    private lateinit var searchScope: TextView
 
     // ---------- 最近搜索 ----------
     private lateinit var historyBlock: View
@@ -148,6 +149,14 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
         chipsScroll = view.findViewById(R.id.chips_scroll)
         cardBottom = view.findViewById(R.id.card_bottom)
         searchArea = view.findViewById(R.id.search_area)
+        searchScope = view.findViewById(R.id.search_scope)
+        searchScope.setOnClickListener {
+            // 回到"以当前位置为中心"，并清空输入、露出历史
+            vm.resetSearchCenter()
+            etSearch.setText("")
+            etSearch.clearFocus()
+            refreshHistory()
+        }
         mapView = view.findViewById(R.id.map_view)
 
         // ---------- 地点卡 ----------
@@ -336,6 +345,18 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
                 launch {
                     vm.locationLabel.collect { label ->
                         tvLocation.text = label.ifEmpty { getString(R.string.navi_location_unknown) }
+                    }
+                }
+                launch {
+                    // "在附近搜索"提示条：钉住某个地点时显形，点击恢复"以当前位置为中心"
+                    vm.searchCenterName.collect { name ->
+                        if (name != null) {
+                            searchScope.text =
+                                getString(R.string.navi_search_scope_near, name)
+                            searchScope.visibility = View.VISIBLE
+                        } else {
+                            searchScope.visibility = View.GONE
+                        }
                     }
                 }
                 launch {
@@ -688,6 +709,8 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
     ) {
         if (lat == 0.0 && lng == 0.0) return
         val knownName = !name.isNullOrBlank()
+        // 钉住搜索中心到这个点：之后的搜索都围绕它展开（"搜这个地点附近的东西"）
+        vm.setSearchCenter(lat, lng, name?.takeIf { it.isNotBlank() } ?: getString(R.string.place_card_point))
         picked = PickedPlace(
             name = name?.takeIf { it.isNotBlank() } ?: getString(R.string.place_card_point),
             lat = lat,
@@ -776,6 +799,8 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
     private fun hidePlaceCard() {
         reverseJob?.cancel()
         picked = null
+        // 解除地点钉住，搜索回到"以当前位置为中心"
+        vm.resetSearchCenter()
         placeCard.visibility = View.GONE
         runCatching { placeMarker?.remove() }
         placeMarker = null

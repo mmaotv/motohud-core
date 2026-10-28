@@ -12,6 +12,7 @@ import com.motohud.ble.amap.AmapManager
 import com.motohud.ble.amap.AmapRepo
 import com.motohud.ble.amap.RoutePlanResult
 import com.motohud.ble.amap.TipItem
+import com.motohud.ble.data.NaviPrefs
 import com.motohud.ble.data.SavedPlaceEntity
 import com.motohud.ble.navi.CoordConverter
 import kotlinx.coroutines.Job
@@ -76,6 +77,55 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
     private val _tipsErrorCode = MutableStateFlow(0)
     val tipsErrorCode: StateFlow<Int> = _tipsErrorCode.asStateFlow()
 
+    /**
+     * 搜索地理中心。
+     *
+     * - null = 跟随当前定位 / 地图视野（"搜离我最近的地方"，默认行为）；
+     * - 非 null = 用户钉住的某个地点（点搜索结果 / 地图上的 POI / 历史纪录 / 长按选点），
+     *   此后搜索都围绕这个点展开，实现"搜这个地点附近的东西"。
+     *
+     * 这是修复"搜索结果跑到北京"的关键状态：所有搜索请求都以 [effectiveCenter] 为圆心
+     * 画地理围栏，而不是让高德默认全国范围。
+     */
+    private val _searchCenter = MutableStateFlow<Pair<Double, Double>?>(null)
+    private val _searchCenterName = MutableStateFlow<String?>(null)
+    val searchCenterName: StateFlow<String?> = _searchCenterName.asStateFlow()
+
+    /** 当前搜索中心所在城市的 adcode（用于给高德搜索做城市偏置，进一步压低外地结果） */
+    private val _searchCity = MutableStateFlow<String?>(null)
+
+    /**
+     * 计算最终搜索中心：钉住点优先；否则当前定位；再否则地图最后视野中心
+     * （没授过定位权限时，用上次看的地图区域当兜底，也比默认北京强）。
+     */
+    private fun effectiveCenter(): Pair<Double, Double>? =
+        _searchCenter.value ?: currentLocation ?: NaviPrefs.mapCamera()?.let { it.lat to it.lng }
+
+    /** 钉住一个搜索中心（点地点卡 / 历史 / POI 时调用） */
+    fun setSearchCenter(lat: Double, lng: Double, name: String?) {
+        _searchCenter.value = lat to lng
+        _searchCenterName.value = name?.takeIf { it.isNotBlank() }
+        resolveCity(lat, lng)
+    }
+
+    /** 解除钉住，回到"以当前位置为中心" */
+    fun resetSearchCenter() {
+        _searchCenter.value = null
+        _searchCenterName.value = null
+        _searchCity.value = null
+        // 当前定位已知时，顺手把城市也补回来（避免之后搜索没了城市偏置）
+        currentLocation?.let { resolveCity(it.first, it.second) }
+    }
+
+    /** 反查某点所在城市的 adcode，写入 [_searchCity] 供搜索偏置（失败静默忽略） */
+    private fun resolveCity(lat: Double, lng: Double) {
+        viewModelScope.launch {
+            val item = runCatching { amapRepo.reverseGeocode(lat, lng) }.getOrNull()
+            val ad = item?.adCode
+            if (!ad.isNullOrBlank()) _searchCity.value = ad
+        }
+    }
+
     enum class TipsState { IDLE, LOADING, DONE, EMPTY, ERROR }
 
     /** 高德功能是否可用（Key + 隐私合规） */
@@ -137,6 +187,8 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
                 _accuracy.value = fix.accuracy
                 _locationFlow.value = LocationFix(fix.lat, fix.lng, fix.accuracy)
                 _locationLabel.value = buildLabel(fix)
+                // 没钉住其他地点时，把搜索中心对准当前位置，并反查城市做搜索偏置
+                if (_searchCenter.value == null) resolveCity(fix.lat, fix.lng)
             } else if (currentLocation == null) {
                 // 高德拿不到（无 Key / 无网络）→ 系统定位持续更新
                 startSystemUpdates()
@@ -236,8 +288,12 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
         _tipsState.value = TipsState.LOADING
         tipsJob = viewModelScope.launch {
             val origin = currentLocation
-            // 同一个词 30 分钟内直接复用：退格重打、清空重输都不再发请求
-            val key = AmapCache.tipsKey(kw, "", origin?.first, origin?.second)
+            // 搜索中心：钉住点 > 当前定位 > 地图视野；所有搜索都围绕它画地理围栏，
+            // 否则高德默认全国范围、结果落到北京
+            val center = effectiveCenter()
+            val city = _searchCity.value
+            // 同一个词 30 分钟内、同一搜索中心直接复用：退格重打、清空重输都不再发请求
+            val key = AmapCache.tipsKey(kw, city.orEmpty(), center?.first, center?.second)
             val cached = AmapCache.get<List<TipItem>>(key, AmapCache.TTL_TIPS_MS)
             if (cached != null) {
                 val list = rank(kw, cached)
@@ -245,7 +301,7 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
                 _tipsState.value = if (list.isEmpty()) TipsState.EMPTY else TipsState.DONE
                 return@launch
             }
-            val result = runCatching { amapRepo.searchTips(kw, "", origin) }
+            val result = runCatching { amapRepo.searchTips(kw, city.orEmpty(), origin, center) }
             result.onSuccess { r ->
                 when (r) {
                     is com.motohud.ble.amap.TipsResult.Ok -> {
@@ -286,7 +342,9 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
         tipsJob = viewModelScope.launch {
             val origin = currentLocation
             // POI 结果比联想更重（一页几十条带图片/评分字段），同一个词必须复用
-            val key = AmapCache.poiKey(kw, "", origin?.first, origin?.second, 1, 20)
+            val center = effectiveCenter()
+            val city = _searchCity.value
+            val key = AmapCache.poiKey(kw, city.orEmpty(), center?.first, center?.second, 1, 20)
             val cached = AmapCache.get<List<TipItem>>(key, AmapCache.TTL_POI_MS)
             if (cached != null) {
                 val list = rank(kw, cached)
@@ -294,7 +352,9 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
                 _tipsState.value = if (list.isEmpty()) TipsState.EMPTY else TipsState.DONE
                 return@launch
             }
-            val result = runCatching { amapRepo.searchPoi(kw, "", origin) }
+            val result = runCatching {
+                amapRepo.searchPoi(kw, city.orEmpty(), origin, center, 30_000)
+            }
             result.onSuccess { r ->
                 when (r) {
                     is com.motohud.ble.amap.TipsResult.Ok -> {

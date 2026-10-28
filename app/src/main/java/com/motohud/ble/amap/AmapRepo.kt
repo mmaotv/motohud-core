@@ -34,7 +34,9 @@ data class TipItem(
     val district: String,
     val latitude: Double,
     val longitude: Double,
-    val distanceM: Int? = null
+    val distanceM: Int? = null,
+    /** 逆地理编码得到的行政区划 adcode（如 "500103"），用于给搜索做城市偏置；POI 结果恒为 null */
+    val adCode: String? = null
 )
 
 /** 路线规划结果 */
@@ -95,18 +97,25 @@ class AmapRepo(private val context: Context) {
 
     /**
      * POI 输入提示（专业导航软件同款搜索体验）。
-     * @param city 城市名或 adcode；空串 = 全国范围
+     *
+     * @param city 城市名或 adcode；空串 = 全国范围（但配合 [center] 仍会按距离偏置）
+     * @param origin 用于本地补算直线距离的起点（当前定位），不参与请求
+     * @param center 搜索地理中心。非 null 时通过 [InputtipsQuery.setLocation] 让联想结果
+     *              向该点聚拢 —— 这是"搜离我最近的地方"的关键，否则高德默认全国范围、
+     *              相关性最高的结果往往在别的大城市（典型表现为"结果全跑到北京"）。
      */
     suspend fun searchTips(
         keyword: String,
         city: String = "",
-        origin: Pair<Double, Double>? = null
+        origin: Pair<Double, Double>? = null,
+        center: Pair<Double, Double>? = null
     ): TipsResult {
         if (keyword.isBlank()) return TipsResult.Ok(emptyList())
         return suspendCancellableCoroutine { cont ->
             try {
                 val query = InputtipsQuery(keyword.trim(), city).apply {
-                    setCityLimit(false)
+                    setCityLimit(city.isNotBlank())
+                    if (center != null) setLocation(LatLonPoint(center.first, center.second))
                 }
                 val inputtips = Inputtips(context, query)
                 inputtips.setInputtipsListener { tips, rCode ->
@@ -299,7 +308,8 @@ class AmapRepo(private val context: Context) {
                                     address = text,
                                     district = addr.district.orEmpty(),
                                     latitude = lat,
-                                    longitude = lng
+                                    longitude = lng,
+                                    adCode = addr.adCode?.takeIf { it.isNotBlank() }
                                 )
                             )
                         } else {
@@ -318,6 +328,10 @@ class AmapRepo(private val context: Context) {
         keyword: String,
         city: String = "",
         origin: Pair<Double, Double>? = null,
+        center: Pair<Double, Double>? = null,
+        /** 搜索半径（米）。中心点 30km 范围内召回；北京（上千公里外）自然被排除，
+         *  这正是修复"结果迁移到北京"的核心：给高德一个明确的地理围栏。 */
+        radiusM: Int = 30_000,
         pageNum: Int = 1,
         pageSize: Int = 20
     ): TipsResult {
@@ -327,11 +341,18 @@ class AmapRepo(private val context: Context) {
                 val query = PoiSearch.Query(keyword.trim(), "", city).apply {
                     this.pageSize = pageSize
                     this.pageNum = pageNum
-                    // 不设城市硬限制：用户出差搜外地地址仍要能搜到，
-                    // 本地结果会因为距离近自然排到前面
-                    setCityLimit(false)
+                    // 不设城市硬限制：用户出差搜外地地址仍要能搜到（bound 只在有 center 时生效，
+                    // 且只约束"以 center 为圆心的搜索范围"，不影响按名称精确搜外地点）。
+                    setCityLimit(city.isNotBlank())
+                    if (center != null) setLocation(LatLonPoint(center.first, center.second))
                 }
                 val search = PoiSearch(context, query)
+                // 地理围栏：把搜索结果限制在中心点附近，彻底避免"全国搜索默认落到北京"
+                if (center != null) {
+                    search.setBound(
+                        PoiSearch.SearchBound(LatLonPoint(center.first, center.second), radiusM)
+                    )
+                }
                 search.setOnPoiSearchListener(object : PoiSearch.OnPoiSearchListener {
                     override fun onPoiSearched(result: PoiResult?, rCode: Int) {
                         if (rCode == 1000) {

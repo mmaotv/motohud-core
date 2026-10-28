@@ -104,6 +104,39 @@
             android:textSize="11sp" />
     </LinearLayout>
 
+    <!-- 搜索地点：和主页搜索同款体验，直接按名称找到地点并落点（途经点/起点都常用） -->
+    <LinearLayout
+        android:id="@+id/origin_search"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:contentDescription="@string/origin_search"
+            android:src="@drawable/ic_search"
+            android:tint="@color/accent" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:text="@string/origin_search"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/origin_search_sub"
+            android:textColor="@color/text_tertiary"
+            android:textSize="11sp" />
+    </LinearLayout>
+
     <!-- 「输入坐标」不做：普通用户没有经纬度概念，地图选点已覆盖精确落点 -->
 
     <!-- 常用地址：有就显示，没有连标题一起收掉 -->

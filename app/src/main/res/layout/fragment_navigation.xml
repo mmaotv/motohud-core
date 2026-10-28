@@ -66,6 +66,29 @@
                 android:visibility="gone" />
         </LinearLayout>
 
+        <!--
+          "在附近搜索"提示条：当用户钉住某个地点（点搜索结果 / POI / 历史 / 长按地图）
+          后搜索框会以该点为圆心，点这里即可回到"以当前位置为中心"。
+          这是"搜这个地点附近的东西"的显式入口，也顺带提示用户当前搜索的范围。
+        -->
+        <TextView
+            android:id="@+id/search_scope"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_chip"
+            android:ellipsize="end"
+            android:fontFamily="@font/inter"
+            android:gravity="center_vertical"
+            android:maxLines="1"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="10dp"
+            android:textColor="@color/accent"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
         <!-- 搜索状态行：搜索中 / 无结果 / 失败。
              以前这三种状态各弹一个 Toast，打字时反复打断。
              状态属于"当前列表在说什么"，放在列表位置最合适，不抢焦点。 -->

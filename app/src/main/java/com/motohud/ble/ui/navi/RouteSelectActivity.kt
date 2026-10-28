@@ -1,5 +1,6 @@
 package com.motohud.ble.ui.navi
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -90,6 +91,22 @@ class RouteSelectActivity : AppCompatActivity() {
         } else {
             setOrigin(getString(R.string.origin_map_pick), lat, lng)
         }
+    }
+
+    /** 地点搜索选点（起点 / 途经点共用），结果与地图选点同款回写 */
+    private val searchPickLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { r ->
+        if (r.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+        val name = r.data?.getStringExtra(PlaceSearchActivity.EXTRA_NAME)
+            .orEmpty().ifBlank { getString(R.string.place_card_point) }
+        val lat = r.data?.getDoubleExtra(PlaceSearchActivity.EXTRA_LAT, 0.0) ?: 0.0
+        val lng = r.data?.getDoubleExtra(PlaceSearchActivity.EXTRA_LNG, 0.0) ?: 0.0
+        if (lat == 0.0 && lng == 0.0) return@registerForActivityResult
+        val target = pickingForWaypoint
+        pickingForWaypoint = -1
+        if (target >= 0) setWaypoint(target, name, lat, lng)
+        else setOrigin(name, lat, lng)
     }
 
     // ---------- 路线预览图 ----------
@@ -379,6 +396,17 @@ class RouteSelectActivity : AppCompatActivity() {
             }
             mapPickLauncher.launch(MapPickActivity.intent(this, clat, clng))
         }
+        dialog.onPickSearch = {
+            // 以路线起点为中心搜途经点，结果天然围绕本程路线，不会搜到别的大城市
+            pickingForWaypoint = index
+            searchPickLauncher.launch(
+                PlaceSearchActivity.intent(
+                    this,
+                    getString(R.string.route_waypoint_pick_title),
+                    startLat, startLng
+                )
+            )
+        }
         dialog.show(supportFragmentManager, "waypoint_pick")
     }
 
@@ -476,6 +504,16 @@ class RouteSelectActivity : AppCompatActivity() {
         dialog.onPickOnMap = {
             mapPickLauncher.launch(
                 MapPickActivity.intent(this, startLat, startLng)
+            )
+        }
+        dialog.onPickSearch = {
+            pickingForWaypoint = -1
+            searchPickLauncher.launch(
+                PlaceSearchActivity.intent(
+                    this,
+                    getString(R.string.origin_pick_title),
+                    startLat, startLng
+                )
             )
         }
         dialog.show(supportFragmentManager, "origin_pick")

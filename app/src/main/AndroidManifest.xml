@@ -158,6 +158,14 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.MotoHeadUnit" />
 
+        <!-- 地点搜索选点：起点 / 途经点共用，以当前位置为搜索中心 -->
+        <activity
+            android:name=".ui.navi.PlaceSearchActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.MotoHeadUnit"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- 避让区管理 / 圈选：用户自己标「这块不能进」 -->
         <activity
             android:name=".ui.navi.AvoidZoneActivity"
