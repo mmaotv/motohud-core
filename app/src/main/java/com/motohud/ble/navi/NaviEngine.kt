@@ -59,6 +59,13 @@ interface NaviEngine {
         val locType: Int = 0,
         /** 本帧是否来自卫星定位（决定"信号弱"提示） */
         val fromSatellite: Boolean = false,
+        /**
+         * GPS 信号质量（高德定位 SDK 判定）：1=好 0=差 -1=未知。
+         *
+         * 高德的判断综合了卫星数、信噪比与速度一致性，比单看 accuracy 更靠谱 ——
+         * 网络定位经常报"±5 米"其实是基站粗定位。系统 GPS 兜底给不出这个值，固定 -1。
+         */
+        val gpsAccuracyStatus: Int = -1,
         /** 前方剩余路段上的拥堵里程（米，TMC 状态≥3 拥堵/严重拥堵累加） */
         val congestionAheadM: Float = 0f
     )
@@ -215,6 +222,7 @@ class RouteNaviEngine(
     private var lastAccuracy = 0f
     private var lastLocType = 0
     private var lastFromSatellite = false
+    private var lastGpsAccuracyStatus = -1
     private var locatorActive = false
 
     /** 最近一帧高德定位的时间：用于决定系统定位是否作为兜底 */
@@ -250,6 +258,7 @@ class RouteNaviEngine(
                 speedMps = if (location.hasSpeed()) location.speed else 0f,
                 locType = if (location.provider == LocationManager.GPS_PROVIDER) 1 else 6,
                 fromSatellite = location.provider == LocationManager.GPS_PROVIDER
+                // 系统定位没有高德的信号质量判定，保持默认 -1
             )
         }
 
@@ -270,7 +279,8 @@ class RouteNaviEngine(
         bearing: Float,
         speedMps: Float,
         locType: Int,
-        fromSatellite: Boolean
+        fromSatellite: Boolean,
+        gpsAccuracyStatus: Int = -1
     ) {
         if (!running) return
         val now = System.currentTimeMillis()
@@ -294,6 +304,7 @@ class RouteNaviEngine(
         lastAccuracy = if (out.accuracy > 0f) out.accuracy else accuracy
         lastLocType = locType
         lastFromSatellite = fromSatellite
+        lastGpsAccuracyStatus = gpsAccuracyStatus
 
         _state.value = _state.value.copy(
             latitude = curLat,
@@ -303,7 +314,8 @@ class RouteNaviEngine(
             speedKmh = if (out.speedMps > 0.2f) out.speedMps * 3.6f else 0f,
             accuracy = lastAccuracy,
             locType = locType,
-            fromSatellite = fromSatellite
+            fromSatellite = fromSatellite,
+            gpsAccuracyStatus = gpsAccuracyStatus
         )
     }
 
@@ -338,6 +350,7 @@ class RouteNaviEngine(
         lastAccuracy = 0f
         lastLocType = 0
         lastFromSatellite = false
+        lastGpsAccuracyStatus = -1
 
         val (sLat, sLng) = startHint ?: lastKnownLocation() ?: NaviEngine.DEFAULT_START
         curLat = sLat
@@ -686,7 +699,8 @@ class RouteNaviEngine(
                         bearing = fix.bearing,
                         speedMps = fix.speedMps,
                         locType = fix.locationType,
-                        fromSatellite = fix.fromSatellite
+                        fromSatellite = fix.fromSatellite,
+                        gpsAccuracyStatus = fix.gpsAccuracyStatus
                     )
                 }
             )

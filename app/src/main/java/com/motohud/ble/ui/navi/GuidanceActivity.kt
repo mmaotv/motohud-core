@@ -42,6 +42,7 @@ import com.amap.api.maps.model.LatLngBounds
 import com.amap.api.maps.model.Marker
 import com.amap.api.maps.model.MarkerOptions
 import com.amap.api.maps.model.Polyline
+import com.amap.api.location.AMapLocation
 import com.amap.api.maps.model.PolylineOptions
 import com.motohud.ble.MotoHudApp
 import com.motohud.ble.R
@@ -97,26 +98,33 @@ import kotlin.math.roundToInt
  * 转弯提前播报的距离阶梯（米，降序）：1 公里 → 500 → 200 → 50。
  *
  * 骑行时最需要的是「快到路口了」的紧迫感，而不是到达后才知道该转。
- * 但档位不能堆：以前是 1km/500/300/200/100/50 六档，300 与 200、100 与 50
+ * 档位不能堆：以前是 1km/500/300/200/100/50 六档，300 与 200、100 与 50
  * 之间只差一两秒，实际听感是"一直有人在说话"，反而盖住了真正该听的那句。
- * 现在按开源实现的做法收敛成四档（OSRM Text Instructions 的
- * `announcementsDistancesBelow500m` 也只给 500/200 两级）：
- *  - **1 公里**：预警，还有别的选择时可以按这个调整；
- *  - **500 米**：确认方向，长路段上的第二次提醒；
- *  - **200 米**：准备变道/减速；
+ *
+ * 现在照高德播报调度表（`libamaptbt.so` 的 `mixfork0`）收敛成三档：
+ * ```
+ * "frontLimit": {"default": 1100}       // 路口前 1100 米开始提醒
+ * "recoverDist": {"default": 200, "lastPlay": 550}   // 最后一次播报在 550 米
+ * "times": {"default": 2}               // 同一路口只播 2 次
+ * ```
+ * 即 **1100 预警 + 550 确认 + 临门动作**，加进来正好 3 次。以前我们多一档 200，
+ * 与 550 只隔两百来米（高速上不到 8 秒），听感是同一句话说两遍。
+ *
+ *  - **1100 米**：预警，「前方 1 公里右转进入南滨路」；
+ *  - **550 米**：确认，最后一次带距离的提醒；
  *  - **临门**：只报动作（「右转」「进入环岛，第 3 个出口」），见
  *    [com.motohud.ble.navi.VoiceGuidance.closeDistOf]。
  *
- * 前三档固定；最后一档出厂值 50 米，实际由 `thresholdsFor` 按车速替换
+ * 前两档固定；最后一档出厂值 50 米，实际由 `thresholdsFor` 按车速替换
  * （30/45/60/80），所以这里写的是兜底值。
  */
-private val TURN_THRESHOLDS = intArrayOf(1_000, 500, 200, 50)
+private val TURN_THRESHOLDS = intArrayOf(1_100, 550, 50)
 
 /** 直行路口的提醒档：200 米预警 + 临门一句「路口直行」，长直路不啰嗦 */
 private val STRAIGHT_THRESHOLDS = intArrayOf(200, 50)
 
-/** 简洁模式：砍掉 1 公里与 200，只留 500 预警 + 临门动作 */
-private val BRIEF_THRESHOLDS = intArrayOf(500, 50)
+/** 简洁模式：砍掉 1100 预警，只留 550 确认 + 临门动作 */
+private val BRIEF_THRESHOLDS = intArrayOf(550, 50)
 
 /** 只播转弯模式：只在 200 米处念一句 */
 private val TURN_ONLY_THRESHOLDS = intArrayOf(200)
@@ -445,7 +453,7 @@ class GuidanceActivity : AppCompatActivity() {
                 applyRoute(cand, start)
                 Toast.makeText(this, R.string.guidance_better_route_adopted, Toast.LENGTH_SHORT).show()
                 // 卡片是给用户看的，声音是给"没在看屏幕"的人听的：两者都要有
-                say("已为您切换到更快路线", SpeechPriority.INFO)
+                say("已为您切换到更快路线", SpeechPriority.INFO, cue = com.motohud.ble.navi.SpeechArbiter.BETTER_ROUTE)
             }
             hideBetterRouteCard()
         }
@@ -461,7 +469,7 @@ class GuidanceActivity : AppCompatActivity() {
             updateVoiceButton()
             voice?.setMuted(!on)
             // 开着车看不见屏幕，用一声确认代替「开了吗？」的犹豫
-            say(if (on) "语音播报已开启" else "语音播报已关闭", SpeechPriority.INFO)
+            say(if (on) "语音播报已开启" else "语音播报已关闭", SpeechPriority.INFO, cue = com.motohud.ble.navi.SpeechArbiter.UI_CONFIRM)
         }
         // 长按选播报档位（详细/简洁/只播转弯）：单击是最高频的开/关，不该被设置项挤掉
         btnVoice.setOnLongClickListener {
@@ -507,7 +515,7 @@ class GuidanceActivity : AppCompatActivity() {
                 NaviPrefs.setVoiceMode(which)
                 updateVoiceButton()
                 // 立刻用一声实测让用户听到档位效果，不用等下一个路口
-                say("前方 300 米右转，请按语音提示行驶", SpeechPriority.INFO)
+                say("前方 300 米右转，请按语音提示行驶", SpeechPriority.INFO, cue = com.motohud.ble.navi.SpeechArbiter.UI_CONFIRM)
                 d.dismiss()
             }
             .setNegativeButton(R.string.cancel, null)
@@ -623,7 +631,7 @@ class GuidanceActivity : AppCompatActivity() {
         naviStartMs = System.currentTimeMillis()
         // 开始播报：骑行中不看屏幕也能确认导航已启动、大概多远、预计多久
         if (NaviPrefs.voiceMode.value != NaviPrefs.VOICE_MODE_TURN_ONLY) {
-            say(buildStartText(r), SpeechPriority.INFO)
+            say(buildStartText(r), SpeechPriority.INFO, cue = com.motohud.ble.navi.SpeechArbiter.START)
         }
         engine.start(destName, destLat, destLng, start, r)
         // 前两段引导语提前预合成：起步后第一句就已经是「前方 xx 右转」，
@@ -780,7 +788,7 @@ class GuidanceActivity : AppCompatActivity() {
     private fun requestReroute(lat: Double, lng: Double) {
         Toast.makeText(this, R.string.guidance_rerouting, Toast.LENGTH_SHORT).show()
         // 偏航是骑行中最需要马上知道的事，但眼睛在看路 —— 必须说出来
-        say("您已偏离路线，正在重新规划", SpeechPriority.SAFETY)
+        say("您已偏离路线，正在重新规划", SpeechPriority.SAFETY, cue = com.motohud.ble.navi.SpeechArbiter.REROUTE)
         hideBetterRouteCard()
         planAndReplace(lat to lng)
     }
@@ -852,7 +860,7 @@ class GuidanceActivity : AppCompatActivity() {
         tvBetterRoute.text = msg
         betterRouteCard.visibility = View.VISIBLE
         // 卡片在顶栏，骑行中未必看得见；说一声才不会错过这次换线机会
-        say("前方路况变化，发现更快路线", SpeechPriority.INFO)
+        say("前方路况变化，发现更快路线", SpeechPriority.INFO, cue = com.motohud.ble.navi.SpeechArbiter.BETTER_ROUTE)
     }
 
     private fun hideBetterRouteCard() {
@@ -1157,14 +1165,22 @@ class GuidanceActivity : AppCompatActivity() {
         tvGpsQuality.text = if (s.gpsActive && s.accuracy > 0f) formatAccuracy(s.accuracy)
         else getString(R.string.guidance_gps)
 
-        // 信号弱：只在导航中真的弱时提示，且只弹一次
-        val weak = s.running && (!s.gpsActive || accuracyLevel(s.accuracy) == 1)
+        // 信号弱：优先信高德给的信号质量（综合卫星数/信噪比/速度一致性），
+        // 只有拿不到（系统定位兜底）时才退回精度阈值。
+        // 高德判 "差" 时哪怕 accuracy 显示 ±5m 也算弱 —— 那是基站定位伪装出来的精度。
+        val weak = s.running && when {
+            !s.gpsActive -> true
+            s.gpsAccuracyStatus == AMapLocation.GPS_ACCURACY_BAD -> true
+            s.gpsAccuracyStatus == AMapLocation.GPS_ACCURACY_GOOD -> false
+            else -> accuracyLevel(s.accuracy) == 1
+        }
         tvSignalWarn.visibility = if (weak && !inPip) View.VISIBLE else View.GONE
-        if (weak && !weakGpsToastShown && s.accuracy > 40f) {
+        if (weak && !weakGpsToastShown) {
             weakGpsToastShown = true
             Toast.makeText(
                 this,
-                getString(R.string.navi_gps_weak_message, s.accuracy.roundToInt()),
+                if (s.accuracy > 0f) getString(R.string.navi_gps_weak_message, s.accuracy.roundToInt())
+                else getString(R.string.navi_gps_weak_message, 0),
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -1204,7 +1220,7 @@ class GuidanceActivity : AppCompatActivity() {
             if (!stopped) {
                 stopped = true
                 app.naviForwarder.forwardFinish()
-                say(buildArrivedText(s), SpeechPriority.INFO)
+                say(buildArrivedText(s), SpeechPriority.INFO, cue = com.motohud.ble.navi.SpeechArbiter.ARRIVED)
                 // 导航历史：到达即结束这条记录（轨迹在这里压缩写回）
                 finishHistory()
             }
@@ -1355,7 +1371,11 @@ class GuidanceActivity : AppCompatActivity() {
         val stepForVoice = if (presetPack) step.copy(road = "") else step
         val text = com.motohud.ble.navi.VoiceGuidance.entry(stepForVoice, icon, r.toFloat())
         if (text.isBlank()) return -1
-        say(text, interrupt = false)
+        say(
+            text,
+            interrupt = false,
+            cue = com.motohud.ble.navi.SpeechArbiter.STEP_ENTRY
+        )
         return r
     }
 
@@ -1403,7 +1423,14 @@ class GuidanceActivity : AppCompatActivity() {
         }
         if (chosen < 0) return
         for (i in 0..chosen) remindMask = remindMask or (1 shl i)
-        say(stepText(s.stepIndex, rem, s.speedKmh))
+        // 临门那句是「右转」，和预警句「前方 500 米右转进入X路」在仲裁表里分属两档：
+        // 到跟前时哪怕有路况提示在说，也该让临门动作抢进来。
+        val cue = if (rem <= com.motohud.ble.navi.VoiceGuidance.closeDistOf(s.speedKmh)) {
+            com.motohud.ble.navi.SpeechArbiter.CLOSE_ACTION
+        } else {
+            com.motohud.ble.navi.SpeechArbiter.APPROACH
+        }
+        say(stepText(s.stepIndex, rem, s.speedKmh), cue = cue)
     }
 
     private fun naviAgain() {
@@ -1585,15 +1612,27 @@ class GuidanceActivity : AppCompatActivity() {
      *
      * @param text 含路名的完整文本（距离+动作+路名），交给离线 TTS 整句念出来。
      * @param interrupt false = 接在后面播（进入路段的播报不该把「开始导航」切成半句）。
+     * @param cue 播报类别，决定和别的播报撞车时谁让谁（见 [SpeechArbiter]）。
      */
     private fun say(
         text: String,
         priority: com.motohud.ble.navi.SpeechPriority =
             com.motohud.ble.navi.SpeechPriority.TURN,
-        interrupt: Boolean = true
+        interrupt: Boolean = true,
+        cue: com.motohud.ble.navi.SpeechArbiter.Cue =
+            com.motohud.ble.navi.SpeechArbiter.cueOf(priority)
     ) {
         if (!NaviPrefs.voice.value) return
         if (text.isBlank()) return
+        // 仲裁：正在说更重要的那句（偏航重算/到达）时，这条直接丢掉，
+        // 不要把人正在听的关键指令切成半句——高德也是这么做的
+        val verdict = com.motohud.ble.navi.SpeechArbiter.submit(
+            cue, text, System.currentTimeMillis()
+        )
+        if (verdict == com.motohud.ble.navi.SpeechArbiter.Verdict.DROP) {
+            android.util.Log.i("GuidanceVoice", "让位给重要播报，丢弃：$text")
+            return
+        }
         android.util.Log.i("GuidanceVoice", "播报：$text")
         voice?.speak(text, priority, interrupt)
     }
@@ -1644,12 +1683,21 @@ class GuidanceActivity : AppCompatActivity() {
      */
     private fun stepText(stepIndex: Int, remainM: Int, speedKmh: Float): String {
         val steps = route?.steps ?: return ""
-        val step = steps.getOrNull(stepIndex) ?: return ""
-        val icon = IconMapper.of(step.action, step.orientation, step.instruction)
+        val closeDist = com.motohud.ble.navi.VoiceGuidance.closeDistOf(speedKmh)
+        // 内置语音包是 153 条预录 mp3、按整句匹配，念不出任意路名。
+        // 连续路口压缩会把下一段的路名拼进来 → 整句库里没有 → 只能拆片段、
+        // 拆出来缺路名反而更怪。所以走语音包时不压缩，保持单句。
+        if (presetPack) {
+            val step = steps.getOrNull(stepIndex) ?: return ""
+            val icon = IconMapper.of(step.action, step.orientation, step.instruction)
+            return com.motohud.ble.navi.VoiceGuidance.pre(
+                step, icon, remainM, null, closeDist = closeDist
+            )
+        }
         return com.motohud.ble.navi.VoiceGuidance.pre(
-            step, icon, remainM, steps.getOrNull(stepIndex + 1),
+            steps, stepIndex, remainM,
             // 与 thresholdsFor 用同一个函数算，保证"哪一档会被当成临门档"和这里判断一致
-            closeDist = com.motohud.ble.navi.VoiceGuidance.closeDistOf(speedKmh)
+            closeDist = closeDist
         )
     }
 

@@ -35,12 +35,35 @@ class AmapLocator(private val context: Context) {
         /** 定位来源：1=GPS 2=前次 4=缓存 5=离线 6=网络 8=高精度融合 */
         val locationType: Int,
         /** 反地理编码地址（仅单次定位请求，连续定位为 null） */
-        val address: String? = null
+        val address: String? = null,
+        /**
+         * GPS 信号质量（地图/定位 SDK 11.x 才有）：1=好 0=差 -1=未知。
+         *
+         * 比只看 [accuracy] 更可信 —— 高德是拿卫星数、信噪比、速度一致性综合判的，
+         * 而 `accuracy` 在某些机型上会被网络定位"美化"成 5 米，实际是基站粗定位。
+         */
+        val gpsAccuracyStatus: Int = AMapLocation.GPS_ACCURACY_UNKNOWN
     ) {
         val fromSatellite: Boolean get() = locationType == 1 || locationType == 8
 
         /** 是否来自本地缓存（上一次定位结果，可能已经是很久以前的位置） */
         val isCache: Boolean get() = locationType == 4
+
+        /**
+         * 信号是否够用：卫星定位且高德判定不是"差"。
+         *
+         * 三档判断，避免把"网络定位的 5 米"当成好信号：
+         *  1. 官方给了 GOOD → 直接好；
+         *  2. 官方给了 BAD  → 直接差（哪怕 accuracy 显示很好）；
+         *  3. 官方未知（老定位源/非卫星帧）→ 回退到 accuracy 阈值。
+         */
+        val signalWeak: Boolean
+            get() = when {
+                !fromSatellite -> true
+                gpsAccuracyStatus == AMapLocation.GPS_ACCURACY_GOOD -> false
+                gpsAccuracyStatus == AMapLocation.GPS_ACCURACY_BAD -> true
+                else -> accuracy > 40f
+            }
     }
 
     private var client: AMapLocationClient? = null
@@ -96,7 +119,9 @@ class AmapLocator(private val context: Context) {
                         accuracy = loc.accuracy,
                         bearing = loc.bearing,
                         speedMps = loc.speed,
-                        locationType = loc.locationType
+                        locationType = loc.locationType,
+                        gpsAccuracyStatus = runCatching { loc.gpsAccuracyStatus }
+                            .getOrDefault(AMapLocation.GPS_ACCURACY_UNKNOWN)
                     )
                 )
             }
@@ -178,7 +203,9 @@ class AmapLocator(private val context: Context) {
                                 bearing = loc.bearing,
                                 speedMps = loc.speed,
                                 locationType = loc.locationType,
-                                address = buildAddress(loc)
+                                address = buildAddress(loc),
+                                gpsAccuracyStatus = runCatching { loc.gpsAccuracyStatus }
+                                    .getOrDefault(AMapLocation.GPS_ACCURACY_UNKNOWN)
                             )
                         )
                     }

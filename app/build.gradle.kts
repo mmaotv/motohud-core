@@ -24,8 +24,8 @@ android {
         targetSdk = 36
         // 开发期版本号：0.0.1 起，每次只递增最后一位（0.0.2 → 0.0.3 …）。
         // 未正式上线，不体现主版本语义。
-        versionCode = 26
-        versionName = "0.0.14"
+        versionCode = 27
+        versionName = "0.0.15"
 
         manifestPlaceholders["AMAP_API_KEY"] = amapApiKey
         buildConfigField("String", "AMAP_API_KEY", "\"$amapApiKey\"")
@@ -121,10 +121,13 @@ dependencies {
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 
-    // 高德 SDK：3D 地图 + 搜索（POI 提示 / 路线规划）+ 定位（地图蓝点依赖）
-    // 官方只发布了类 jar（so 与 assets 在 jar 内部），此处使用合并去重后的本地 jar，
-    // so 已解出到 src/main/jniLibs，assets 已解出到 src/main/assets。
-    implementation(files("libs/amap-sdk-merged.jar"))
+    // 高德 SDK：3D 地图 11.3.100 + 搜索 9.8.1 + 定位 11.3.101（官网合包）
+    // 官方从 V11 起不再往 Maven 发版（com.amap.api:3dmap 的 latest 永远停在 10.0.600），
+    // 所以 jar 由 tools/prepare_amap_sdk.py 从官网合包生成：
+    //   libs/amap-sdk-<地图版本>.jar  只含 class（jar 内嵌的 assets 已解到 src/main/assets）
+    //   src/main/jniLibs/<abi>/        so（文件名带版本号，升级时旧的必须删）
+    // 升级方式：python tools/prepare_amap_sdk.py
+    implementation(files("libs/amap-sdk-11.3.100.jar"))
 
     // 离线 TTS 运行时（sherpa-onnx，Apache-2.0）。
     //

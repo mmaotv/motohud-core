@@ -90,6 +90,10 @@ object AmapManager {
             MapsInitializer.updatePrivacyShow(context, true, true)
             MapsInitializer.updatePrivacyAgree(context, true)
             MapsInitializer.setApiKey(key)
+            // HTTPDNS：把瓦片/接口域名解析交给高德自己的 DNS 服务。
+            // 骑在路上切基站、进隧道、连公共 Wi-Fi 时，运营商 DNS 经常解析慢或
+            // 被劫持到广告页，表现为"地图一直转圈但网络正常"。V11 才有这个开关。
+            MapsInitializer.setHttpDnsEnabled(true)
         }
         return true
     }

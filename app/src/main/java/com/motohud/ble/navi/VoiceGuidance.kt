@@ -45,11 +45,25 @@ object VoiceGuidance {
     /** 本段短于该米数 → 进段时不单独报"继续沿 X 行驶"，直接交给阈值播报 */
     const val POST_MIN_M = 250
 
-    /** 本段短于该米数 → 临门指令后面补一句"然后…" */
-    const val CHAIN_M = 400f
-
     /** 距路口近于该米数才允许链式「然后…」：远处预告下一句会让人误以为马上要转 */
     const val CHAIN_AT_M = 250
+
+    /**
+     * 连续路口压缩：总跨度超过该米数就不再往后并段。
+     *
+     * 高德 `compress.remind.initMaxDist = 800` —— 两个路口相距 800 米以上就
+     * 不算"连续路口"了，各说各的；挤在一起说反而让人以为马上要连着转两次。
+     */
+    const val COMPRESS_MAX_TOTAL_M = 800f
+
+    /**
+     * 最多往后并几段。
+     *
+     * 高德分三级（间隔 500~700 / 350~500 / 250~350），级数越高说明路口越密、
+     * 越该并成一句。但人一次能记住的转向不超过三个，所以**封顶两段**：
+     * 当前动作 + 两个后续动作，再多就是念经了。
+     */
+    const val COMPRESS_MAX_TAIL = 2
 
     /**
      * 距路口小于该米数 → **只报动作**，不再报距离和路名。
@@ -99,7 +113,17 @@ object VoiceGuidance {
         val span = SpeechScript.span(d)
         if (span.isEmpty()) return ""
         val road = current.road.trim().takeIf { SpeechScript.isUsableRoad(it) }
-        val head = if (road != null) "继续沿${road}行驶 $span" else "继续直行 $span"
+        // 同一个句式听一路会腻，所以按 route 原文取一个**稳定**的变体号：
+        // 用 instruction 的 hash 而不是随机数，保证同一段路每次算出来都是同一句，
+        // 否则预合成的文本和运行时说的文本对不上，缓存直接失效。
+        // 只有 road 存在时才有变体；内置语音包把 road 清空了，两边都走「继续直行 X」，
+        // 不生成新文本，语音包那 153 条照样命中。
+        val variant = if (road == null) 0 else (current.instruction.hashCode() ushr 4) and 1
+        val head = when {
+            road == null -> "继续直行 $span"
+            variant == 1 -> "接下来 $span 沿${road}行驶"
+            else -> "继续沿${road}行驶 $span"
+        }
         // 短段：一次说完"走多远 + 接着怎么转"，避免第二句等到来不及才说
         if (d <= MULTI_CUE_M) {
             var act = SpeechScript.maneuverShort(icon, current.road, current.instruction)
@@ -134,6 +158,88 @@ object VoiceGuidance {
         next: RouteStep?,
         closeDist: Int = CLOSE_M
     ): String {
+        val tails = if (next == null) emptyList() else tailsFrom(listOf(next), remainM)
+        return preWithTails(current, icon, remainM, tails, closeDist)
+    }
+
+    /**
+     * 带路线上下文的临门指令：会自动把后面 **连续多个** 短路口的动作并进来。
+     *
+     * 城区骑行最难受的一段是「右转、马上左转、马上再右转」——按老逻辑每段各播一次，
+     * 第一句还没念完人已经到第二个路口了。高德的 `compress` 就是干这个的：
+     * 两路口间隔落在 500~700 / 350~500 / 250~350 三级区间时，把几句压成一句。
+     *
+     * 这里按总跨度（[COMPRESS_MAX_TOTAL_M]，高德的 initMaxDist=800）往后并，
+     * 最多并 [COMPRESS_MAX_TAIL] 段，输出形如：
+     * 「前方 200 米右转进入A路，然后左转进入B路，然后右转进入C路」。
+     *
+     * @param steps 整条路线的步骤表
+     * @param index 当前所在段的下标
+     */
+    fun pre(
+        steps: List<RouteStep>,
+        index: Int,
+        remainM: Int,
+        closeDist: Int = CLOSE_M
+    ): String {
+        val current = steps.getOrNull(index) ?: return ""
+        val icon = IconMapper.of(current.action, current.orientation, current.instruction)
+        return preWithTails(current, icon, remainM, compressTail(steps, index, remainM), closeDist)
+    }
+
+    /**
+     * 往后能并进来的后续动作（不含距离词）。
+     *
+     * 三个终止条件，任一命中就停：
+     *  - 距当前路口还远（> [CHAIN_AT_M]）—— 远处预告下一句会被误当成"马上要转"；
+     *  - 累计跨度超过 [COMPRESS_MAX_TOTAL_M]；
+     *  - 已经并了 [COMPRESS_MAX_TAIL] 段。
+     */
+    fun compressTail(steps: List<RouteStep>, index: Int, remainM: Int): List<String> {
+        if (remainM > CHAIN_AT_M) return emptyList()
+        // 当前段的动作也算"上一句"：高德常把同一句写两遍（进辅路、绕行），
+        // 「前方 200 米右转进入A路，然后右转进入A路」听着像卡带
+        val cur = steps.getOrNull(index)
+        val curAct = if (cur == null) "" else {
+            val icon = IconMapper.of(cur.action, cur.orientation, cur.instruction)
+            SpeechScript.maneuverShort(icon, cur.road, cur.instruction)
+        }
+        return tailsFrom(steps.drop(index + 1), remainM, curAct)
+    }
+
+    private fun tailsFrom(
+        following: List<RouteStep>,
+        remainM: Int,
+        exclude: String = ""
+    ): List<String> {
+        if (remainM > CHAIN_AT_M) return emptyList()
+        val out = ArrayList<String>(COMPRESS_MAX_TAIL)
+        var acc = 0f
+        var last = exclude
+        for (s in following) {
+            if (out.size >= COMPRESS_MAX_TAIL) break
+            val d = s.distanceM
+            if (d <= 0f) break
+            if (acc + d > COMPRESS_MAX_TOTAL_M) break
+            val icon = IconMapper.of(s.action, s.orientation, s.instruction)
+            val act = SpeechScript.maneuverShort(icon, s.road, s.instruction)
+            if (act.isEmpty()) break
+            if (act != last) {
+                out.add(act)
+                last = act
+            }
+            acc += d
+        }
+        return out
+    }
+
+    private fun preWithTails(
+        current: RouteStep,
+        icon: Int,
+        remainM: Int,
+        tails: List<String>,
+        closeDist: Int
+    ): String {
         // 最后一档：短促的动作词，不带距离、不带"然后"
         if (remainM <= closeDist) return SpeechScript.actionOnly(icon, current.instruction)
         val base = if (icon == IconType.STRAIGHT) {
@@ -141,11 +247,8 @@ object VoiceGuidance {
         } else {
             SpeechScript.turn(icon, remainM, current.road, current.instruction)
         }
-        if (base.isEmpty() || next == null) return base
-        if (remainM > CHAIN_AT_M || next.distanceM > CHAIN_M) return base
-        val nextIcon = IconMapper.of(next.action, next.orientation, next.instruction)
-        val nextAct = SpeechScript.maneuverShort(nextIcon, next.road, next.instruction)
-        return chain(base, nextAct)
+        if (base.isEmpty() || tails.isEmpty()) return base
+        return tails.fold(base) { acc, tail -> chain(acc, tail) }
     }
 
     /**
@@ -186,17 +289,19 @@ object VoiceGuidance {
 
         // 阈值播报：与 GuidanceActivity 的阶梯（[TURN_THRESHOLDS]）逐档一致；
         // 带/不带"然后"都要备，因为下一段长度是固定的，但播报点在哪个阈值上不固定。
+        // 这里的 [pre] 传整条 steps，会按同一套 compress 规则把连续路口并进来 ——
+        // 运行时 stepText 用的也是这个重载，两边文本必须逐字一致，否则缓存不命中。
         //
         // 最后一档的**距离**是动态的（[closeDistOf]，30~80 米），但它的**文本**
         // 只由 [SpeechScript.actionOnly] 决定、与距离无关，所以这里固定 probe 50
         // 就能覆盖全部情形 —— 运行时无论 closeDist 取 30 还是 80，说的都是同一句。
-        for (probe in intArrayOf(1_000, 500, 200, 50)) {
+        for (probe in intArrayOf(1_100, 550, 50)) {
             if (probe > total) continue
-            pre(step, icon, probe, next).takeIf { it.isNotEmpty() }?.let { out.add(it) }
+            pre(steps, index, probe).takeIf { it.isNotEmpty() }?.let { out.add(it) }
             pre(step, icon, probe, null).takeIf { it.isNotEmpty() }?.let { out.add(it) }
         }
         // 进段那一刻整段长度上的临门指令（短段会被当成"前方 X 米转弯"播一次）
-        pre(step, icon, total, next).takeIf { it.isNotEmpty() }?.let { out.add(it) }
+        pre(steps, index, total).takeIf { it.isNotEmpty() }?.let { out.add(it) }
         pre(step, icon, total, null).takeIf { it.isNotEmpty() }?.let { out.add(it) }
         return out.distinct()
     }

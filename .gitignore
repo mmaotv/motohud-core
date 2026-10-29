@@ -25,3 +25,6 @@ local.properties
 
 # 本地测试截图（adb screencap 产物，不入库）
 test_shots/
+
+# 高德 SDK 下载缓存（prepare_amap_sdk.py）
+/tools/.cache/
