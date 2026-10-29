@@ -1,116 +1,164 @@
-"""
-内置语音包生成器（构建期一次性工具，不参与 APK 构建）。
+# -*- coding: utf-8 -*-
+"""生成内置语音包（assets/voicepack）。
+
+音色与 0.0.5 那批 `res/raw/vp_*.mp3` 完全一致：edge-tts 的 zh-CN-XiaoxiaoNeural，
+语速 +8%。那是本项目的「第一版语音」，用户明确要求沿用它，参数不要再改。
+（旧版 48 段 res/raw 已随 VoicePack 一起删除，产物不再进 res —— 150+ 个资源 id
+没有意义，assets + 索引文件更直接。）
 
 用法：
     python tools/gen_voice_pack.py
 
-输出：app/src/main/res/raw/vp_*.mp3
+产物：
+    app/src/main/assets/voicepack/<md5>.mp3   每条一句话，文件名是文本 md5
+    app/src/main/assets/voicepack/index.txt   UTF-8，每行 `文本<TAB>文件名`
 
-设计：导航播报高度模板化，与其把几十 MB 的神经 TTS 模型塞进包里，
-不如把「前方 / 300米 / 右转」这类片段在构建期用神经网络 TTS 合成好，
-运行时按顺序播放。32 段片段合计约 0.5MB，音质接近云端，且完全离线、
-无 JNI 依赖 —— 系统没装任何 TTS 引擎的机器也能正常播报。
+## 清单为什么是这些
 
-代价：念不出路名（只念"前方 300 米右转"）。这也是一线车机导航的常见口径。
+播放端（PresetPackSpeaker）拿到一句播报文本后：
+  1. 整句命中 → 单段播放，没有拼接停顿；
+  2. 否则从左到右**贪心匹配最长已知片段**，匹配不上的字（路名）跳过。
+
+所以要覆盖三种粒度：
+  - **原子**：动作词、距离词（带/不带「前方」）、路口次序、系统提示；
+  - **常用整句**：距离 × 常用动作（少一段拼接就少一次停顿）；
+  - **整句句式**：「继续直行 X」「前方 X 米路口直行」「进入环岛，第 N 个出口」。
+
+⚠ 与代码强耦合，改文案必须同步改这里，否则命中不了：
+  `navi/SpeechScript.kt`（action / distance / span）
+  `navi/VoiceGuidance.kt`（entry / pre / actionOnly 的句式）
+  `navi/tts/VoiceLibrary.kt`（NOTICES）
 """
 import asyncio
-import os
+import hashlib
+import pathlib
 import sys
 
-import edge_tts
-
-# Xiaoxiao 是微软最清晰的中文女声之一；+8% 语速贴近导航播报节奏
 VOICE = "zh-CN-XiaoxiaoNeural"
 RATE = "+8%"
 
-CLIPS = {
-    # 前缀
-    "vp_front": "前方",
-    # 距离档位（播报距离一律取到最近的档位，不念精确米数）
-    "vp_d50": "50米",
-    "vp_d100": "100米",
-    "vp_d200": "200米",
-    "vp_d300": "300米",
-    "vp_d500": "500米",
-    "vp_d800": "800米",
-    "vp_d1k": "1公里",
-    "vp_d2k": "2公里",
-    "vp_d5k": "5公里",
-    "vp_d10k": "10公里",
-    # 全程（整句，避免"全程约"+"5公里"拼接导致 6.7km 被念成 5 公里）
-    "vp_t1": "全程约1公里",
-    "vp_t2": "全程约2公里",
-    "vp_t3": "全程约3公里",
-    "vp_t4": "全程约4公里",
-    "vp_t5": "全程约5公里",
-    "vp_t6": "全程约6公里",
-    "vp_t7": "全程约7公里",
-    "vp_t8": "全程约8公里",
-    "vp_t9": "全程约9公里",
-    "vp_t10": "全程约10公里",
-    "vp_t15": "全程约15公里",
-    "vp_t20": "全程约20公里",
-    "vp_t30": "全程约30公里",
-    "vp_t50": "全程约50公里以上",
-    # 动作（与 NaviEngine.IconType 一一对应）
-    "vp_a_straight": "直行",
-    "vp_a_left": "左转",
-    "vp_a_right": "右转",
-    "vp_a_left_front": "向左前方行驶",
-    "vp_a_right_front": "向右前方行驶",
-    "vp_a_left_back": "向左后方行驶",
-    "vp_a_right_back": "向右后方行驶",
-    "vp_a_uturn": "掉头",
-    "vp_a_roundabout_in": "进入环岛",
-    "vp_a_roundabout_out": "驶出环岛",
-    "vp_a_waypoint": "到达途经点",
-    "vp_a_dest": "到达目的地",
-    "vp_a_merge_left": "汇入左侧主路",
-    "vp_a_merge_right": "汇入右侧主路",
-    # 固定句
-    "vp_start": "开始导航",
-    "vp_reroute": "已重新规划路线",
-    "vp_gps_weak": "GPS信号弱，位置可能不准",
-    "vp_arrived": "已到达目的地",
-    "vp_end": "导航结束",
-    "vp_exited": "已退出导航",
-    "vp_voice_on": "语音已开启",
-    "vp_voice_off": "语音已关闭",
-}
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+OUT = ROOT / "app/src/main/assets/voicepack"
+
+# 与 SpeechScript.action() 一致
+ACTIONS = [
+    "左转", "右转", "向左前方行驶", "向右前方行驶",
+    "向左后方行驶", "向右后方行驶", "掉头", "直行",
+    "进入环岛", "靠左进入环岛", "驶出环岛", "向左并线", "向右并线",
+]
+# 与 SpeechScript.distance() 一致
+DISTANCES = [
+    "前方 50 米", "前方 100 米", "前方 200 米", "前方 300 米", "前方 500 米",
+    "前方 800 米", "前方 1 公里", "前方 2 公里", "前方 5 公里", "前方 10 公里",
+]
+# 与 SpeechScript.span() 一致
+SPANS = [
+    "50 米", "100 米", "200 米", "300 米", "500 米",
+    "800 米", "1 公里", "2 公里", "5 公里", "10 公里",
+]
+# 与 VoiceLibrary.NOTICES 一致
+NOTICES = [
+    "开始导航",
+    "即将到达目的地",
+    "已到达目的地",
+    "已到达途经点",
+    "您已偏离路线，正在重新规划",
+    "已为您重新规划路线",
+    "前方道路拥堵，正在寻找更快路线",
+    "已为您切换到更快路线",
+    "语音播报已开启",
+    "语音播报已关闭",
+    "正在搜索卫星信号",
+    "卫星信号弱，请注意定位偏差",
+    "请注意安全驾驶",
+    "前方路口请减速慢行",
+    "请保持直行",
+    "请注意避让行人",
+]
+# 整句优先给这些动作做组合：骑行中最常听到的几个
+COMMON_ACTIONS = ["左转", "右转", "向左前方行驶", "向右前方行驶", "掉头", "进入环岛"]
 
 
-async def one(name: str, text: str, out_dir: str) -> None:
-    path = os.path.join(out_dir, name + ".mp3")
-    if os.path.exists(path) and os.path.getsize(path) > 1000:
-        print("skip", name)
-        return
-    # 重试：网络抖动时不要让整批失败
+def build_phrases():
+    phrases, seen = [], set()
+
+    def add(t):
+        t = t.strip()
+        if t and t not in seen:
+            seen.add(t)
+            phrases.append(t)
+
+    # 1) 原子
+    for a in ACTIONS:
+        add(a)
+    for d in DISTANCES:
+        add(d)
+    for s in SPANS:
+        add(s)
+    for n in NOTICES:
+        add(n)
+    add("路口直行")
+    for n in range(2, 10):
+        add(f"第 {n} 个路口")
+
+    # 2) 常用整句：距离 × 常用动作
+    for d in DISTANCES:
+        for a in COMMON_ACTIONS:
+            add(f"{d}{a}")
+
+    # 3) 整句句式（entry 兜底 / 直行路口 / 环岛出口）
+    for s in SPANS:
+        add(f"继续直行 {s}")
+    for d in DISTANCES:
+        add(f"{d}路口直行")
+    for n in range(2, 9):
+        add(f"进入环岛，走第 {n} 个出口")
+    for n in range(1, 9):
+        add(f"进入环岛，第 {n} 个出口")
+    return phrases
+
+
+async def synth(text, path):
+    import edge_tts
     for attempt in range(3):
         try:
-            await edge_tts.Communicate(text, VOICE, rate=RATE).save(path)
-            print("ok  ", name, os.path.getsize(path), "B")
-            return
+            await edge_tts.Communicate(text, VOICE, rate=RATE).save(str(path))
+            if path.exists() and path.stat().st_size > 1000:
+                return
         except Exception as e:  # noqa: BLE001
-            print("retry", name, attempt, e)
-            await asyncio.sleep(1.0)
-    print("FAIL", name)
+            print("  retry", text, attempt, e)
+            await asyncio.sleep(1.5 * (attempt + 1))
+    print("  FAIL", text)
 
 
-async def main() -> None:
-    out_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "app", "src", "main", "res", "raw",
-    )
-    os.makedirs(out_dir, exist_ok=True)
-    for name, text in CLIPS.items():
-        await one(name, text, out_dir)
-    total = sum(
-        os.path.getsize(os.path.join(out_dir, n + ".mp3"))
-        for n in CLIPS
-        if os.path.exists(os.path.join(out_dir, n + ".mp3"))
-    )
-    print(f"\n共 {len(CLIPS)} 段，合计 {total / 1024:.0f} KB")
+async def main():
+    OUT.mkdir(parents=True, exist_ok=True)
+    phrases = build_phrases()
+    print(f"共 {len(phrases)} 条 → {OUT}")
+    sem = asyncio.Semaphore(4)
+    done = 0
+    index_lines = []
+
+    async def one(text):
+        nonlocal done
+        name = hashlib.md5(text.encode("utf-8")).hexdigest() + ".mp3"
+        path = OUT / name
+        async with sem:
+            if not (path.exists() and path.stat().st_size > 1000):
+                await synth(text, path)
+            index_lines.append(f"{text}\t{name}")
+            done += 1
+            if done % 20 == 0:
+                print(f"  {done}/{len(phrases)}")
+
+    await asyncio.gather(*(one(t) for t in phrases))
+    index_lines.sort()
+    (OUT / "index.txt").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
+    total = sum(p.stat().st_size for p in OUT.glob("*.mp3"))
+    print(f"完成：{len(index_lines)} 条，{total / 1024 / 1024:.2f} MB")
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    asyncio.run(main())

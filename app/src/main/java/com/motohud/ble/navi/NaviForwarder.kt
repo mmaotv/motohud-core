@@ -49,6 +49,28 @@ class NaviForwarder(private val ble: BleConnectionManager) {
         )
     }
 
+    /**
+     * 转发**外部导航源**（高德 / 百度 APP 的广播或通知）的一帧。
+     *
+     * 与 [forward] 共用同一条 BLE 出口，只是三个字段都可空：
+     * 上游没读到的项传 null，就不发 —— 车机保留上一次显示，
+     * 不会出现"目的地距离被填进下一路口"这种串字段。
+     *
+     * 数据源需要先 [attach]（服务启动时挂一个 tag），这样"投到车机"总开关
+     * 和连接状态判断都复用现有逻辑，不必另写一套。
+     */
+    fun forwardRaw(iconType: Int?, pathRemain: Int?, stepRemain: Int?) {
+        if (!canSend()) return
+        if (iconType == null && pathRemain == null && stepRemain == null) return
+        NaviCommand.forwardPartial(
+            send = { text, key -> ble.sendNavCommand(text, key) },
+            deviceName = ble.connectedDeviceName,
+            iconType = iconType,
+            pathRemain = pathRemain,
+            stepRemain = stepRemain
+        )
+    }
+
     /** 到达终点：FINISH ::: */
     fun forwardFinish() {
         if (ble.state.value != BleConnectionManager.State.CONNECTED) return

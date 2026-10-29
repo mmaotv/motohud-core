@@ -103,10 +103,6 @@ object BleConstants {
     /** 退出导航（BaseNaviActivity.java:264 onDestroy writeData("NO")） */
     const val CMD_NO = "NO"
 
-    /** 高德转向图标类型上限（BYQ 0~19，SR 0~16） */
-    const val ICON_MAX_BYQ = 20
-    const val ICON_MAX_SR = 17
-
     private fun pad2(v: Int) = if (v < 10) "0$v" else "$v"
 
     // ---------- 通知类型码表（TWNotifyService.java:122-152,237-241） ----------

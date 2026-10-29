@@ -24,8 +24,8 @@ android {
         targetSdk = 36
         // 开发期版本号：0.0.1 起，每次只递增最后一位（0.0.2 → 0.0.3 …）。
         // 未正式上线，不体现主版本语义。
-        versionCode = 24
-        versionName = "0.0.12"
+        versionCode = 26
+        versionName = "0.0.14"
 
         manifestPlaceholders["AMAP_API_KEY"] = amapApiKey
         buildConfigField("String", "AMAP_API_KEY", "\"$amapApiKey\"")
@@ -67,6 +67,16 @@ android {
         jniLibs {
             useLegacyPackaging = true
         }
+    }
+
+    /**
+     * assets 里的语音包 mp3 不能被压缩。
+     *
+     * `PresetPackSpeaker` 用 `assets.openFd()` 取 fd 直接喂 MediaPlayer，
+     * 压缩过的 asset 拿不到 offset/length（openFd 抛异常），只能整段读进内存再播。
+     */
+    androidResources {
+        noCompress += "mp3"
     }
 
     buildTypes {

@@ -9,6 +9,8 @@ import android.util.Log
 import com.motohud.ble.MotoHudApp
 import com.motohud.ble.ble.BleConstants
 import com.motohud.ble.ble.BleConnectionManager
+import com.motohud.ble.navi.bridge.NaviBridgeHub
+import com.motohud.ble.navi.bridge.NotifyTextParser
 
 /**
  * 通知/来电转发服务 —— 复刻原 App TWNotifyService（264 行）。
@@ -45,6 +47,16 @@ class NotificationForwardService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         sbn ?: return
         try {
+            // 导航通知桥接：只有「导航桥接」开关打开、且广播通道静默时才真正生效，
+            // 判断都在 Hub 内部做，这里只负责把能解析出来的字段投递过去。
+            // 高德/百度不在 WATCHED_PACKAGES 里，不会和下面的通知计数转发冲突。
+            if (NaviBridgeHub.enabled) {
+                val navi = NotifyTextParser.parse(sbn)
+                if (navi != null) {
+                    NaviBridgeHub.offerNotification(navi)
+                    return
+                }
+            }
             val pkg = sbn.packageName
             val count = (sbn.notification.number + 1).coerceAtLeast(1)
             val type = mapType(pkg)

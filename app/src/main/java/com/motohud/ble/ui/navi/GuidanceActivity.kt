@@ -94,19 +94,29 @@ import kotlin.math.roundToInt
  */
 
 /**
- * 转弯提前播报的距离阶梯（米，降序）：1km → 500 → 300 → 200 → 100 → 50。
+ * 转弯提前播报的距离阶梯（米，降序）：1 公里 → 500 → 200 → 50。
  *
  * 骑行时最需要的是「快到路口了」的紧迫感，而不是到达后才知道该转。
- * 这套阶梯与开源 OSRM Text Instructions / Valhalla 的做法一致：
- * 远处粗（1km 一次）、近处密（200/100/50 连着提醒）。
+ * 但档位不能堆：以前是 1km/500/300/200/100/50 六档，300 与 200、100 与 50
+ * 之间只差一两秒，实际听感是"一直有人在说话"，反而盖住了真正该听的那句。
+ * 现在按开源实现的做法收敛成四档（OSRM Text Instructions 的
+ * `announcementsDistancesBelow500m` 也只给 500/200 两级）：
+ *  - **1 公里**：预警，还有别的选择时可以按这个调整；
+ *  - **500 米**：确认方向，长路段上的第二次提醒；
+ *  - **200 米**：准备变道/减速；
+ *  - **临门**：只报动作（「右转」「进入环岛，第 3 个出口」），见
+ *    [com.motohud.ble.navi.VoiceGuidance.closeDistOf]。
+ *
+ * 前三档固定；最后一档出厂值 50 米，实际由 `thresholdsFor` 按车速替换
+ * （30/45/60/80），所以这里写的是兜底值。
  */
-private val TURN_THRESHOLDS = intArrayOf(1_000, 500, 300, 200, 100, 50)
+private val TURN_THRESHOLDS = intArrayOf(1_000, 500, 200, 50)
 
-/** 直行路口的提醒档：只保留临到路口的 200/100，长直路不啰嗦 */
-private val STRAIGHT_THRESHOLDS = intArrayOf(200, 100)
+/** 直行路口的提醒档：200 米预警 + 临门一句「路口直行」，长直路不啰嗦 */
+private val STRAIGHT_THRESHOLDS = intArrayOf(200, 50)
 
-/** 简洁模式：砍掉 1km/300，只留 500 与 200 */
-private val BRIEF_THRESHOLDS = intArrayOf(500, 200)
+/** 简洁模式：砍掉 1 公里与 200，只留 500 预警 + 临门动作 */
+private val BRIEF_THRESHOLDS = intArrayOf(500, 50)
 
 /** 只播转弯模式：只在 200 米处念一句 */
 private val TURN_ONLY_THRESHOLDS = intArrayOf(200)
@@ -173,11 +183,21 @@ class GuidanceActivity : AppCompatActivity() {
      *
      * 不再直接用系统 `TextToSpeech` —— 车机和部分国产 ROM 上它根本调不通
      * （无引擎 / 缺中文数据 / 只支持 synthesizeToFile），表现就是"导航全程哑巴"。
-     * 现在唯一实现是离线神经 TTS（[com.motohud.ble.navi.tts.SherpaSpeaker]），
-     * 由 [com.motohud.ble.navi.SpeechRouter] 在模型就绪后自动出声；模型未下载时
-     * 回退到 [com.motohud.ble.navi.SilentSpeaker]（静默，提示用户去下载）。
+     * 现在有两种实现，[com.motohud.ble.navi.SpeechRouter] 按"模型装没装"二选一：
+     *  - [com.motohud.ble.navi.tts.SherpaSpeaker]：能念路名；
+     *  - [com.motohud.ble.navi.PresetPackSpeaker]：APK 内置语音包，不念路名。
      */
     private var voice: com.motohud.ble.navi.Speaker? = null
+
+    /**
+     * 当前是不是「内置语音包」在播（没装模型）。
+     *
+     * 内置包只能念固定短句，**念不出路名和任意数字**，所以要换一套文案：
+     *  - 进段确认说「继续直行 500 米」而不是「继续沿烟雨路行驶 500 米」；
+     *  - 开场白只说「开始导航」，不带全程距离/ETA（"10.1 公里"这种数字念不了，
+     *    硬拼会变成"一公里"）。
+     */
+    private var presetPack = false
     private var route: RouteData? = null
     private var destName: String = "目的地"
     private var destLat = 0.0
@@ -210,7 +230,7 @@ class GuidanceActivity : AppCompatActivity() {
      * 提前播报调度：每个路段按距离阈值逐级提醒，位图记录本段已播过的档位。
      *
      * 以前只有「进入路段」和 500m/200m 两个固定点，路口临近时几乎没有提醒；
-     * 现在改成 1km/500m/300m/200m/100m/50m 的阶梯，越接近路口越密。
+     * 现在改成 1 公里/500/200/50 四档，越接近路口越具体（最后一档只说动作）。
      * 这套「多远一档」的模型参考自开源 OSRM Text Instructions（BSD-2）与
      * Valhalla 的语音提示：`armDistances`/`announcementsDistancesBelow500m` 等。
      */
@@ -1175,7 +1195,7 @@ class GuidanceActivity : AppCompatActivity() {
             // 进入时就已念过的距离，把同一档及更远的档位标记为已播，避免复读/倒着播
             if (spokeAt > 0) markAnnouncedAt(spokeAt)
         }
-        // 按距离阈值逐级提前提醒（1km/500/300/200/100/50），越接近路口越密
+        // 按距离阈值逐级提前提醒（1 公里/500/200/50），最后一档只报动作
         announceApproaching(s)
         // 趁还在当前路段，把下一段的引导语先合成好（进入下一段直接命中缓存）
         prewarmStep(s.stepIndex + 1)
@@ -1265,9 +1285,13 @@ class GuidanceActivity : AppCompatActivity() {
     /**
      * 当前路段生效的播报阈值集合（降序）。
      *
-     * 转弯用完整阶梯 1km/500/300/200/100/50，临近路口越来越密；
-     * 直行只在真有路口（需换路）时用 200/100 两档，避免长直路反复念「直行」。
-     * 详细度选择器仍然有效：简洁砍到 500/200，只播转弯砍到 200。
+     * 转弯用 1 公里/500/200/临门 四档，最后一档只报动作；
+     * 直行只在真有路口（需换路）时用 200 一档，避免长直路反复念「直行」。
+     * 详细度选择器仍然有效：简洁砍到 500/临门，只播转弯砍到 200。
+     *
+     * **最后一档的距离按进段车速算**（[com.motohud.ble.navi.VoiceGuidance.closeDistOf]）：
+     * 高速上要早报，市区慢行晚报。进段时定一次就够 —— 这一段的车速基调
+     * 在进入时已经确定，中途抖一下没必要重排播报阶梯。
      */
     private fun thresholdsFor(s: NaviEngine.NaviState): IntArray {
         val isTurn = TurnIcons.isTurn(s.iconType)
@@ -1277,12 +1301,25 @@ class GuidanceActivity : AppCompatActivity() {
                 NaviPrefs.VOICE_MODE_TURN_ONLY -> IntArray(0)
                 // 简洁模式直行只提醒一次，别把长直路念成复读机
                 NaviPrefs.VOICE_MODE_BRIEF -> intArrayOf(200)
-                else -> STRAIGHT_THRESHOLDS
+                else -> withCloseDist(STRAIGHT_THRESHOLDS, s)
             }
-            mode == NaviPrefs.VOICE_MODE_BRIEF -> BRIEF_THRESHOLDS
+            mode == NaviPrefs.VOICE_MODE_BRIEF -> withCloseDist(BRIEF_THRESHOLDS, s)
+            // 只播转弯模式只有一档「提醒一次」，没有临门档，不动
             mode == NaviPrefs.VOICE_MODE_TURN_ONLY -> TURN_ONLY_THRESHOLDS
-            else -> TURN_THRESHOLDS
+            else -> withCloseDist(TURN_THRESHOLDS, s)
         }
+    }
+
+    /**
+     * 把阶梯的**最后一档**换成按车速算出的临门距离，其余档位保持不变。
+     *
+     * 换值而不是加一档，是为了不改变 [remindMask] 的位布局 —— 位索引和档位一一对应，
+     * 长度变了会让"已播"状态整体错位，导致重复播报。
+     */
+    private fun withCloseDist(base: IntArray, s: NaviEngine.NaviState): IntArray {
+        if (base.isEmpty()) return base
+        val d = com.motohud.ble.navi.VoiceGuidance.closeDistOf(s.speedKmh)
+        return IntArray(base.size) { i -> if (i == base.lastIndex) d else base[i] }
     }
 
     /**
@@ -1313,7 +1350,10 @@ class GuidanceActivity : AppCompatActivity() {
             else -> false
         }
         if (!should) return -1
-        val text = com.motohud.ble.navi.VoiceGuidance.entry(step, icon, r.toFloat())
+        // 内置语音包念不出路名，别拼「继续沿烟雨路行驶」——把路名去掉，
+        // 直接说「继续直行 500 米」，这段在语音包里有整句，一次命中
+        val stepForVoice = if (presetPack) step.copy(road = "") else step
+        val text = com.motohud.ble.navi.VoiceGuidance.entry(stepForVoice, icon, r.toFloat())
         if (text.isBlank()) return -1
         say(text, interrupt = false)
         return r
@@ -1341,12 +1381,19 @@ class GuidanceActivity : AppCompatActivity() {
      *
      * 每 tick 找到「已跨过但还没播」的**最紧急**一档（阈值最小、且剩余距离 <= 该阈值），
      * 播一次并把它及更远的档位标记为已播；这样一次 GPS 跳变也只会说最相关的一句，
-     * 不会把 1km/500m/300m 连着念出来。
+     * 不会把 1 公里/500/200 连着念出来。若跳变时已经进了临门距离内
+     * （按车速 30~80 米，见 `VoiceGuidance.closeDistOf`），
+     * 说的就是纯动作句（「左转」/「进入环岛，第 2 个出口」）。
      */
     private fun announceApproaching(s: NaviEngine.NaviState) {
         if (!s.running || s.arrived || s.stepIndex < 0) return
         if (activeThresholds.isEmpty()) return
         if (s.stepIndex != remindStepIndex) return
+        // 临门档距离按**实时车速**刷新。
+        // 进段时算的那一档只反映进入那一刻的车速：高速驶入、到路口前减速停车时，
+        // 固定的 80 米会让「右转」那句永远不触发（人已经停在路口，车机还静着）。
+        // 只在档位数 >= 2 时刷新 —— "只播转弯"模式只有一档 [200]，那是提醒档不是临门档。
+        if (activeThresholds.size >= 2) activeThresholds = withCloseDist(activeThresholds, s)
         val rem = s.stepRemain.toInt()
         if (rem <= 0) return
         var chosen = -1
@@ -1356,7 +1403,7 @@ class GuidanceActivity : AppCompatActivity() {
         }
         if (chosen < 0) return
         for (i in 0..chosen) remindMask = remindMask or (1 shl i)
-        say(stepText(s.stepIndex, rem))
+        say(stepText(s.stepIndex, rem, s.speedKmh))
     }
 
     private fun naviAgain() {
@@ -1508,20 +1555,27 @@ class GuidanceActivity : AppCompatActivity() {
         historyId = null
     }
 
-    // ---------- 语音播报（离线神经 TTS） ----------
+    // ---------- 语音播报 ----------
     //
     // 历史教训：这里原来是系统 TextToSpeech，两个致命问题都表现为"导航全程哑巴"：
     // ① initTts 回调异步，就绪前的播报被丢弃；② 引擎缺中文数据时 ttsReady 永远 false。
     // 更根本的是——车机上根本没有可用的 TTS 引擎，怎么修都是哑巴。
-    // 现在用离线 VITS 模型（SherpaSpeaker）：模型随 App 下载，完全离线、能念任意文本
-    // （含路名）。原来的预录语音包已移除——它念不出路名、内容也太受限。
+    //
+    // 现在两条路（由 SpeechRouter 选，互斥不会叠音）：
+    //  - 装了离线 VITS 模型 → SherpaSpeaker，能念任意文本（含路名）；
+    //  - 没装 → PresetPackSpeaker，播 APK 内置的 150+ 条预合成短句，
+    //    方向/距离/第几个路口/出口都有，只是不含路名。
 
     private fun initVoice() {
         voice = com.motohud.ble.navi.SpeechRouter.create(this)
             .also { it.setMuted(!NaviPrefs.voice.value) }
-        // 离线语音包删掉之后，没装模型就是**一点声音都没有**。
-        // 不提示的话用户只会觉得"软件坏了"—— 说清楚去哪装，比静默好。
-        if (NaviPrefs.voice.value && !TtsModelStore.isInstalled(this)) {
+        presetPack = voice is com.motohud.ble.navi.PresetPackSpeaker
+        // 用内置语音包时"路名不念"必须讲一次，否则用户以为功能坏了；
+        // 但每次进导航都弹就是骚扰，所以只提示一次。
+        if (NaviPrefs.voice.value && !TtsModelStore.isInstalled(this) &&
+            !NaviPrefs.packHintShown()
+        ) {
+            NaviPrefs.markPackHintShown()
             Toast.makeText(this, R.string.guidance_voice_no_model, Toast.LENGTH_LONG).show()
         }
     }
@@ -1550,6 +1604,9 @@ class GuidanceActivity : AppCompatActivity() {
      */
     private fun buildStartText(r: RouteData?): String {
         if (r == null) return "开始导航"
+        // 内置语音包念不出"10.1 公里"这种任意数字，硬拼会被切成"一公里"，
+        // 所以只说一句「开始导航」——全程/ETA 屏幕上一直有
+        if (presetPack) return "开始导航"
         val dist = CoordConverter.formatDistance(r.distanceM.toInt())
         // formatEta 给的是「16 分钟」「1 小时 20 分钟」这种带空格的展示文本，
         // 直接拼「到达」会多出一个空格（TTS 断句变怪），所以只在需要时补空格。
@@ -1561,6 +1618,8 @@ class GuidanceActivity : AppCompatActivity() {
      * 到达目的地：报一下这趟走了多远、花了多久（与到达卡片一致）。
      */
     private fun buildArrivedText(s: NaviEngine.NaviState): String {
+        // 内置包念不了"全程约 10.1 公里，用时 32min"，只说到达
+        if (presetPack) return "已到达目的地"
         val traveled = s.traveled.coerceAtLeast(0)
         val dist = CoordConverter.formatDistance(traveled)
         val durMs = (System.currentTimeMillis() - naviStartMs).coerceAtLeast(0L)
@@ -1583,12 +1642,14 @@ class GuidanceActivity : AppCompatActivity() {
      *
      * @param remainM 距该段结束还有多远；预合成时传整段长度
      */
-    private fun stepText(stepIndex: Int, remainM: Int): String {
+    private fun stepText(stepIndex: Int, remainM: Int, speedKmh: Float): String {
         val steps = route?.steps ?: return ""
         val step = steps.getOrNull(stepIndex) ?: return ""
         val icon = IconMapper.of(step.action, step.orientation, step.instruction)
         return com.motohud.ble.navi.VoiceGuidance.pre(
-            step, icon, remainM, steps.getOrNull(stepIndex + 1)
+            step, icon, remainM, steps.getOrNull(stepIndex + 1),
+            // 与 thresholdsFor 用同一个函数算，保证"哪一档会被当成临门档"和这里判断一致
+            closeDist = com.motohud.ble.navi.VoiceGuidance.closeDistOf(speedKmh)
         )
     }
 
@@ -1603,6 +1664,8 @@ class GuidanceActivity : AppCompatActivity() {
     private fun prewarmStep(stepIndex: Int) {
         if (stepIndex < 0) return
         if (!NaviPrefs.voice.value) return
+        // 内置包已经全在 assets 里，没有"合成"这一步，不必白算文本
+        if (presetPack) return
         val steps = route?.steps ?: return
         if (stepIndex == prewarmedStep) return
         prewarmedStep = stepIndex

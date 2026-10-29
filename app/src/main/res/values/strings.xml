@@ -623,7 +623,7 @@
 
     <!-- 离线语音引擎（TTS 模型下载） -->
     <string name="settings_voice_engine">离线语音引擎</string>
-    <string name="tts_intro">装上离线语音引擎后，导航能念完整句子（含路名）：「沿黄桷坪正街行驶 500 米后右转进入南滨路」。\n\n模型约 27MB，只在需要时下载，不占安装包。下载后完全离线，不联网也能播报。</string>
+    <string name="tts_intro">不下载也能播报：安装包里已内置 150+ 条常用语音（方向、距离、第几个路口/出口），完全离线、零延迟，只是不念路名。\n\n下载离线语音引擎后，导航能念完整句子（含路名）：「沿黄桷坪正街行驶 500 米后右转进入南滨路」。\n\n模型约 27MB，只在需要时下载，不占安装包。下载后完全离线，不联网也能播报。</string>
     <string name="tts_model_info">模型：AISHELL-3 多说话人（174 个说话人）\n许可：Apache-2.0，可商用\n下载后完全离线运行，不会把你的位置或路名发到任何服务器。</string>
     <string name="tts_voice_title">播报风格</string>
     <string name="tts_voice_hint">点一下就能听，选你喜欢的那个（不同风格的语速和音调也不同）</string>
@@ -639,7 +639,7 @@
     <string name="tts_lib_done">语音库已就绪，共 %1$d 条</string>
     <string name="tts_download">下载语音模型（约 27MB）</string>
     <string name="tts_delete">删除语音模型</string>
-    <string name="tts_delete_msg">删除后导航将没有播报声音。需要时可以重新下载（语音库会保留）。</string>
+    <string name="tts_delete_msg">删除后导航改用内置语音包（不念路名）。需要时可重新下载（语音库会保留）。</string>
     <string name="tts_test">试听一句</string>
     <string name="tts_test_text">沿黄桷坪正街行驶五百米后右转进入南滨路</string>
     <string name="tts_test_preparing">正在准备语音引擎…</string>
@@ -647,13 +647,29 @@
     <string name="tts_state_installed">已安装</string>
     <string name="tts_state_installed_sub">离线语音可用，导航会念出路名。占用空间 %1$s</string>
     <string name="tts_state_missing">未安装</string>
-    <string name="tts_state_missing_sub">导航暂时没有播报声音。下载模型后可念完整句子（含路名）。</string>
+    <string name="tts_state_missing_sub">当前使用内置语音包：方向、距离、第几个路口/出口都会念，但不含路名。下载模型后可念完整句子（含路名）。</string>
     <string name="tts_state_downloading">正在下载…</string>
     <string name="tts_connecting">连接服务器…</string>
     <string name="tts_unzipping">正在解压…</string>
     <string name="tts_download_ok">语音模型已就绪，导航时生效</string>
     <string name="tts_download_fail">下载失败：%1$s</string>
-    <string name="guidance_voice_no_model">未安装离线语音模型，本次导航没有播报声音。可在「设置 → 离线语音引擎」下载。</string>
+    <string name="guidance_voice_no_model">本次导航使用内置语音包：方向、距离、第几个路口/出口都会念，但不含路名。需要路名可在「设置 → 离线语音引擎」下载模型。</string>
     <string name="tts_engine_state_on">已启用 · %1$s</string>
     <string name="tts_engine_state_off">未安装</string>
+
+    <!-- 第三方导航桥接（高德/百度 → 车机） -->
+    <string name="settings_bridge">第三方导航转发</string>
+    <string name="settings_bridge_desc">用高德/百度导航，把转向和距离推到车机</string>
+    <string name="bridge_fg_channel">导航转发中</string>
+    <string name="bridge_fg_title">导航转发</string>
+    <string name="bridge_fg_waiting">等待高德或百度开始导航</string>
+    <string name="bridge_fg_arrived">已到达目的地</string>
+    <string name="bridge_fg_active">%1$s · %2$s</string>
+    <string name="bridge_fg_step">下一路口 %1$s</string>
+    <string name="bridge_fg_path">剩余 %1$s</string>
+    <string name="bridge_fg_no_data">暂无可转发字段</string>
+    <string name="bridge_need_notify_title">建议授予通知访问权限</string>
+    <string name="bridge_need_notify_message">高德/百度的转向信息主要通过系统广播获取，不需要该权限；但百度地图手机版与部分高德版本不发广播，此时只能靠解析通知文本兜底（数据会不完整）。\n\n是否前往设置授权？</string>
+    <string name="bridge_cast_off">「投到车机」总开关是关的，导航转发不会被发送</string>
+    <string name="bridge_started">导航转发已开启，打开高德或百度导航即可</string>
 </resources>

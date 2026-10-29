@@ -60,7 +60,7 @@ object SpeechScript {
      * 距离词（带「前方」）。
      *
      * 分档一是为了让同一距离上的文本固定、命中合成缓存；二是让**播报阈值**
-     * （[com.motohud.ble.ui.navi.GuidanceActivity] 里的 1km/500/300/200/100/50）
+     * （[com.motohud.ble.ui.navi.GuidanceActivity] 里的 1 公里/500/200/50）
      * 和念出来的字面对得上：阈值 1000 时这里必须给「前方 1 公里」，
      * 所以 800 米这一档的上界收到 900，别把 950 米念成「800 米」。
      *
@@ -144,8 +144,12 @@ object SpeechScript {
         // 环岛：出口序号比「进入环岛」有用得多（Valhalla 的 roundabout_exit_count）
         val exit = roundaboutExitOf(instruction)
         if (exit in 2..8 && isRoundabout(iconType)) {
+            // 「驶入X路」只能取**原文明确写的**路名：环岛段的 road 是本段所在的那条路
+            // （如「江南大道」），拿它当目标会说出「走第 3 个出口，驶入江南大道」——
+            // 人正在江南大道上，这句等于把人往原地指。
+            val outRoad = explicitRoad(instruction)
             val head = "$d，进入环岛，走第 $exit 个出口"
-            return if (target.isNotEmpty()) "$head，驶入$target" else head
+            return if (outRoad.isNotEmpty()) "$head，驶入$outRoad" else head
         }
 
         // 「第 1 个路口左转」等同于左转，报出来是噪音；只有 ≥2 才有区分度
@@ -184,6 +188,29 @@ object SpeechScript {
         }
         val target = targetRoad(instruction, road)
         return if (target.isNotEmpty()) "${act}进入$target" else act
+    }
+
+    /**
+     * 只含**动作本身**的临门一句（不带距离、不带目标路名）。
+     *
+     * 距路口 50 米时说的就是这句：骑手此刻只想知道"往哪打方向"，
+     * 再念「前方 50 米，第 2 个路口右转进入南滨路」既长又来不及。
+     *
+     *  - 普通转弯 → 「左转」「右转」「向左前方行驶」「掉头」；
+     *  - 环岛 → 「进入环岛，第 3 个出口」（到跟前必须报出口序号，
+     *    只报"进入环岛"等于没指路）；
+     *  - 直行路口 → 「路口直行」（只说"直行"太弱，容易漏听）。
+     */
+    fun actionOnly(iconType: Int, instruction: String): String {
+        val act = action(iconType)
+        if (act.isEmpty()) return ""
+        if (iconType == IconType.ARRIVED_DESTINATION || iconType == IconType.ARRIVED_WAYPOINT) return act
+        if (isRoundabout(iconType)) {
+            val exit = roundaboutExitOf(instruction)
+            return if (exit in 1..8) "进入环岛，第 $exit 个出口" else act
+        }
+        if (iconType == IconType.STRAIGHT) return "路口直行"
+        return act
     }
 
     // 注：进段确认 / 阈值临门指令 / 预合成文本均由叙事层 VoiceGuidance 组合，
@@ -232,11 +259,14 @@ object SpeechScript {
      * 当补充信息用 —— 有明确目标路还用它，会把"进入 A 路"说成当前所在的路）。
      */
     private fun targetRoad(instruction: String, road: String): String {
-        ENTER_ROAD.find(instruction)?.groupValues?.getOrNull(1)?.trim()
-            ?.takeIf { it.isNotEmpty() && it !in PLACEHOLDER_ROAD }
-            ?.let { return it }
+        explicitRoad(instruction).let { if (it.isNotEmpty()) return it }
         return road.trim().takeIf { isUsableRoad(it) } ?: ""
     }
+
+    /** 原文里明确写的「进入某某路」；没写返回空串（**不**退回本段路名） */
+    private fun explicitRoad(instruction: String): String =
+        ENTER_ROAD.find(instruction)?.groupValues?.getOrNull(1)?.trim()
+            ?.takeIf { it.isNotEmpty() && it !in PLACEHOLDER_ROAD } ?: ""
 
     /** 高德会用这些词占位，它们不是真实路名 */
     private val PLACEHOLDER_ROAD = setOf(

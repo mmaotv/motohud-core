@@ -1,16 +1,19 @@
 package com.motohud.ble.ui.settings
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Toast
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.motohud.ble.MotoHudApp
 import com.motohud.ble.R
 import com.motohud.ble.data.NaviPrefs
 import com.motohud.ble.data.device.DevicePrefs
 import com.motohud.ble.databinding.DialogSettingsBinding
+import com.motohud.ble.service.NaviBridgeService
 import com.motohud.ble.service.NaviForegroundService
 import com.motohud.ble.ui.MainActivity
 import com.motohud.ble.ui.OnboardingActivity
@@ -57,6 +60,9 @@ class SettingsSheetDialog : BottomSheetDialogFragment() {
 
         b.swCast.isChecked = NaviPrefs.castEnabled.value
         b.swCast.setOnCheckedChangeListener { _, on -> NaviPrefs.setCastEnabled(on) }
+
+        // 第三方导航转发（高德/百度 APP → 车机）的开关已收起，见 dialog_settings.xml 注释。
+        // NaviBridgeService / NaviPrefs.bridgeEnabled 保留未删，接入车机版地图时可直接贴回。
 
         b.swScreenOff.isChecked = NaviPrefs.screenOffNavi.value
         b.swScreenOff.setOnCheckedChangeListener { _, on ->
@@ -106,6 +112,40 @@ class SettingsSheetDialog : BottomSheetDialogFragment() {
         }
 
         renderVoiceEngineState()
+    }
+
+    /**
+     * 第三方导航转发开关的接线（已收起，保留备查）。
+     *
+     * 原实现开启时做三件事：总闸没开先提示 → 起前台服务 → 引导通知权限。
+     * 收起原因与恢复方式见 `dialog_settings.xml` 内的注释。
+     */
+    @Suppress("unused")
+    private fun setBridge(ctx: Context, on: Boolean) {
+        NaviPrefs.setBridgeEnabled(on)
+        if (!on) {
+            NaviBridgeService.stop(ctx)
+            return
+        }
+        if (!NaviPrefs.castEnabled.value) {
+            Toast.makeText(ctx, R.string.bridge_cast_off, Toast.LENGTH_LONG).show()
+        }
+        NaviBridgeService.start(ctx)
+        Toast.makeText(ctx, R.string.bridge_started, Toast.LENGTH_SHORT).show()
+        if (!act.isNotificationAccessGranted()) promptBridgeNotifyAccess()
+    }
+
+    @Suppress("unused")
+    private fun promptBridgeNotifyAccess() {
+        com.motohud.ble.ui.common.MotoDialog.builder(requireContext())
+            .setTitle(R.string.bridge_need_notify_title)
+            .setMessage(R.string.bridge_need_notify_message)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.setting) { _, _ ->
+                dismiss()
+                act.promptNotificationAccess()
+            }
+            .show()
     }
 
     /** 语音引擎装没装、占多少空间 —— 在设置列表里直接显示，省得点进去才知道 */

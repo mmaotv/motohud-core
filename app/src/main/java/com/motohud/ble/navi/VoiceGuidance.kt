@@ -45,8 +45,45 @@ object VoiceGuidance {
     /** 本段短于该米数 → 进段时不单独报"继续沿 X 行驶"，直接交给阈值播报 */
     const val POST_MIN_M = 250
 
-    /** 下一段短于该米数 → 临门指令后面补一句"然后…" */
+    /** 本段短于该米数 → 临门指令后面补一句"然后…" */
     const val CHAIN_M = 400f
+
+    /** 距路口近于该米数才允许链式「然后…」：远处预告下一句会让人误以为马上要转 */
+    const val CHAIN_AT_M = 250
+
+    /**
+     * 距路口小于该米数 → **只报动作**，不再报距离和路名。
+     *
+     * 这是播报阶梯最后一档的**兜底值**，实际距离由 [closeDistOf] 按车速给出。
+     * 到跟前了，骑手只关心"左还是右、第几个出口"，一句「右转」远比
+     * 「前方 50 米右转进入烟雨路」有效——后者还没念完人已经过路口了。
+     */
+    const val CLOSE_M = 50
+
+    /**
+     * 临门播报距离：按当前车速折算「约 3 秒的提前量」。
+     *
+     * ## 为什么不是固定 50 米
+     *
+     * 固定值两头都不合适：
+     *  - 70 km/h 时 50 米只有 **2.6 秒**，「前方 50 米右转」还没念完已经过路口；
+     *  - 20 km/h 时 50 米有 **9 秒**，干等一句「右转」反而干扰判断。
+     *
+     * ## 依据
+     *
+     * 高德内置的播报调度表（`libamaptbt.so` 里的 `skilledMode.confirmDist`）
+     * 是**按道路等级**给的：高速 80 米 / 快速路 70 / 主干道 50 / 县道 25 / 小路 30。
+     * 我们拿不到道路等级（`DriveStep` 没有该字段，只有 instruction/road/distance/duration），
+     * 改用**车速**近似——效果等价：快车早报、慢车晚报。
+     *
+     * 分档取整到 15 的倍数，让同一车速区间落到同一档，避免在档位边界来回抖动。
+     */
+    fun closeDistOf(speedKmh: Float): Int = when {
+        speedKmh >= 65f -> 80   // 高速 / 高架：80 米 ≈ 4.4 秒 @65km/h
+        speedKmh >= 45f -> 60   // 快速路 / 郊区：60 米 ≈ 4.8 秒 @45km/h
+        speedKmh >= 25f -> 45   // 市区正常：45 米 ≈ 6.5 秒 @25km/h
+        else -> 30              // 拥堵 / 慢行：30 米 ≈ 5.4 秒 @20km/h
+    }
 
     /**
      * 过渡后确认（进段播报）：刚通过路口/刚进入新路段时说。
@@ -78,19 +115,34 @@ object VoiceGuidance {
     /**
      * 临门指令（阈值播报）：距路口 remainM 米时说。
      *
-     * 直行路口走 [SpeechScript.straight]（"路口直行进入 X 路"）；
-     * 其余走 [SpeechScript.turn]。下一段够短就补「，然后…」（OSRM 的 `then`）。
+     * 两段式：
+     *  - **最后一档（≤ [CLOSE_M] 米）**：只报动作——「右转」「向右前方行驶」
+     *    「进入环岛，第 3 个出口」。到跟前再报距离和路名只会拖慢，来不及。
+     *  - 更远的档位：距离 + 动作 + 目标路名；直行路口走 [SpeechScript.straight]，
+     *    其余走 [SpeechScript.turn]。
+     *
+     * 链式「然后…」只在 **距路口 ≤ [CHAIN_AT_M] 米** 时才补：1 公里/500 米处
+     * 说「然后左转进入福红路」，骑手会以为马上要左转，而那是八百米以后的事。
      *
      * @param next 下一段（`steps[i+1]`），为 null 表示本段是最后一段
+     * @param closeDist 最后一档的距离（[closeDistOf] 按车速算），小于等于它就只报动作
      */
-    fun pre(current: RouteStep, icon: Int, remainM: Int, next: RouteStep?): String {
+    fun pre(
+        current: RouteStep,
+        icon: Int,
+        remainM: Int,
+        next: RouteStep?,
+        closeDist: Int = CLOSE_M
+    ): String {
+        // 最后一档：短促的动作词，不带距离、不带"然后"
+        if (remainM <= closeDist) return SpeechScript.actionOnly(icon, current.instruction)
         val base = if (icon == IconType.STRAIGHT) {
             SpeechScript.straight(remainM, current.instruction)
         } else {
             SpeechScript.turn(icon, remainM, current.road, current.instruction)
         }
         if (base.isEmpty() || next == null) return base
-        if (next.distanceM > CHAIN_M) return base
+        if (remainM > CHAIN_AT_M || next.distanceM > CHAIN_M) return base
         val nextIcon = IconMapper.of(next.action, next.orientation, next.instruction)
         val nextAct = SpeechScript.maneuverShort(nextIcon, next.road, next.instruction)
         return chain(base, nextAct)
@@ -132,9 +184,13 @@ object VoiceGuidance {
         // 进段播报：长段只有"继续沿 X 行驶 N"，短段带"然后…"，两种形态都备
         entry(step, icon, step.distanceM).takeIf { it.isNotEmpty() }?.let { out.add(it) }
 
-        // 阈值播报：与 GuidanceActivity 的阶梯一致；带/不带"然后"都要备，
-        // 因为下一段长度是固定的，但播报点在哪个阈值上不固定
-        for (probe in intArrayOf(1_000, 500, 300, 200, 100, 50)) {
+        // 阈值播报：与 GuidanceActivity 的阶梯（[TURN_THRESHOLDS]）逐档一致；
+        // 带/不带"然后"都要备，因为下一段长度是固定的，但播报点在哪个阈值上不固定。
+        //
+        // 最后一档的**距离**是动态的（[closeDistOf]，30~80 米），但它的**文本**
+        // 只由 [SpeechScript.actionOnly] 决定、与距离无关，所以这里固定 probe 50
+        // 就能覆盖全部情形 —— 运行时无论 closeDist 取 30 还是 80，说的都是同一句。
+        for (probe in intArrayOf(1_000, 500, 200, 50)) {
             if (probe > total) continue
             pre(step, icon, probe, next).takeIf { it.isNotEmpty() }?.let { out.add(it) }
             pre(step, icon, probe, null).takeIf { it.isNotEmpty() }?.let { out.add(it) }

@@ -120,6 +120,17 @@
             android:layout_height="1dp"
             android:background="@color/divider" />
 
+        <!--
+          第三方导航转发（高德/百度 APP → 车机）的开关已收起。
+          原因：实测高德手机版 17.01.0 **不发** AUTONAVI_STANDARD_BROADCAST_SEND
+          （解包 8 dex + 72 so 零命中），通知里也只有「正在导航」四个字，
+          打开后没有任何数据可转，留着是虚假承诺。
+
+          代码保留未删（NaviBridgeData / NaviBridgeService / NaviPrefs.bridgeEnabled），
+          高德车机版（com.autonavi.amapauto）或百度车机版接入时，把这段开关贴回来即可。
+          详见 导航信息转发-审计报告.md 第三阶段。
+        -->
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="52dp"

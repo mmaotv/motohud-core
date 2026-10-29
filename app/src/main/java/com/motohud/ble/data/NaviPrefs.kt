@@ -47,6 +47,7 @@ object NaviPrefs {
     private const val KEY_VOICE_MODE = "voice_mode"
     private const val KEY_PHONE_MODE = "phone_mode"   // 旧键：仅用于迁移读取
     private const val KEY_CAST = "cast_enabled"
+    private const val KEY_BRIDGE = "navi_bridge_enabled"
     private const val KEY_SCREEN_OFF = "screen_off_navi"
     private const val KEY_MAP_TRAFFIC = "map_traffic_layer"
 
@@ -76,6 +77,9 @@ object NaviPrefs {
 
     /** 播报音量倍率（引擎原始输出偏小，需要放大才听得清） */
     private const val KEY_TTS_VOLUME = "tts_volume"
+
+    /** 内置语音包说明是否弹过（只提示一次） */
+    private const val KEY_PACK_HINT = "voice_pack_hint_shown"
 
     private lateinit var prefs: SharedPreferences
 
@@ -138,6 +142,17 @@ object NaviPrefs {
     private val _castEnabled = MutableStateFlow(true)
     val castEnabled: StateFlow<Boolean> = _castEnabled.asStateFlow()
 
+    /**
+     * 第三方导航桥接（读取高德/百度导航状态并转发到车机）。
+     *
+     * **默认关闭**：这是新增能力，且需要额外的前台常驻服务，
+     * 不能让老用户升级后莫名多一个常驻通知。只在设置里手动打开才生效。
+     *
+     * 注意它是「数据源」层面的开关，真正发不发还要过 [castEnabled] 这道总闸。
+     */
+    private val _bridgeEnabled = MutableStateFlow(false)
+    val bridgeEnabled: StateFlow<Boolean> = _bridgeEnabled.asStateFlow()
+
     /** 息屏继续导航（关闭屏幕后仍保持定位、播报与车机转发） */
     private val _screenOffNavi = MutableStateFlow(true)
     val screenOffNavi: StateFlow<Boolean> = _screenOffNavi.asStateFlow()
@@ -185,6 +200,7 @@ object NaviPrefs {
         _ttsVolume.value = prefs.getFloat(KEY_TTS_VOLUME, DEFAULT_TTS_VOLUME)
         // 「投屏」从页面改成开关：默认开（连了车机就是要投），忽略已废弃的 phone_mode
         _castEnabled.value = prefs.getBoolean(KEY_CAST, true)
+        _bridgeEnabled.value = prefs.getBoolean(KEY_BRIDGE, false)
         _screenOffNavi.value = prefs.getBoolean(KEY_SCREEN_OFF, true)
         _mapTraffic.value = prefs.getBoolean(KEY_MAP_TRAFFIC, false)
         _smart.value = prefs.getBoolean(KEY_SMART, true)
@@ -210,6 +226,19 @@ object NaviPrefs {
         prefs.edit().putBoolean(KEY_VOICE, on).apply()
     }
 
+    /**
+     * 内置语音包的说明是否已经提示过。
+     *
+     * 没装模型时导航会自动用内置语音包（不念路名）。这件事必须告诉用户一次，
+     * 否则他会以为"路名怎么不见了"；但每次进导航都弹就是骚扰 —— 所以只弹一次。
+     */
+    fun packHintShown(): Boolean =
+        ::prefs.isInitialized && prefs.getBoolean(KEY_PACK_HINT, false)
+
+    fun markPackHintShown() {
+        if (::prefs.isInitialized) prefs.edit().putBoolean(KEY_PACK_HINT, true).apply()
+    }
+
     fun setVoiceMode(mode: Int) {
         _voiceMode.value = mode
         prefs.edit().putInt(KEY_VOICE_MODE, mode).apply()
@@ -233,6 +262,11 @@ object NaviPrefs {
     fun setCastEnabled(on: Boolean) {
         _castEnabled.value = on
         prefs.edit().putBoolean(KEY_CAST, on).apply()
+    }
+
+    fun setBridgeEnabled(on: Boolean) {
+        _bridgeEnabled.value = on
+        prefs.edit().putBoolean(KEY_BRIDGE, on).apply()
     }
 
     fun setScreenOffNavi(on: Boolean) {

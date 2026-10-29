@@ -43,6 +43,14 @@ class MotoHudApp : Application() {
         // 导航偏好（路线偏好 / 语音开关 / 息屏导航）
         com.motohud.ble.data.NaviPrefs.init(this)
 
+        // 上次开着「第三方导航转发」就把它拉回来。
+        // 该开关已在设置面板收起（实测高德手机版不发导航广播，见审计报告第三阶段），
+        // 所以这里也一并停用 —— 否则偏好里残留 true 时服务会被悄悄拉起来，用户又关不掉。
+        // 恢复方式：把设置面板的开关贴回来，同时取消下面这行注释。
+        // if (com.motohud.ble.data.NaviPrefs.bridgeEnabled.value) {
+        //     com.motohud.ble.service.NaviBridgeService.start(this)
+        // }
+
         // 自愈：引导流程已完成说明用户同意过隐私政策，但高德侧的同意标记是另一套存储，
         // 重装、清数据或跨版本升级后可能缺失。不同步的话地图与搜索会一直不可用，
         // 界面上还会莫名出现"去配置地图"的提示。
