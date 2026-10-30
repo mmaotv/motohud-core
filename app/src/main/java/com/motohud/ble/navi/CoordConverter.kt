@@ -27,7 +27,14 @@ object CoordConverter {
         return (z * sin(theta) + 0.006) to (z * cos(theta) + 0.0065)
     }
 
-    /** WGS84 -> GCJ02（GPS 原始坐标转国内地图坐标） */
+    /**
+     * WGS84 -> GCJ02（GPS 原始坐标转国内地图坐标）。
+     *
+     * **不要直接调用**：业务代码一律走 [com.motohud.ble.amap.CoordFix.gpsToGcj]，
+     * 那是高德官方 `CoordinateConverter` 的封装（含可用区判断，参数跟着国测局版本走）。
+     * 这里保留只是给 CoordFix 在没有 Context（纯逻辑/单测）时兜底，
+     * 二者公式同源，但官方实现更权威。
+     */
     fun wgs84ToGCJ(wgsLat: Double, wgsLng: Double): Pair<Double, Double> {
         if (outOfChina(wgsLat, wgsLng)) return wgsLat to wgsLng
         var dLat = transformLat(wgsLng - 105.0, wgsLat - 35.0)
@@ -55,19 +62,18 @@ object CoordConverter {
      * 搜索结果只给"3.2 公里"时，用户还得自己判断在哪个方向、顺不顺路。
      * 加上方位（"东南 3.2 公里"）才是「这地方离我多远、在哪边」的完整回答。
      */
+    /**
+     * 八方位（北/东北/东/…）。
+     *
+     * 搜索结果只给"3.2 公里"时，用户还得自己判断在哪个方向、顺不顺路。
+     * 加上方位（"东南 3.2 公里"）才是「这地方离我多远、在哪边」的完整回答。
+     *
+     * 方位角算法在 [Geo.bearing]，八方位命名只保留 [bearingToDirection] 一份 ——
+     * 原先这里另写了一套平面近似 + 另一张方向表，两张表的"东北/东南"顺序并不一致。
+     */
     fun direction8(fromLat: Double, fromLng: Double, toLat: Double, toLng: Double): String {
-        val dLat = Math.toRadians(toLat - fromLat)
-        val dLng = Math.toRadians(toLng - fromLng)
-        val mLat = Math.toRadians((fromLat + toLat) / 2.0)
-        // 米制平面分量：x 向东、y 向北
-        val x = dLng * cos(mLat)
-        val y = dLat
-        if (x == 0.0 && y == 0.0) return "正前方"
-        var deg = Math.toDegrees(atan2(x, y))
-        if (deg < 0) deg += 360.0
-        val names = arrayOf("北", "东北", "东", "东南", "南", "西南", "西", "西北")
-        val idx = (((deg + 22.5) / 45.0).toInt()) % 8
-        return names[idx]
+        if (fromLat == toLat && fromLng == toLng) return "正前方"
+        return bearingToDirection(Geo.bearing(fromLat, fromLng, toLat, toLng))
     }
 
     /** 时间格式化：秒 -> "x 分钟" / "x 小时 x 分钟" */

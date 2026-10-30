@@ -5,6 +5,7 @@ import com.motohud.ble.amap.AmapManager
 import com.motohud.ble.ble.BleConnectionManager
 import com.motohud.ble.data.AppDatabase
 import com.motohud.ble.data.BleDiagnostic
+import com.motohud.ble.data.CrashHandler
 import com.motohud.ble.data.FaultRepository
 import com.motohud.ble.data.SearchEngine
 import com.motohud.ble.data.bike.BikePrefs
@@ -34,6 +35,9 @@ class MotoHudApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 崩溃捕获必须第一件事装上：后面任何一行初始化都可能炸，
+        // 晚装一步就漏掉最该拿到的那类启动崩溃。
+        CrashHandler.install(this) { crashExtras() }
         // 诊断日志落盘（filesDir/ble_diagnostic/diag.log），供现场导出
         BleDiagnostic.attach(this)
         // 恢复上次选择的车型
@@ -42,6 +46,8 @@ class MotoHudApp : Application() {
         com.motohud.ble.data.device.DevicePrefs.init(this)
         // 导航偏好（路线偏好 / 语音开关 / 息屏导航）
         com.motohud.ble.data.NaviPrefs.init(this)
+        // 坐标纠偏走高德官方 CoordinateConverter，需要 Context 先喂一次
+        com.motohud.ble.amap.CoordFix.init(this)
 
         // 上次开着「第三方导航转发」就把它拉回来。
         // 该开关已在设置面板收起（实测高德手机版不发导航广播，见审计报告第三阶段），
@@ -75,5 +81,39 @@ class MotoHudApp : Application() {
                 com.motohud.ble.navi.tts.SherpaSpeaker.buildVoiceLibrary(this) { _, _ -> }
             }
         }
+    }
+
+    /**
+     * 崩溃报告里的「附加状态」。
+     *
+     * 只写能反映「崩的时候 App 在干什么」的几项，别塞一堆无关字段 ——
+     * 真正定位问题时，看的是导航有没有在跑、连的是哪台车机，
+     * 而不是把整个偏好表打出来。
+     *
+     * 每一项都独立 runCatching：崩溃现场本身可能就是某个单例构造失败，
+     * 这里再去摸它只会二次崩，把原始异常盖掉。
+     */
+    private fun crashExtras(): String = buildString {
+        runCatching {
+            appendLine("BLE: ${BleDiagnostic.state.value} / 设备=${BleDiagnostic.deviceName.value ?: "无"}")
+            appendLine("BLE: 通知=${BleDiagnostic.notifyReady.value} HELLO=${BleDiagnostic.helloSent.value} 帧数=${BleDiagnostic.frameCount.value}")
+        }.onFailure { appendLine("BLE: (读取失败 ${it.javaClass.simpleName})") }
+
+        runCatching {
+            val s = naviEngine.state.value
+            appendLine(
+                "导航: running=${s.running} arrived=${s.arrived} " +
+                    "step=${s.stepIndex} stepRemain=${s.stepRemain}m pathRemain=${s.pathRemain}m " +
+                    "speed=${s.speedKmh.toInt()}km/h gps=${s.gpsActive}"
+            )
+        }.onFailure { appendLine("导航: (读取失败 ${it.javaClass.simpleName})") }
+
+        runCatching {
+            appendLine(
+                "偏好: 语音=${com.motohud.ble.data.NaviPrefs.voice.value} " +
+                    "投屏=${com.motohud.ble.data.NaviPrefs.castEnabled.value} " +
+                    "息屏=${com.motohud.ble.data.NaviPrefs.screenOffNavi.value}"
+            )
+        }.onFailure { appendLine("偏好: (读取失败 ${it.javaClass.simpleName})") }
     }
 }

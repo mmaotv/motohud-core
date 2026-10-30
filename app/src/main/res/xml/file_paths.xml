@@ -11,4 +11,8 @@
     <external-files-path
         name="diag"
         path="diagnostic/" />
+    <!-- 轨迹分享图（external-files/shots/） -->
+    <external-files-path
+        name="shots"
+        path="shots/" />
 </paths>

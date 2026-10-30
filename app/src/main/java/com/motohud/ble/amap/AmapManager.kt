@@ -107,6 +107,11 @@ object AmapManager {
             ServiceSettings.updatePrivacyShow(context, true, true)
             ServiceSettings.updatePrivacyAgree(context, true)
             ServiceSettings.getInstance().setApiKey(key)
+            // 注意：搜索侧的 HTTPDNS 默认**不开**。
+            // 9.8.1 提供了 ServiceSettings.setHttpDnsEnabled，但实测开启后
+            // Inputtips 搜索会间歇性抛 "http或socket连接失败 - ConnectionException"
+            // （同一台机器、同一网络下，连续 5 次搜索失败 3 次）。
+            // 地图侧的地图 HTTPDNS 没有这个问题，所以只有搜索不启。
         }
         return true
     }
@@ -131,6 +136,7 @@ object AmapManager {
         if (key.isEmpty()) return
         runCatching {
             MapsInitializer.setApiKey(key)
+            MapsInitializer.setHttpDnsEnabled(true)
             ServiceSettings.getInstance().setApiKey(key)
             AMapLocationClient.setApiKey(key)
         }

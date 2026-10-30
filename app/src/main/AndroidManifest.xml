@@ -174,6 +174,13 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.MotoHeadUnit" />
 
+        <!-- 离线地图管理：下载/更新/删除城市离线包 -->
+        <activity
+            android:name=".ui.navi.OfflineMapActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.MotoHeadUnit" />
+
         <!-- 地图选点：给「起点 ≠ 当前位置」用 -->
         <activity
             android:name=".ui.navi.MapPickActivity"

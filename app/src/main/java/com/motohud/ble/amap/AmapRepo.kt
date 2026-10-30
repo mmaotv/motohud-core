@@ -68,7 +68,23 @@ sealed class TipsResult {
 data class RouteQueryOptions(
     val waypoints: List<Pair<Double, Double>> = emptyList(),
     val avoidPolygons: List<List<Pair<Double, Double>>> = emptyList(),
-    val excludeMotorway: Boolean = false
+    val excludeMotorway: Boolean = false,
+    /**
+     * 避开轮渡（`DriveRouteQuery.setUseFerry(false)`）。
+     *
+     * 这是彻查 SDK 时才发现的遗漏：`setUseFerry` 与三个 `DRIVING_EXCLUDE_*` 常量里，
+     * 之前只用了 `MOTORWAY`。摩托车过江靠轮渡很常见（重庆、武汉都有），
+     * 但轮渡班次不可控，赶时间的人会希望绕桥走 —— 以前没有任何开关能表达。
+     */
+    val avoidFerry: Boolean = false,
+    /**
+     * 车型（`DriveRouteQuery.setCarType`）。
+     *
+     * 0=普通汽车 1=纯电 2=插混。这个参数以前**完全没传**，走的是默认 0。
+     * 它影响两件事：限行判定（部分城市新能源不限行）、以及电车会优先规划有充电
+     * 条件的路线。摩托车按普通汽车处理即可，但用户开电车通勤时会需要它。
+     */
+    val carType: Int = RouteSearch.DRIVING_NORMAL_CAR
 ) {
     val isEmpty: Boolean
         get() = waypoints.isEmpty() && avoidPolygons.isEmpty() && !excludeMotorway
@@ -223,6 +239,14 @@ class AmapRepo(private val context: Context) {
                 // 显式按道路等级排除高速/快速路，与 strategy 的 no_highway 双保险
                 if (options.excludeMotorway) {
                     query.setExclude(RouteSearch.DRIVING_EXCLUDE_MOTORWAY)
+                }
+                // 避开轮渡：setUseFerry 默认 true，不显式关掉就等于"允许过江靠船"
+                if (options.avoidFerry) {
+                    query.setUseFerry(false)
+                }
+                // 车型：不传时高德按普通汽车算，限行与能耗路线都不区分动力类型
+                if (options.carType != RouteSearch.DRIVING_NORMAL_CAR) {
+                    query.setCarType(options.carType)
                 }
                 routeSearch.setRouteSearchListener(object : RouteSearch.OnRouteSearchListener {
                     override fun onDriveRouteSearched(
@@ -455,14 +479,17 @@ class AmapRepo(private val context: Context) {
             district = district.orEmpty(),
             latitude = p.latitude,
             longitude = p.longitude,
-            distanceM = origin?.let { haversineM(it.first, it.second, p.latitude, p.longitude) }
+            distanceM = origin?.let {
+                com.motohud.ble.navi.Geo.distanceM(it.first, it.second, p.latitude, p.longitude).toInt()
+            }
         )
     }
 
     private fun PoiItem.toItem(origin: Pair<Double, Double>?): TipItem {
         val p = latLonPoint
         val dist = when {
-            p != null && origin != null -> haversineM(origin.first, origin.second, p.latitude, p.longitude)
+            p != null && origin != null ->
+                com.motohud.ble.navi.Geo.distanceM(origin.first, origin.second, p.latitude, p.longitude).toInt()
             distance > 0 -> distance
             else -> 0
         }
@@ -474,17 +501,6 @@ class AmapRepo(private val context: Context) {
             longitude = p?.longitude ?: 0.0,
             distanceM = if (dist > 0) dist else null
         )
-    }
-
-    /** 球面距离（米）。联想层补距离用，误差 <0.5%，足够排序 */
-    private fun haversineM(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Int {
-        val r = 6371000.0
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLng = Math.toRadians(lng2 - lng1)
-        val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
-            kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
-            kotlin.math.sin(dLng / 2) * kotlin.math.sin(dLng / 2)
-        return (r * 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))).toInt()
     }
 
     private fun DrivePath.toRouteData(
@@ -500,7 +516,9 @@ class AmapRepo(private val context: Context) {
             modeLabel = modeLabel,
             label = label,
             tolls = tolls,
-            trafficLights = totalTrafficlights
+            trafficLights = totalTrafficlights,
+            restriction = restriction,
+            tollDistanceM = tollDistance
         )
     }
 
@@ -511,9 +529,12 @@ class AmapRepo(private val context: Context) {
             .filter { it.status?.contains("拥堵") == true }
             .sumOf { it.distance.toDouble() }
             .toFloat()
+        // 注意：高德的 assistantAction 一定要读（「进入隧道」「进入匝道」「进入左岔路」），
+        // 沿途道路要素提示全靠它，见 RoadFeatureDetector。
         return RouteStep(
             instruction = instruction.orEmpty(),
             action = action.orEmpty(),
+            assistantAction = assistantAction.orEmpty(),
             orientation = orientation.orEmpty(),
             road = road.orEmpty(),
             distanceM = distance,

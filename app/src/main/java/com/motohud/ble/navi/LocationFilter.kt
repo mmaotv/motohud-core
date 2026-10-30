@@ -169,17 +169,14 @@ class LocationFilter(
 
     companion object {
 
-        private const val EARTH_R = 6_371_000.0
-
-        /** 两点间距离（米，平面近似足够） */
-        fun distanceM(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Float {
-            val dLat = Math.toRadians(lat2 - lat1)
-            val dLng = Math.toRadians(lng2 - lng1)
-            val mLat = Math.toRadians((lat1 + lat2) / 2.0)
-            val x = dLng * cos(mLat) * EARTH_R
-            val y = dLat * EARTH_R
-            return kotlin.math.sqrt((x * x + y * y).toFloat().toDouble()).toFloat()
-        }
+        /**
+         * 两点间距离（米）。
+         *
+         * 公式**只允许有一份**，在 [Geo.distanceM]（优先走官方 `AMapUtils`，
+         * JVM 单测下退回 haversine）。这里保留 Float 签名只是为了不动既有调用方。
+         */
+        fun distanceM(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Float =
+            Geo.distanceM(lat1, lng1, lat2, lng2).toFloat()
 
         /** 角度插值（处理 359° → 1° 的跨界） */
         fun blendAngle(from: Float, to: Float, t: Float): Float {

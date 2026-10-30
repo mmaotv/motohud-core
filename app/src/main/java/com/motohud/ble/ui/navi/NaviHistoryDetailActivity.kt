@@ -10,8 +10,10 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.view.View
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -32,9 +34,12 @@ import com.motohud.ble.amap.AmapManager
 import com.motohud.ble.data.NaviHistoryEntity
 import com.motohud.ble.data.NaviTrack
 import com.motohud.ble.navi.CoordConverter
+import com.motohud.ble.navi.TrackSmooth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -58,6 +63,9 @@ class NaviHistoryDetailActivity : AppCompatActivity() {
     private var mapView: MapView? = null
     private var aMap: AMap? = null
     private var entity: NaviHistoryEntity? = null
+
+    /** 分享流程进行中：挡 SDK 的两个回调重载重复触发 */
+    private var shareBusy = false
 
     private lateinit var tvDest: TextView
     private lateinit var tvTime: TextView
@@ -91,6 +99,7 @@ class NaviHistoryDetailActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.detail_btn_back).setOnClickListener { finish() }
         findViewById<View>(R.id.detail_btn_again).setOnClickListener { naviAgain() }
+        findViewById<View>(R.id.detail_btn_share).setOnClickListener { shareTrack() }
 
         // 底部卡：peek 只露统计，上滑看得更全
         val sheet = findViewById<View>(R.id.detail_sheet)
@@ -109,7 +118,7 @@ class NaviHistoryDetailActivity : AppCompatActivity() {
             runCatching {
                 mapView?.onCreate(savedInstanceState)
                 aMap = mapView?.map?.apply {
-                    mapType = AMap.MAP_TYPE_NIGHT
+                    com.motohud.ble.amap.AmapMapConfig.applyDisplay(this)
                     uiSettings.isZoomControlsEnabled = false
                     uiSettings.isMyLocationButtonEnabled = false
                     uiSettings.isRotateGesturesEnabled = true
@@ -169,7 +178,8 @@ class NaviHistoryDetailActivity : AppCompatActivity() {
         val pts = NaviTrack.decode(row.trackPolyline)
         val line: List<Pair<Double, Double>>
         if (pts.size >= 2) {
-            line = pts
+            // 本地轻量纠偏：去噪 + 几何平滑，让轨迹更干净（不吸附真实道路）
+            line = TrackSmooth.smooth(pts)
         } else {
             // 兜底：老记录没有轨迹，只画起终点连线并明确提示
             tvNoTrack.visibility = View.VISIBLE
@@ -256,6 +266,79 @@ class NaviHistoryDetailActivity : AppCompatActivity() {
             fromLat = 0.0, fromLng = 0.0
         )
         finish()
+    }
+
+    // ---------- 分享轨迹图 ----------
+
+    /**
+     * 分享轨迹图。
+     *
+     * 必须走 SDK 的 `getMapScreenShot`，不能截 View：地图是 GL 表面，
+     * `View.draw(canvas)` / drawing cache 拿到的是黑的 —— 这是渲染层的硬限制。
+     *
+     * 回调有两个重载，不同版本/机型走的不是同一个（3D 地图一般给
+     * `onMapScreenShot(Bitmap)`，带 status 的那个在某些场景才回），
+     * 所以用 [shareBusy] 挡重复，避免共享面板弹两次。
+     */
+    private fun shareTrack() {
+        val row = entity ?: return
+        val map = aMap
+        if (map == null) {
+            toast(getString(R.string.track_share_fail_no_map))
+            return
+        }
+        if (shareBusy) return
+        toast(getString(R.string.track_share_rendering))
+        runCatching {
+            map.getMapScreenShot(object : AMap.OnMapScreenShotListener {
+                override fun onMapScreenShot(bitmap: Bitmap?) = realizeShot(row, bitmap)
+                override fun onMapScreenShot(bitmap: Bitmap?, status: Int) = realizeShot(row, bitmap)
+            })
+        }.onFailure { toast(getString(R.string.track_share_fail)) }
+    }
+
+    private fun realizeShot(row: NaviHistoryEntity, shot: Bitmap?) {
+        if (shareBusy) return
+        if (shot == null || shot.width <= 0 || shot.height <= 0) {
+            toast(getString(R.string.track_share_fail))
+            return
+        }
+        shareBusy = true
+        lifecycleScope.launch {
+            val file = withContext(Dispatchers.IO) {
+                runCatching {
+                    val card = TrackShareCard.compose(this@NaviHistoryDetailActivity, shot, row)
+                    val dir = File(getExternalFilesDir(null) ?: filesDir, "shots").apply { mkdirs() }
+                    // 只留最近 5 张：每张约 2MB，留着只会一直占内存卡
+                    dir.listFiles()?.sortedByDescending { it.lastModified() }
+                        ?.drop(4)?.forEach { it.delete() }
+                    val out = File(dir, "track-${System.currentTimeMillis()}.png")
+                    FileOutputStream(out).use { card.compress(Bitmap.CompressFormat.PNG, 92, it) }
+                    card.recycle()
+                    out
+                }.getOrNull()
+            }
+            shareBusy = false
+            if (file == null) {
+                toast(getString(R.string.track_share_fail))
+                return@launch
+            }
+            runCatching {
+                val uri = FileProvider.getUriForFile(
+                    this@NaviHistoryDetailActivity, "$packageName.fileprovider", file
+                )
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "image/png"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(send, getString(R.string.track_share)))
+            }.onFailure { toast(getString(R.string.track_share_fail)) }
+        }
+    }
+
+    private fun toast(msg: String) {
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
     // ---------- 生命周期 ----------

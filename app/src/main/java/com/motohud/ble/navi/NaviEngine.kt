@@ -6,13 +6,12 @@ import android.location.LocationManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import com.amap.api.maps.model.LatLng
+import com.amap.api.maps.utils.SpatialRelationUtil
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.abs
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
 
 /**
  * 导航引擎接口：产生与高德导航 SDK NaviInfo 等价的状态快照，供手机 UI 与
@@ -108,6 +107,9 @@ interface NaviEngine {
         const val ARRIVE_THRESHOLD_M = 25.0
         const val GPS_STALE_MS = 3_000L
 
+        /** 垂足投影的搜索窗口（点数，前后各这么多）。与最近点索引的窗口保持一致 */
+        const val PROJECT_WINDOW = 200
+
         /** 偏航判定：偏移超过该米数（吸附前原始偏移）才视为开错路 */
         const val OFFROUTE_M = 90.0
         /** 偏航判定：定位精度需优于该米数，避免噪点触发重算 */
@@ -128,6 +130,13 @@ data class RouteStep(
     val instruction: String,
     /** 动作文本，如"右转" */
     val action: String,
+    /**
+     * 辅助动作（高德 `DriveStep.getAssistantAction()`）。
+     *
+     * 高德把一些**不影响转向但需要提醒**的信息放在这里，例如「进入匝道」
+     * 「通过人行横道」。长期没被读取，导致这类提示一条都没播过。
+     */
+    val assistantAction: String = "",
     /** 方向文本，如"右" */
     val orientation: String,
     /** 道路名 */
@@ -152,7 +161,17 @@ data class RouteData(
     /** 过路费（元） */
     val tolls: Float = 0f,
     /** 红绿灯数量 */
-    val trafficLights: Int = 0
+    val trafficLights: Int = 0,
+    /**
+     * 限行标记（高德 `DrivePath.getRestriction()`）。
+     *
+     * 0 = 不限行；非 0 表示这条路线**会经过限行区域**（外地牌照、尾号限行、货车限行等）。
+     * 这个字段一直被忽略 —— 于是外地游客骑进限行区也收不到任何提示。
+     * 具体含义由高德服务端判定，SDK 没有给出枚举常量，所以这里只区分"有 / 无"。
+     */
+    val restriction: Int = 0,
+    /** 收费路段里程（米） */
+    val tollDistanceM: Float = 0f
 )
 
 /** 高德 IconType 常用值（com.amap.api.navi.enums.IconType） */
@@ -234,6 +253,9 @@ class RouteNaviEngine(
     private var steps: List<RouteStep> = emptyList()
     private var totalDist = 0.0
 
+    /** 与 [cumulative] 同序的投影用点列（[buildRoute] 建一次，供 SDK 求垂足） */
+    private var routeLatLng: List<LatLng> = emptyList()
+
     /** 高德返回的这条路线规划总时长（秒），用于推算剩余时间 */
     private var routeDurationS = 0f
     private var lastIndex = 0
@@ -249,7 +271,10 @@ class RouteNaviEngine(
             if (System.currentTimeMillis() - lastAmapFixMs < 5_000L) return
             // 关键：系统 LocationManager 返回 WGS84，而地图与规划路线都是 GCJ02。
             // 不做转换会形成 300~700m 的恒定偏移，正是"导航一直漂"的根因。
-            val (gLat, gLng) = CoordConverter.wgs84ToGCJ(location.latitude, location.longitude)
+            // 纠偏走高德官方 CoordinateConverter（见 CoordFix），不再自算公式。
+            val (gLat, gLng) = com.motohud.ble.amap.CoordFix.gpsToGcj(
+                location.latitude, location.longitude
+            )
             acceptFix(
                 lat = gLat,
                 lng = gLng,
@@ -371,6 +396,7 @@ class RouteNaviEngine(
         } else {
             lastRoute = null
             cumulative = emptyList()
+            routeLatLng = emptyList()
             stepEndDist = emptyList()
             steps = emptyList()
             totalDist = 0.0
@@ -445,6 +471,9 @@ class RouteNaviEngine(
         }
         cumulative = points
         stepEndDist = ends
+        // 投影用的 LatLng 视图：与 cumulative 同序，算路后建一次。
+        // 每个 tick 都新建 List<LatLng> 会产生成百上千个小对象，GC 抖动直接反映成掉帧。
+        routeLatLng = points.map { LatLng(it.lat, it.lng) }
         // 以路线几何距离校正总里程（折线累加通常略大于官方口径）
         totalDist = if (points.isNotEmpty()) points.last().dist else route.distanceM.toDouble()
     }
@@ -465,8 +494,14 @@ class RouteNaviEngine(
                 // 车标吸附路线：导航软件一律把车标画在路上。
                 // 高德算路会把起点吸到最近可行驶道路，而 GPS 原始点常在路侧几十米外，
                 // 不吸附就会看到"车标在楼里 / 在路外"——这就是用户感知到的"漂移"。
-                val p = cumulative[lastIndex]
-                val off = LocationFilter.distanceM(curLat, curLng, p.lat, p.lng)
+                //
+                // 吸附目标用**折线垂足**而不是最近顶点：算路的折线点间隔 10~50m 不等，
+                // 取顶点会让车标在相邻顶点之间来回弹（视觉抖动），而且"到顶点的距离"
+                // 恒大于等于"到路的距离"，长直路段上会把 8m 的偏移算成 20m，
+                // 白白触发一次 0.75 的吸附。垂足由 SDK 的
+                // SpatialRelationUtil.calShortestDistancePoint 给出（见 projectOnRoute）。
+                val anchor = projectOnRoute(curLat, curLng, lastIndex) ?: vertexAnchor(lastIndex)
+                val off = LocationFilter.distanceM(curLat, curLng, anchor.lat, anchor.lng)
                 // 偏航判定必须在吸附前用原始偏移：吸附会掩盖偏移，否则开错路也发现不了。
                 // 精度尚可且持续偏离 >90m 超过 8s，视为开错路，回调上层重算。
                 val offRoute = off > NaviEngine.OFFROUTE_M && lastAccuracy <= NaviEngine.OFFROUTE_ACC_M
@@ -482,15 +517,15 @@ class RouteNaviEngine(
                         else -> 0f
                     }
                     if (snap > 0f) {
-                        curLat += (p.lat - curLat) * snap
-                        curLng += (p.lng - curLng) * snap
+                        curLat += (anchor.lat - curLat) * snap
+                        curLng += (anchor.lng - curLng) * snap
                     }
                 }
                 if (com.motohud.ble.BuildConfig.DEBUG) {
                     android.util.Log.d(
                         "NaviEngine",
                         "idx=$lastIndex off=${off.toInt()}m snap=$snap acc=${lastAccuracy.toInt()} " +
-                            "cur=($curLat,$curLng) road=(${p.lat},${p.lng})"
+                            "anchor=${anchor.tag} cur=($curLat,$curLng) road=(${anchor.lat},${anchor.lng})"
                     )
                 }
             } else {
@@ -605,6 +640,38 @@ class RouteNaviEngine(
     }
 
     // ---------- 路线几何 ----------
+
+    /** 吸附锚点：折线垂足（`proj`）或最近顶点（`vertex`）。tag 只用于调试日志 */
+    private data class Anchor(val lat: Double, val lng: Double, val tag: String)
+
+    private fun vertexAnchor(idx: Int): Anchor {
+        val p = cumulative[idx.coerceIn(cumulative.indices)]
+        return Anchor(p.lat, p.lng, "vertex")
+    }
+
+    /**
+     * 把当前位置投影到路线折线上，返回垂足（高德 `SpatialRelationUtil`）。
+     *
+     * 只在 [nearIdx] 前后各 [PROJECT_WINDOW] 个点里找：长路线能有两万个点，
+     * 每秒全量扫一遍是几万次浮点运算，而 GPS 一秒最多挪几百米、跳不出窗口。
+     *
+     * 返回 null 就退回最近顶点 —— 只有 SDK 不可用（纯 JVM 单测）时会发生，
+     * 真机不会。宁可吸附点差十几米，也不能因为一次异常让车标停住。
+     */
+    private fun projectOnRoute(lat: Double, lng: Double, nearIdx: Int): Anchor? {
+        val pts = routeLatLng
+        if (pts.size < 2) return null
+        val lo = (nearIdx - NaviEngine.PROJECT_WINDOW).coerceAtLeast(0)
+        val hi = (nearIdx + NaviEngine.PROJECT_WINDOW).coerceAtMost(pts.size - 1)
+        if (hi - lo < 1) return null
+        return runCatching {
+            val pair = SpatialRelationUtil.calShortestDistancePoint(
+                pts.subList(lo, hi + 1), LatLng(lat, lng)
+            )
+            val pt = pair?.second ?: return@runCatching null
+            Anchor(pt.latitude, pt.longitude, "proj")
+        }.getOrNull()
+    }
 
     /** 最近点索引：优先在 lastIndex 附近窗口查找，偏离过远时全量扫描 */
     private fun nearestIndex(lat: Double, lng: Double, from: Int): Int {
@@ -735,7 +802,7 @@ class RouteNaviEngine(
             val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
                 ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
             // 同样必须纠偏到 GCJ02，否则起点会整体偏出去
-            loc?.let { CoordConverter.wgs84ToGCJ(it.latitude, it.longitude) }
+            loc?.let { com.motohud.ble.amap.CoordFix.gpsToGcj(it.latitude, it.longitude) }
         } catch (_: Exception) {
             null
         }
@@ -774,32 +841,13 @@ class RouteNaviEngine(
         return (distM / (v * 1000 / 3600)).toInt()
     }
 
-    // ---------- 球面几何 ----------
+    // ---------- 球面几何（实现统一在 Geo，这里只留调用别名） ----------
 
     /** 返回 (方位角度, 距离米) */
-    private fun bearingAndDistance(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Pair<Float, Double> {
-        val dLng = Math.toRadians(lng2 - lng1)
-        val rLat1 = Math.toRadians(lat1)
-        val rLat2 = Math.toRadians(lat2)
-        val y = sin(dLng) * cos(rLat2)
-        val x = cos(rLat1) * sin(rLat2) - sin(rLat1) * cos(rLat2) * cos(dLng)
-        var brg = Math.toDegrees(atan2(y, x))
-        if (brg < 0) brg += 360.0
-        val dLat = rLat2 - rLat1
-        val a = sin(dLat / 2) * sin(dLat / 2) +
-            cos(rLat1) * cos(rLat2) * sin(dLng / 2) * sin(dLng / 2)
-        val dist = 6371000.0 * 2 * atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
-        return brg.toFloat() to dist
-    }
+    private fun bearingAndDistance(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Pair<Float, Double> =
+        Geo.bearing(lat1, lng1, lat2, lng2) to Geo.distanceM(lat1, lng1, lat2, lng2)
 
     /** 从 (lat,lng) 沿 bearing 前进 dist 米后的坐标（直线演示模式用） */
-    private fun destinationPoint(lat: Double, lng: Double, bearingDeg: Float, distM: Double): Pair<Double, Double> {
-        val rLat = Math.toRadians(lat)
-        val rLng = Math.toRadians(lng)
-        val brg = Math.toRadians(bearingDeg.toDouble())
-        val d = distM / 6371000.0
-        val nLat = Math.asin(sin(rLat) * cos(d) + cos(rLat) * sin(d) * cos(brg))
-        val nLng = rLng + atan2(sin(brg) * sin(d) * cos(rLat), cos(d) - sin(rLat) * sin(nLat))
-        return Math.toDegrees(nLat) to Math.toDegrees(nLng)
-    }
+    private fun destinationPoint(lat: Double, lng: Double, bearingDeg: Float, distM: Double): Pair<Double, Double> =
+        Geo.destination(lat, lng, bearingDeg, distM)
 }

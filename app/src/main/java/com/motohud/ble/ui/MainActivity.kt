@@ -27,6 +27,7 @@ import com.motohud.ble.MotoHudApp
 import com.motohud.ble.R
 import com.motohud.ble.ble.BleConnectionManager
 import com.motohud.ble.data.AppCache
+import com.motohud.ble.data.CrashHandler
 import com.motohud.ble.data.device.DevicePrefs
 import com.motohud.ble.service.NotificationForwardService
 import com.motohud.ble.ui.common.MotoDialog
@@ -132,6 +133,41 @@ class MainActivity : AppCompatActivity() {
                 vm.consumeToast()
             }
         }
+
+        promptCrashIfAny()
+    }
+
+    /**
+     * 上次崩溃过就在启动后问一次要不要导出。
+     *
+     * 只在**真的崩过**时出现（[CrashHandler.pendingCount]），并且问完即清零 ——
+     * 每次启动都弹一个「上次崩过」的窗，比崩溃本身还烦人。
+     * 清零不影响记录本身，设置 → 数据与系统 → 崩溃记录 里随时还能导出。
+     */
+    private fun promptCrashIfAny() {
+        if (CrashHandler.pendingCount(this) <= 0) return
+        val summary = CrashHandler.latestSummary(this) ?: return
+        CrashHandler.clearPending(this)
+        if (isFinishing || isDestroyed) return
+        MotoDialog.builder(this)
+            .setTitle(R.string.crash_dialog_title)
+            .setMessage(getString(R.string.crash_startup_msg) + "\n\n" + summary)
+            .setPositiveButton(R.string.crash_export) { _, _ -> exportCrashQuietly() }
+            .setNegativeButton(R.string.crash_startup_later, null)
+            .show()
+    }
+
+    private fun exportCrashQuietly() {
+        val file = runCatching { CrashHandler.export(this) }.getOrNull() ?: return
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this, "$packageName.fileprovider", file
+        )
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runCatching { startActivity(Intent.createChooser(intent, getString(R.string.crash_export))) }
     }
 
     // ---------- 自动连接 ----------

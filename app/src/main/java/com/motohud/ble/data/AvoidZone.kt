@@ -124,8 +124,8 @@ object AvoidZoneStore {
     ): List<Pair<Double, Double>> {
         val halfW = widthM / 2.0
         val halfH = heightM / 2.0
-        val dLat = halfH / 111_320.0
-        val dLng = halfW / (111_320.0 * Math.cos(Math.toRadians(lat)).coerceAtLeast(0.01))
+        val dLat = halfH / com.motohud.ble.navi.Geo.M_PER_DEG_LAT
+        val dLng = halfW / com.motohud.ble.navi.Geo.mPerDegLng(lat)
         return listOf(
             lat - dLat to lng - dLng,
             lat - dLat to lng + dLng,
@@ -144,10 +144,9 @@ object AvoidZoneStore {
         if (polygon.isEmpty()) return 0.0 to 0.0
         val lats = polygon.map { it.first }
         val lngs = polygon.map { it.second }
-        val h = (lats.max() - lats.min()) * 111_320.0
+        val h = (lats.max() - lats.min()) * com.motohud.ble.navi.Geo.M_PER_DEG_LAT
         val midLat = (lats.max() + lats.min()) / 2.0
-        val w = (lngs.max() - lngs.min()) * 111_320.0 *
-            Math.cos(Math.toRadians(midLat)).coerceAtLeast(0.01)
+        val w = (lngs.max() - lngs.min()) * com.motohud.ble.navi.Geo.mPerDegLng(midLat)
         return w to h
     }
 

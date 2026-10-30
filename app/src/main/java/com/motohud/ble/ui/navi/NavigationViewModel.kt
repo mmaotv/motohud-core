@@ -15,6 +15,7 @@ import com.motohud.ble.amap.TipItem
 import com.motohud.ble.data.NaviPrefs
 import com.motohud.ble.data.SavedPlaceEntity
 import com.motohud.ble.navi.CoordConverter
+import com.motohud.ble.navi.Geo
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -143,7 +144,7 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
         override fun onLocationChanged(location: Location) {
             // 系统定位只作兜底：高德定位已经拿到值时不再覆盖（两者坐标基准不同）
             if (currentLocation != null && !systemUpdatesOn) return
-            val (lat, lng) = CoordConverter.wgs84ToGCJ(location.latitude, location.longitude)
+            val (lat, lng) = com.motohud.ble.amap.CoordFix.gpsToGcj(location.latitude, location.longitude)
             currentLocation = lat to lng
             _accuracy.value = location.accuracy
             _locationFlow.value = LocationFix(lat, lng, location.accuracy)
@@ -216,7 +217,7 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
             ).maxByOrNull { it.time } ?: return
             val ageMs = System.currentTimeMillis() - best.time
             if (ageMs > 90_000L) return
-            val (lat, lng) = CoordConverter.wgs84ToGCJ(best.latitude, best.longitude)
+            val (lat, lng) = com.motohud.ble.amap.CoordFix.gpsToGcj(best.latitude, best.longitude)
             currentLocation = lat to lng
             _accuracy.value = best.accuracy
             _locationFlow.value = LocationFix(lat, lng, best.accuracy)
@@ -406,9 +407,8 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun near(a: TipItem, b: TipItem): Boolean {
-        val dLat = (a.latitude - b.latitude) * 111_320.0
-        val dLng = (a.longitude - b.longitude) * 111_320.0 *
-            kotlin.math.cos(Math.toRadians(a.latitude))
+        val dLat = (a.latitude - b.latitude) * Geo.M_PER_DEG_LAT
+        val dLng = (a.longitude - b.longitude) * Geo.mPerDegLng(a.latitude)
         return kotlin.math.sqrt(dLat * dLat + dLng * dLng) < 500.0
     }
 

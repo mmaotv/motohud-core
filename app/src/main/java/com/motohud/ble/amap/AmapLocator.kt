@@ -108,7 +108,7 @@ class AmapLocator(private val context: Context) {
                 // coordType 正常为 GCJ02；万一是 WGS84（境外/特殊机型）就地纠偏
                 val isWgs = loc.coordType.equals("WGS84", ignoreCase = true)
                 val (lat, lng) = if (isWgs) {
-                    com.motohud.ble.navi.CoordConverter.wgs84ToGCJ(loc.latitude, loc.longitude)
+                    CoordFix.gpsToGcj(loc.latitude, loc.longitude)
                 } else {
                     loc.latitude to loc.longitude
                 }
@@ -189,9 +189,7 @@ class AmapLocator(private val context: Context) {
                         }
                         val isWgs = loc.coordType.equals("WGS84", ignoreCase = true)
                         val (lat, lng) = if (isWgs) {
-                            com.motohud.ble.navi.CoordConverter.wgs84ToGCJ(
-                                loc.latitude, loc.longitude
-                            )
+                            CoordFix.gpsToGcj(loc.latitude, loc.longitude)
                         } else {
                             loc.latitude to loc.longitude
                         }

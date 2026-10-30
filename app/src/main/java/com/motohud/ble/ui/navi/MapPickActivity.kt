@@ -56,7 +56,7 @@ class MapPickActivity : AppCompatActivity() {
             mapView = findViewById(R.id.pick_map)
             mapView?.onCreate(savedInstanceState)
             aMap = mapView?.map?.apply {
-                mapType = AMap.MAP_TYPE_NIGHT
+                com.motohud.ble.amap.AmapMapConfig.applyDisplay(this)
                 uiSettings.apply {
                     isZoomControlsEnabled = false
                     isMyLocationButtonEnabled = false

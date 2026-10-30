@@ -24,8 +24,8 @@ android {
         targetSdk = 36
         // 开发期版本号：0.0.1 起，每次只递增最后一位（0.0.2 → 0.0.3 …）。
         // 未正式上线，不体现主版本语义。
-        versionCode = 27
-        versionName = "0.0.15"
+        versionCode = 33
+        versionName = "0.0.21"
 
         manifestPlaceholders["AMAP_API_KEY"] = amapApiKey
         buildConfigField("String", "AMAP_API_KEY", "\"$amapApiKey\"")
@@ -138,4 +138,9 @@ dependencies {
     // 注意：这只是**推理引擎**，中文模型约 27MB 不打进 APK，
     // 由用户在应用内按需下载（见 TtsModelStore）。
     implementation(files("libs/sherpa-classes.jar"))
+
+    // 纯逻辑单元测试（JVM，不需要设备）。
+    // 只测不碰 Android 框架的那几块：播报文本分档、弯道几何、昼夜判定、图标映射。
+    // 这些以前全靠"跑一段真实道路听一遍"，改一行就要实车验证，根本不敢动。
+    testImplementation("junit:junit:4.13.2")
 }

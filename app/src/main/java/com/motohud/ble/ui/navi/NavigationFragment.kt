@@ -402,7 +402,8 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
         try {
             mapView?.onCreate(savedInstanceState)
             aMap = mapView?.map?.apply {
-                mapType = AMap.MAP_TYPE_NIGHT
+                // 深色/浅色、3D 建筑、地图文字走用户设置
+                com.motohud.ble.amap.AmapMapConfig.applyDisplay(this)
                 uiSettings.apply {
                     isZoomControlsEnabled = false
                     isMyLocationButtonEnabled = false

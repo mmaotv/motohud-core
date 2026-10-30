@@ -40,7 +40,6 @@ class PresetPackSpeaker(context: Context) : Speaker {
 
     companion object {
         private const val TAG = "PresetPack"
-        private const val DIR = "voicepack"
         private const val INDEX = "index.txt"
 
         /** 贪心匹配时单个片段的最大字符数（最长条目「进入环岛，走第 3 个出口」13 字） */
@@ -50,6 +49,15 @@ class PresetPackSpeaker(context: Context) : Speaker {
     private val app = context.applicationContext
     private val handler = Handler(Looper.getMainLooper())
     private val player = MediaPlayer()
+
+    /**
+     * 当前音色的包目录（`voicepack` 或 `voicepack/yun`）。
+     *
+     * 音色是**构造时**定的：一套包就是一批定型的 mp3，中途换音色必须重建播放器
+     * （重新读索引），否则播到的是上一套的文件。切换入口见 TtsModelActivity。
+     */
+    private val base: String = com.motohud.ble.navi.tts.PresetVoice
+        .assetsDir(runCatching { com.motohud.ble.data.NaviPrefs.presetVoice.value }.getOrNull())
 
     /** 文本 → assets 内文件名 */
     private val index = HashMap<String, String>(256)
@@ -84,7 +92,7 @@ class PresetPackSpeaker(context: Context) : Speaker {
 
     private fun loadIndex() {
         runCatching {
-            app.assets.open("$DIR/$INDEX").bufferedReader(Charsets.UTF_8).useLines { lines ->
+            app.assets.open("$base/$INDEX").bufferedReader(Charsets.UTF_8).useLines { lines ->
                 lines.forEach { line ->
                     val tab = line.lastIndexOf('\t')
                     if (tab > 0) {
@@ -192,7 +200,7 @@ class PresetPackSpeaker(context: Context) : Speaker {
         runCatching {
             player.reset()
             // mp3 在 assets 里不压缩，可以拿 fd 直接播，不用整段读进内存
-            app.assets.openFd("$DIR/$next").use { afd ->
+            app.assets.openFd("$base/$next").use { afd ->
                 player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
             }
             player.prepare()

@@ -233,7 +233,7 @@ class RouteSelectActivity : AppCompatActivity() {
             AmapManager.initMap(this)
             mapView?.onCreate(savedInstanceState)
             aMap = mapView?.map?.apply {
-                mapType = com.amap.api.maps.AMap.MAP_TYPE_NIGHT
+                com.motohud.ble.amap.AmapMapConfig.applyDisplay(this)
                 uiSettings.apply {
                     isZoomControlsEnabled = false
                     isMyLocationButtonEnabled = false
@@ -692,14 +692,18 @@ class RouteSelectActivity : AppCompatActivity() {
                 waypoints = waypoints.filter { it.lat != 0.0 && it.lng != 0.0 }
                     .map { it.lat to it.lng },
                 avoidPolygons = avoidZones,
-                excludeMotorway = NaviPrefs.excludeMotorway()
+                excludeMotorway = NaviPrefs.excludeMotorway(),
+                // 这两个参数以前根本没下发（SDK 里有 setUseFerry / setCarType，一直没调）
+                avoidFerry = NaviPrefs.avoidFerry.value,
+                carType = NaviPrefs.carType.value
             )
 
             // 同一段路 10 分钟内复用上次算路结果：不产生网络请求，直接省掉最贵的一次调用。
             // 注意 optionsTag 必须参与 key —— 否则改了途经点会命中旧缓存，
             // 表现就是"设置了没反应"。
             val optionsTag = AmapCache.optionsTag(
-                options.waypoints, options.avoidPolygons, options.excludeMotorway
+                options.waypoints, options.avoidPolygons, options.excludeMotorway,
+                options.avoidFerry, options.carType
             )
             val cacheKey = AmapCache.routeKey(
                 fromLat, fromLng, destLat, destLng, strategy, LIMIT, optionsTag
@@ -830,6 +834,13 @@ class RouteSelectActivity : AppCompatActivity() {
                 putExtra(GuidanceActivity.EXTRA_LNG, destLng)
                 putExtra(GuidanceActivity.EXTRA_FROM_LAT, startLat)
                 putExtra(GuidanceActivity.EXTRA_FROM_LNG, startLng)
+                // 途经点要带过去：导航中途再追加途经点时，必须拿原有的整串一起重算，
+                // 否则"加一个点"会把之前设的途经点全丢了。
+                putExtra(
+                    GuidanceActivity.EXTRA_WAYPOINTS,
+                    waypoints.filter { it.lat != 0.0 && it.lng != 0.0 }
+                        .joinToString(";") { "${it.lat},${it.lng}" }
+                )
             }
         )
     }
@@ -959,6 +970,12 @@ private class RouteOptionAdapter(
                 append(String.format(Locale.US, "¥%.0f", r.tolls))
             } else {
                 append(" · 无过路费")
+            }
+            // 限行：高德 DrivePath.getRestriction() 一直在返回，但从来没人读过。
+            // 外地牌照骑进限行区是要吃罚单的，这个提示必须放在**选路线时**，
+            // 而不是等开进去了才说。
+            if (r.restriction != 0) {
+                append(" · ⚠ 经限行区")
             }
             if (r.modeLabel.isNotBlank()) {
                 append(" · ")

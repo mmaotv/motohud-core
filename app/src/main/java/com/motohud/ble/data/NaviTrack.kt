@@ -1,6 +1,7 @@
 package com.motohud.ble.data
 
 import com.motohud.ble.MotoHudApp
+import com.motohud.ble.navi.Geo
 import com.motohud.ble.navi.LocationFilter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -121,7 +122,8 @@ object NaviTrack {
                     val dao = app.naviTrackPointDao
                     if (pending.isNotEmpty()) dao.insertAll(pending)
                     val raw = dao.listByHistory(id)
-                    val points = raw.map { it.lat to it.lng }
+                    val cleaned = denoise(raw)
+                    val points = cleaned.map { it.lat to it.lng }
                     val simplified = if (points.size > 2) {
                         douglasPeucker(points, SIMPLIFY_EPSILON_M)
                     } else {
@@ -161,6 +163,37 @@ object NaviTrack {
             val lng = p[1].toDoubleOrNull() ?: return@mapNotNull null
             lat to lng
         }
+    }
+
+    /**
+     * 源头去噪：剔除明显 GPS 漂移的「瞬移」点。
+     *
+     * 规则：某点与前一点、与后一点间的瞬时速度都远超合理上限（如 70 m/s ≈ 252km/h），
+     * 但「跳过该点、前后直连」的速度正常 → 判定为漂移，丢弃。
+     * 只动明显异常点；正常快速行驶（直线、匀速）不会被误删。
+     */
+    private fun denoise(
+        raw: List<NaviTrackPointEntity>,
+        maxSpeedMps: Double = 70.0
+    ): List<NaviTrackPointEntity> {
+        if (raw.size <= 2) return raw
+        val keep = BooleanArray(raw.size) { true }
+        for (i in 1 until raw.size - 1) {
+            val prev = raw[i - 1]
+            val cur = raw[i]
+            val next = raw[i + 1]
+            val dtPrev = (cur.ts - prev.ts) / 1000.0
+            val dtNext = (next.ts - cur.ts) / 1000.0
+            if (dtPrev <= 0 || dtNext <= 0) continue
+            val vPrev = Geo.distanceM(prev.lat, prev.lng, cur.lat, cur.lng) / dtPrev
+            val vNext = Geo.distanceM(cur.lat, cur.lng, next.lat, next.lng) / dtNext
+            if (vPrev > maxSpeedMps && vNext > maxSpeedMps) {
+                val vDirect =
+                    Geo.distanceM(prev.lat, prev.lng, next.lat, next.lng) / (dtPrev + dtNext)
+                if (vDirect < maxSpeedMps) keep[i] = false
+            }
+        }
+        return raw.filterIndexed { i, _ -> keep[i] }
     }
 
     // ---------- Douglas-Peucker ----------
@@ -205,8 +238,8 @@ object NaviTrack {
         a: Pair<Double, Double>,
         b: Pair<Double, Double>
     ): Double {
-        val latScale = 111_320.0
-        val lngScale = 111_320.0 * kotlin.math.cos(Math.toRadians(a.first))
+        val latScale = com.motohud.ble.navi.Geo.M_PER_DEG_LAT
+        val lngScale = com.motohud.ble.navi.Geo.mPerDegLng(a.first)
         val px = (p.second - a.second) * lngScale
         val py = (p.first - a.first) * latScale
         val bx = (b.second - a.second) * lngScale

@@ -223,6 +223,7 @@
     <string name="navi_accuracy_unknown">精度未知</string>
     <string name="navi_gps_weak_title">定位精度较差</string>
     <string name="navi_gps_weak_message">当前定位精度约 ±%1$d 米。建议停到开阔处等待信号恢复，期间导航会沿路线方向继续引导。</string>
+    <string name="navi_map_tile_failed">地图瓦片加载不出来，多半是网络断了（隧道、地下车库常见）。导航引导本身不受影响。</string>
     <string name="navi_phone_mode">手机导航</string>
     <string name="navi_cast_mode">投屏车机</string>
     <string name="navi_phone_mode_desc">手机屏幕全屏地图 + 转向引导，同时继续向车机推送数据</string>
@@ -480,7 +481,80 @@
     <string name="navi_cast_off_toast">已关闭投屏</string>
     <string name="navi_pip">小窗导航</string>
     <string name="navi_pip_failed">当前系统不支持小窗</string>
+
+    <!-- ================= 屏幕与地图设置 ================= -->
+    <string name="settings_map_section">屏幕与地图</string>
+    <string name="settings_map_theme_title">地图配色</string>
+    <string name="settings_map_theme_value">%1$s</string>
+    <string name="settings_map_theme_auto">自动</string>
+    <string name="settings_map_theme_day">日间</string>
+    <string name="settings_map_theme_night">夜间</string>
+    <string name="settings_map_3d_title">3D 建筑</string>
+    <string name="settings_map_3d_desc">关掉能明显减轻渲染负担，中低端机更流畅</string>
+    <string name="settings_map_text_title">地图文字</string>
+    <string name="settings_map_text_desc">路名与地点名称。关掉只剩路网，转向时更干净</string>
+    <string name="settings_route_reduce_title">路线抽稀</string>
+    <string name="settings_route_reduce_desc">长途路线几千个点，抽稀更省性能；弯道贴合要求高可关掉</string>
+    <string name="settings_screen_keep_on_title">导航常亮</string>
+    <string name="settings_screen_keep_on_desc">导航中不让屏幕自动熄灭。想省电可以关掉，靠语音听路</string>
+    <string name="settings_screen_bright_title">导航亮度</string>
+    <string name="settings_screen_bright_desc">只影响导航页。夜骑调暗不刺眼，白天强光调亮看得清</string>
+    <string name="settings_screen_bright_value">%1$s</string>
+    <string name="settings_bright_follow">跟随系统</string>
+    <string name="settings_bright_dim">较暗</string>
+    <string name="settings_bright_normal">正常</string>
     <string name="close">关闭</string>
+
+    <!-- ================= 导航中调整路线 ================= -->
+    <string name="navi_opt_title">导航选项</string>
+    <string name="navi_opt_add_waypoint">加个途经点</string>
+    <string name="navi_opt_waypoint_added">已添加途经点：%1$s</string>
+    <string name="navi_opt_waypoint_voice">已添加途经点，重新规划路线</string>
+    <string name="navi_opt_waypoint_fallback">途经点</string>
+
+    <!-- ================= 崩溃记录 ================= -->
+    <string name="settings_crash_log_title">崩溃记录</string>
+    <string name="settings_crash_log_desc">异常退出时的现场，出问题可以导出反馈</string>
+    <string name="settings_crash_state_none">无</string>
+    <string name="settings_crash_state">%1$d 条</string>
+    <string name="crash_dialog_title">崩溃记录</string>
+    <string name="crash_dialog_none">没有任何崩溃记录，运行正常。</string>
+    <string name="crash_dialog_msg">最近一次异常退出：\n%1$s\n\n共 %2$d 份记录。导出后是一个 txt 文件，可以直接发出来。</string>
+    <string name="crash_export">导出</string>
+    <string name="crash_clear">清空</string>
+    <string name="crash_cleared">崩溃记录已清空</string>
+    <string name="crash_export_fail">导出失败，可以稍后再试</string>
+    <string name="crash_startup_msg">上次异常退出过，要不要把崩溃报告发出来？</string>
+    <string name="crash_startup_later">以后再说</string>
+
+    <!-- ================= 设置分组标题 ================= -->
+    <string name="settings_section_connection">连接与投屏</string>
+    <string name="settings_section_voice">语音播报</string>
+    <string name="settings_section_route">路线与导航</string>
+    <string name="settings_section_storage">数据与系统</string>
+
+    <!-- ================= 沿途提示 ================= -->
+    <string name="settings_voice_mode_title">播报详细度</string>
+    <string name="settings_voice_mode_value">%1$s</string>
+    <string name="settings_voice_mode_short_detail">详细</string>
+    <string name="settings_voice_mode_short_brief">简洁</string>
+    <string name="settings_voice_mode_short_turn">只播转弯</string>
+    <string name="settings_cue_road_title">隧道桥梁提示</string>
+    <string name="settings_cue_road_desc">进入隧道、上桥、立交、匝道前提醒一次，隧道会提示开灯</string>
+    <string name="settings_cue_curve_title">弯道提示</string>
+    <string name="settings_cue_curve_desc">前方 300 米有急弯或连续弯道时提示减速。由路线形状自行计算</string>
+    <string name="settings_cue_terrain_title">坡度提示</string>
+    <string name="settings_cue_terrain_desc">连续上下坡时提示。靠手机气压计测量，没有气压计的设备自动跳过</string>
+    <string name="settings_cue_terrain_none">这台设备没有气压计，坡度提示无法工作。其余播报不受影响</string>
+    <string name="settings_cue_harsh_title">驾驶行为提示</string>
+    <string name="settings_cue_harsh_desc">急刹车、急加速、转弯过快时出声。默认关闭，因为事后再提醒多半只是干扰</string>
+
+    <!-- ================= 路线偏好与算路细项 ================= -->
+    <string name="settings_route_prefs_title">路线偏好</string>
+    <string name="settings_route_prefs_desc">不走高速、少收费、躲避拥堵等</string>
+    <string name="settings_avoid_ferry_title">避开轮渡</string>
+    <string name="settings_avoid_ferry_desc">过江宁愿绕桥也不排轮渡。轮渡班次不可控，赶时间时反而更慢</string>
+    <string name="settings_route_restricted">这条路线经过限行区域，外地牌照请留意</string>
 
     <!-- ================= 导航页增强 ================= -->
     <string name="guidance_next_step">然后 %1$s</string>
@@ -623,6 +697,10 @@
 
     <!-- 离线语音引擎（TTS 模型下载） -->
     <string name="settings_voice_engine">离线语音引擎</string>
+    <string name="settings_preset_voice_title">内置语音音色</string>
+    <string name="settings_preset_voice_value">%1$s</string>
+    <string name="settings_preset_voice_desc">未装模型时用的预录语音，换一套换一种声音；语速音调对它无效</string>
+    <string name="tts_preset_voice_model_wins">已安装离线模型，音色由模型决定，这里的选项不会生效。想用预录语音，先在「离线语音引擎」里删除模型。</string>
     <string name="tts_intro">不下载也能播报：安装包里已内置 150+ 条常用语音（方向、距离、第几个路口/出口），完全离线、零延迟，只是不念路名。\n\n下载离线语音引擎后，导航能念完整句子（含路名）：「沿黄桷坪正街行驶 500 米后右转进入南滨路」。\n\n模型约 27MB，只在需要时下载，不占安装包。下载后完全离线，不联网也能播报。</string>
     <string name="tts_model_info">模型：AISHELL-3 多说话人（174 个说话人）\n许可：Apache-2.0，可商用\n下载后完全离线运行，不会把你的位置或路名发到任何服务器。</string>
     <string name="tts_voice_title">播报风格</string>
@@ -647,7 +725,7 @@
     <string name="tts_state_installed">已安装</string>
     <string name="tts_state_installed_sub">离线语音可用，导航会念出路名。占用空间 %1$s</string>
     <string name="tts_state_missing">未安装</string>
-    <string name="tts_state_missing_sub">当前使用内置语音包：方向、距离、第几个路口/出口都会念，但不含路名。下载模型后可念完整句子（含路名）。</string>
+    <string name="tts_state_missing_sub">当前使用内置语音包：方向、距离、第几个路口/出口都会念，但不含路名。可以在「设置 → 内置语音音色」里换一套声音；下载模型后可念完整句子（含路名）。</string>
     <string name="tts_state_downloading">正在下载…</string>
     <string name="tts_connecting">连接服务器…</string>
     <string name="tts_unzipping">正在解压…</string>
@@ -672,4 +750,38 @@
     <string name="bridge_need_notify_message">高德/百度的转向信息主要通过系统广播获取，不需要该权限；但百度地图手机版与部分高德版本不发广播，此时只能靠解析通知文本兜底（数据会不完整）。\n\n是否前往设置授权？</string>
     <string name="bridge_cast_off">「投到车机」总开关是关的，导航转发不会被发送</string>
     <string name="bridge_started">导航转发已开启，打开高德或百度导航即可</string>
+
+    <!-- 轨迹分享图 -->
+    <string name="track_share">分享轨迹图</string>
+    <string name="track_share_rendering">正在生成分享图…</string>
+    <string name="track_share_fail">截图失败，请稍后重试</string>
+    <string name="track_share_fail_no_map">地图还没加载完，稍等一下再试</string>
+
+    <!-- 离线地图 -->
+    <string name="settings_offline_map_title">离线地图</string>
+    <string name="settings_offline_map_desc">进山、隧道没信号时也能看底图和路网</string>
+    <string name="offline_map_title">离线地图</string>
+    <string name="offline_map_footer">离线包下载后保存在本机，删除应用时一并清除。已下载城市仍会优先使用在线地图，断网时自动回退到离线数据。</string>
+    <string name="offline_map_province_sub">%1$d/%2$d 个城市 · %3$s</string>
+    <string name="offline_map_size">%1$s</string>
+    <string name="offline_map_downloading">下载中 %1$d%%</string>
+    <string name="offline_map_summary">已下载 %1$d 城 · %2$s</string>
+    <string name="offline_action_download">下载</string>
+    <string name="offline_action_province">下载全省</string>
+    <string name="offline_action_delete">删除</string>
+    <string name="offline_action_update">更新</string>
+    <string name="offline_action_pause">暂停</string>
+    <string name="offline_map_hint_init_fail">离线地图初始化失败：%1$s</string>
+    <string name="offline_map_action_fail">操作失败：%1$s</string>
+    <string name="offline_map_hint_no_service">没有取到离线包列表。
+
+离线地图不是免费基础服务，需向高德单独申请开通（当前 Key 的免费服务只有地图/定位/导航/室内地图/室内定位/猎鹰）。申请开通离线地图服务并更新 Key 后，本页才能下载离线包；在此之前点击下载会被服务端拒绝。
+
+如果已申请开通仍为空，检查当前网络是否可用、Key 是否与申请时一致。</string>
+    <!-- 下载失败提示：错误码来自 OfflineMapStatus -->
+    <string name="offline_map_err_network">离线地图下载失败：网络异常。请检查网络后重试；若网络正常，多半是当前 Key 未开通离线地图服务（它不在免费基础服务列表里，需向高德单独申请）——申请开通并更新 Key 前，下载会一直被服务端拒绝。</string>
+    <string name="offline_map_err_sdcard">离线地图下载失败：设备存储不可用，请检查存储空间。</string>
+    <string name="offline_map_err_service">离线地图下载被高德服务端拒绝：当前 Key 未开通离线地图服务。离线地图不在免费基础服务列表（地图/定位/导航/室内地图/室内定位/猎鹰）中，需向高德单独申请开通并更新 Key 后才能下载。</string>
+    <string name="offline_map_err_start">离线地图下载启动失败，请稍后重试。</string>
+    <string name="offline_map_err_unknown">离线地图下载失败（错误码 %1$d），请重试。</string>
 </resources>

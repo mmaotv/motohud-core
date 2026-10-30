@@ -78,7 +78,10 @@ class RoutePrefsDialog : DialogFragment() {
             .setTitle(R.string.route_prefs)
             .setView(v)
             .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(R.string.setting) { _, _ ->
+            // 这里点下去只是**保存偏好**，不跳任何页面。
+            // 原来借用 R.string.setting（「去设置」）是历史误用：按钮写着"去设置"，
+            // 实际什么都不跳，用户点完会以为没生效。改用「保存」。
+            .setPositiveButton(R.string.save) { _, _ ->
                 NaviPrefs.setSmart(cbSmart.isChecked)
                 if (!cbSmart.isChecked) {
                     NaviPrefs.setHighwayFirst(cbHighwayFirst.isChecked)

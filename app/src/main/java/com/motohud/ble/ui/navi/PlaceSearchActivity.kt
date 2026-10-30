@@ -214,7 +214,7 @@ class PlaceSearchActivity : AppCompatActivity() {
         runCatching {
             mapView?.onCreate(savedInstanceState)
             aMap = mapView?.map?.apply {
-                mapType = AMap.MAP_TYPE_NIGHT
+                com.motohud.ble.amap.AmapMapConfig.applyDisplay(this)
                 uiSettings.isZoomControlsEnabled = false
                 uiSettings.isMyLocationButtonEnabled = false
                 uiSettings.isRotateGesturesEnabled = false

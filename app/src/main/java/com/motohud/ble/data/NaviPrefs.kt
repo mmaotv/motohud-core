@@ -3,6 +3,7 @@ package com.motohud.ble.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.amap.api.services.route.RouteSearch
+import com.motohud.ble.navi.tts.PresetVoice
 import com.motohud.ble.navi.tts.TtsStyle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +36,16 @@ object NaviPrefs {
     const val VOICE_MODE_DETAIL = 0
     const val VOICE_MODE_BRIEF = 1
     const val VOICE_MODE_TURN_ONLY = 2
+
+    /** 地图配色：自动（按日出日落）/ 日间 / 夜间 */
+    const val THEME_AUTO = 0
+    const val THEME_DAY = 1
+    const val THEME_NIGHT = 2
+
+    /** 导航页亮度：跟随系统 / 较暗 / 正常 */
+    const val BRIGHT_FOLLOW = 0
+    const val BRIGHT_DIM = 1
+    const val BRIGHT_NORMAL = 2
 
     /** 播报音量档位（模型原始输出偏小，必须放大才听得清；默认 2.0×） */
     val VOLUME_STEPS = floatArrayOf(1.0f, 1.5f, 2.0f, 2.5f, 3.0f)
@@ -81,6 +92,50 @@ object NaviPrefs {
     /** 内置语音包说明是否弹过（只提示一次） */
     private const val KEY_PACK_HINT = "voice_pack_hint_shown"
 
+    /**
+     * 内置语音包音色。
+     *
+     * 与 [KEY_TTS_STYLE] 是两回事：那个是给离线神经 TTS 的"风格"（换说话人/语速/音调，
+     * 不需要额外资源）；这个选的是**预录 mp3 套装**，换一个就换一整套录音。
+     * 模型没装时只有这个有意义，装了模型时只有那个有意义。
+     */
+    private const val KEY_PRESET_VOICE = "preset_voice"
+
+    // ---------- 屏幕与地图 ----------
+    // 这几项以前都是写死在各个地图页里的（统一夜间、建筑全开、文字全开）。
+    // 骑手场景差异很大：白天跑长途的嫌深色地图看不清，夜里跑的嫌亮；
+    // 中低端机开 3D 建筑 + 全量文字会掉帧，跑熟路的又嫌字太密。
+    //
+    // 深色地图原本是个布尔开关（`map_dark`），现在改成三态 `map_theme`：
+    // 手动开关的问题是**跑一趟从白天到天黑得中途去设置里点一下**，
+    // 而骑手双手都在车把上。自动档按当地日出日落切换，见 [com.motohud.ble.amap.DayNight]。
+    private const val KEY_MAP_THEME = "map_theme"
+    private const val KEY_MAP_DARK_LEGACY = "map_dark"
+    private const val KEY_MAP_3D_BUILDING = "map_3d_building"
+    private const val KEY_MAP_TEXT = "map_text"
+    private const val KEY_ROUTE_REDUCE = "route_reduce_point"
+
+    /** 导航页屏幕常亮 / 亮度。以前是写死无条件常亮，夜骑没法调暗，兜里放着又没法关 */
+    private const val KEY_SCREEN_KEEP_ON = "screen_keep_on"
+    private const val KEY_SCREEN_BRIGHT = "screen_brightness"
+
+    // ---------- 沿途提示 ----------
+    // 四类提示分别开关。为什么要拆开而不是一个"沿途提示"总闸：
+    //  - 隧道/桥梁/立交（道路要素）几乎人人要，尤其隧道开灯；
+    //  - 弯道提示在山路是救命功能，在平原城市基本不触发；
+    //  - 坡度提示依赖气压计，且只有山区才有意义；
+    //  - 驾驶行为提示（急刹/急加速）默认关，见 DriveBehaviorMonitor 的说明。
+    private const val KEY_CUE_ROAD_FEATURE = "cue_road_feature"
+    private const val KEY_CUE_CURVE = "cue_curve"
+    private const val KEY_CUE_TERRAIN = "cue_terrain"
+    private const val KEY_CUE_HARSH = "cue_harsh_drive"
+
+    // ---------- 算路细项 ----------
+    /** 避开轮渡：对应 DriveRouteQuery.setUseFerry(false)，摩托车上轮渡多半是绕路 */
+    private const val KEY_AVOID_FERRY = "route_avoid_ferry"
+    /** 车型：0=普通汽车 1=纯电 2=插混。影响限行判定与"能耗/加油"类算路 */
+    private const val KEY_CAR_TYPE = "route_car_type"
+
     private lateinit var prefs: SharedPreferences
 
     /** 骑行模式（保留：影响默认偏好与界面文案，不再单独做算路分支） */
@@ -113,6 +168,15 @@ object NaviPrefs {
      */
     private val _ttsStyle = MutableStateFlow(TtsStyle.DEFAULT.id)
     val ttsStyle: StateFlow<String> = _ttsStyle.asStateFlow()
+
+    /**
+     * 内置语音包音色（见 [PresetVoice]）。
+     *
+     * 只在**没装离线模型**时生效：那时播的是预录 mp3，音色是录音时定死的，
+     * 想换只能换一整套包。装模型后走 [SherpaSpeaker]，那个由 [ttsStyle] 决定。
+     */
+    private val _presetVoice = MutableStateFlow(PresetVoice.DEFAULT.id)
+    val presetVoice: StateFlow<String> = _presetVoice.asStateFlow()
 
     /**
      * 离线语音语速倍率（0.7~1.4）。
@@ -166,6 +230,66 @@ object NaviPrefs {
     private val _mapTraffic = MutableStateFlow(false)
     val mapTraffic: StateFlow<Boolean> = _mapTraffic.asStateFlow()
 
+    // ---------- 屏幕与地图 ----------
+
+    /**
+     * 地图配色。见 [THEME_AUTO] / [THEME_DAY] / [THEME_NIGHT]。
+     * 默认自动 —— 手动档等于要求骑手中途停车去点一下设置。
+     */
+    private val _mapTheme = MutableStateFlow(THEME_AUTO)
+    val mapTheme: StateFlow<Int> = _mapTheme.asStateFlow()
+
+    /** 导航页屏幕常亮。关掉后按系统超时熄屏，靠语音听路，长途省电 */
+    private val _screenKeepOn = MutableStateFlow(true)
+    val screenKeepOn: StateFlow<Boolean> = _screenKeepOn.asStateFlow()
+
+    /**
+     * 导航页屏幕亮度（只在导航页生效，退出即恢复系统亮度）。
+     * 取值见 [BRIGHT_FOLLOW] / [BRIGHT_DIM] / [BRIGHT_NORMAL]。
+     */
+    private val _screenBright = MutableStateFlow(BRIGHT_FOLLOW)
+    val screenBright: StateFlow<Int> = _screenBright.asStateFlow()
+
+    /** 3D 建筑体块。关掉能明显减轻渲染负担（中低端机掉帧的主因之一） */
+    private val _map3DBuilding = MutableStateFlow(true)
+    val map3DBuilding: StateFlow<Boolean> = _map3DBuilding.asStateFlow()
+
+    /** 底图文字（路名、POI 名称）。关掉地图只剩路网，转向时更干净 */
+    private val _mapText = MutableStateFlow(true)
+    val mapText: StateFlow<Boolean> = _mapText.asStateFlow()
+
+    /** 路线折线抽稀。关掉按原始点绘制，弯道贴合最准但更吃性能 */
+    private val _routeReduce = MutableStateFlow(true)
+    val routeReduce: StateFlow<Boolean> = _routeReduce.asStateFlow()
+
+    // ---------- 沿途提示 ----------
+
+    /** 道路要素提示（隧道 / 桥梁 / 天桥 / 立交 / 匝道） */
+    private val _cueRoadFeature = MutableStateFlow(true)
+    val cueRoadFeature: StateFlow<Boolean> = _cueRoadFeature.asStateFlow()
+
+    /** 弯道提示（急转弯 / 连续弯道） */
+    private val _cueCurve = MutableStateFlow(true)
+    val cueCurve: StateFlow<Boolean> = _cueCurve.asStateFlow()
+
+    /** 坡度提示（长下坡 / 长上坡）。设备没有气压计时自动静默 */
+    private val _cueTerrain = MutableStateFlow(true)
+    val cueTerrain: StateFlow<Boolean> = _cueTerrain.asStateFlow()
+
+    /** 驾驶行为提示（急刹 / 急加速 / 急转弯）。**默认关**，理由见 DriveBehaviorMonitor */
+    private val _cueHarsh = MutableStateFlow(false)
+    val cueHarsh: StateFlow<Boolean> = _cueHarsh.asStateFlow()
+
+    // ---------- 算路细项 ----------
+
+    /** 避开轮渡 */
+    private val _avoidFerry = MutableStateFlow(false)
+    val avoidFerry: StateFlow<Boolean> = _avoidFerry.asStateFlow()
+
+    /** 车型（RouteSearch.DRIVING_NORMAL_CAR / DRIVING_PURE_ELECTRIC_VEHICLE / DRIVING_PLUGIN_HYBRID_CAR） */
+    private val _carType = MutableStateFlow(RouteSearch.DRIVING_NORMAL_CAR)
+    val carType: StateFlow<Int> = _carType.asStateFlow()
+
     // ---------- 路线偏好 ----------
 
     /** 高德智能推荐（与其他选项互斥：勾上它就忽略其余选项） */
@@ -196,6 +320,8 @@ object NaviPrefs {
         _voiceMode.value = prefs.getInt(KEY_VOICE_MODE, VOICE_MODE_DETAIL)
         _ttsStyle.value = prefs.getString(KEY_TTS_STYLE, TtsStyle.DEFAULT.id)
             ?: TtsStyle.DEFAULT.id
+        _presetVoice.value = prefs.getString(KEY_PRESET_VOICE, PresetVoice.DEFAULT.id)
+            ?: PresetVoice.DEFAULT.id
         _ttsSpeed.value = prefs.getFloat(KEY_TTS_SPEED, 1.0f)
         _ttsVolume.value = prefs.getFloat(KEY_TTS_VOLUME, DEFAULT_TTS_VOLUME)
         // 「投屏」从页面改成开关：默认开（连了车机就是要投），忽略已废弃的 phone_mode
@@ -203,6 +329,18 @@ object NaviPrefs {
         _bridgeEnabled.value = prefs.getBoolean(KEY_BRIDGE, false)
         _screenOffNavi.value = prefs.getBoolean(KEY_SCREEN_OFF, true)
         _mapTraffic.value = prefs.getBoolean(KEY_MAP_TRAFFIC, false)
+        _mapTheme.value = readMapTheme(prefs)
+        _map3DBuilding.value = prefs.getBoolean(KEY_MAP_3D_BUILDING, true)
+        _mapText.value = prefs.getBoolean(KEY_MAP_TEXT, true)
+        _routeReduce.value = prefs.getBoolean(KEY_ROUTE_REDUCE, true)
+        _screenKeepOn.value = prefs.getBoolean(KEY_SCREEN_KEEP_ON, true)
+        _screenBright.value = prefs.getInt(KEY_SCREEN_BRIGHT, BRIGHT_FOLLOW)
+        _cueRoadFeature.value = prefs.getBoolean(KEY_CUE_ROAD_FEATURE, true)
+        _cueCurve.value = prefs.getBoolean(KEY_CUE_CURVE, true)
+        _cueTerrain.value = prefs.getBoolean(KEY_CUE_TERRAIN, true)
+        _cueHarsh.value = prefs.getBoolean(KEY_CUE_HARSH, false)
+        _avoidFerry.value = prefs.getBoolean(KEY_AVOID_FERRY, false)
+        _carType.value = prefs.getInt(KEY_CAR_TYPE, RouteSearch.DRIVING_NORMAL_CAR)
         _smart.value = prefs.getBoolean(KEY_SMART, true)
         _avoidJam.value = prefs.getBoolean(KEY_AVOID_JAM, true)
         _avoidToll.value = prefs.getBoolean(KEY_AVOID_TOLL, false)
@@ -254,6 +392,11 @@ object NaviPrefs {
         prefs.edit().putString(KEY_TTS_STYLE, id).apply()
     }
 
+    fun setPresetVoice(id: String) {
+        _presetVoice.value = id
+        prefs.edit().putString(KEY_PRESET_VOICE, id).apply()
+    }
+
     fun setTtsSpeed(speed: Float) {
         _ttsSpeed.value = speed
         prefs.edit().putFloat(KEY_TTS_SPEED, speed).apply()
@@ -277,6 +420,98 @@ object NaviPrefs {
     fun setMapTraffic(on: Boolean) {
         _mapTraffic.value = on
         prefs.edit().putBoolean(KEY_MAP_TRAFFIC, on).apply()
+    }
+
+    fun setMapTheme(theme: Int) {
+        val v = theme.coerceIn(THEME_AUTO, THEME_NIGHT)
+        _mapTheme.value = v
+        prefs.edit().putInt(KEY_MAP_THEME, v).apply()
+    }
+
+    /**
+     * 迁移旧版布尔开关 `map_dark`。
+     *
+     * 旧版只有一个「深色地图」开关，默认 true。直接映射成夜间会让老用户
+     * 永远用不上自动切换（他们要的其实正是「天黑自动变深」），所以：
+     *   · 旧值 true（开着深色）→ 自动。白天变浅、夜里变深，比原来只有深色更好；
+     *   · 旧值 false（特意关掉过）→ 日间。这是**主动选择**，必须尊重。
+     */
+    private fun readMapTheme(p: android.content.SharedPreferences): Int {
+        if (p.contains(KEY_MAP_THEME)) {
+            return p.getInt(KEY_MAP_THEME, THEME_AUTO).coerceIn(THEME_AUTO, THEME_NIGHT)
+        }
+        if (!p.contains(KEY_MAP_DARK_LEGACY)) return THEME_AUTO
+        val legacyDark = p.getBoolean(KEY_MAP_DARK_LEGACY, true)
+        val migrated = if (legacyDark) THEME_AUTO else THEME_DAY
+        // 立刻落盘并清掉旧键：否则每次启动都重新迁移一遍，用户改了又被旧值盖回去
+        p.edit().putInt(KEY_MAP_THEME, migrated).remove(KEY_MAP_DARK_LEGACY).apply()
+        return migrated
+    }
+
+    fun setScreenKeepOn(on: Boolean) {
+        _screenKeepOn.value = on
+        prefs.edit().putBoolean(KEY_SCREEN_KEEP_ON, on).apply()
+    }
+
+    fun setScreenBright(level: Int) {
+        val v = level.coerceIn(BRIGHT_FOLLOW, BRIGHT_NORMAL)
+        _screenBright.value = v
+        prefs.edit().putInt(KEY_SCREEN_BRIGHT, v).apply()
+    }
+
+    /**
+     * 屏幕亮度档位 → `WindowManager.LayoutParams.screenBrightness` 的取值。
+     * [BRIGHT_FOLLOW] 用 `BRIGHTNESS_OVERRIDE_NONE`（-1）表示交还系统。
+     */
+    fun screenBrightnessValue(): Float = when (_screenBright.value) {
+        BRIGHT_DIM -> 0.40f
+        BRIGHT_NORMAL -> 0.90f
+        else -> android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+    }
+
+    fun setMap3DBuilding(on: Boolean) {
+        _map3DBuilding.value = on
+        prefs.edit().putBoolean(KEY_MAP_3D_BUILDING, on).apply()
+    }
+
+    fun setMapText(on: Boolean) {
+        _mapText.value = on
+        prefs.edit().putBoolean(KEY_MAP_TEXT, on).apply()
+    }
+
+    fun setRouteReduce(on: Boolean) {
+        _routeReduce.value = on
+        prefs.edit().putBoolean(KEY_ROUTE_REDUCE, on).apply()
+    }
+
+    fun setCueRoadFeature(on: Boolean) {
+        _cueRoadFeature.value = on
+        prefs.edit().putBoolean(KEY_CUE_ROAD_FEATURE, on).apply()
+    }
+
+    fun setCueCurve(on: Boolean) {
+        _cueCurve.value = on
+        prefs.edit().putBoolean(KEY_CUE_CURVE, on).apply()
+    }
+
+    fun setCueTerrain(on: Boolean) {
+        _cueTerrain.value = on
+        prefs.edit().putBoolean(KEY_CUE_TERRAIN, on).apply()
+    }
+
+    fun setCueHarsh(on: Boolean) {
+        _cueHarsh.value = on
+        prefs.edit().putBoolean(KEY_CUE_HARSH, on).apply()
+    }
+
+    fun setAvoidFerry(on: Boolean) {
+        _avoidFerry.value = on
+        prefs.edit().putBoolean(KEY_AVOID_FERRY, on).apply()
+    }
+
+    fun setCarType(type: Int) {
+        _carType.value = type
+        prefs.edit().putInt(KEY_CAR_TYPE, type).apply()
     }
 
     fun setSmart(on: Boolean) {

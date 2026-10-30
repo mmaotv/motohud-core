@@ -93,14 +93,21 @@ object AmapCache {
     fun optionsTag(
         waypoints: List<Pair<Double, Double>>,
         avoidZones: List<List<Pair<Double, Double>>>,
-        excludeMotorway: Boolean
+        excludeMotorway: Boolean,
+        avoidFerry: Boolean = false,
+        carType: Int = 0
     ): String {
-        if (waypoints.isEmpty() && avoidZones.isEmpty() && !excludeMotorway) return ""
+        if (waypoints.isEmpty() && avoidZones.isEmpty() && !excludeMotorway &&
+            !avoidFerry && carType == 0
+        ) return ""
         val wp = waypoints.joinToString(",") { "${precise(it.first)},${precise(it.second)}" }
         val az = avoidZones.joinToString(";") { poly ->
             poly.joinToString(",") { "${precise(it.first)},${precise(it.second)}" }
         }
-        return "w[$wp]a[$az]x${if (excludeMotorway) 1 else 0}"
+        // 避开轮渡与车型同样会改变路线结果，漏进 key 就会出现
+        // 「改了设置还是走老路」—— 和途经点漏进 key 是同一类事故。
+        return "w[$wp]a[$az]x${if (excludeMotorway) 1 else 0}" +
+            "f${if (avoidFerry) 1 else 0}c$carType"
     }
 
     /** POI 搜索缓存键 */
