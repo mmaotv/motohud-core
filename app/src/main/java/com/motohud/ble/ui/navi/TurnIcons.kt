@@ -1,6 +1,7 @@
 package com.motohud.ble.ui.navi
 
 import com.motohud.ble.R
+import com.motohud.ble.navi.IconMapper
 import com.motohud.ble.navi.IconType
 
 /**
@@ -24,13 +25,7 @@ object TurnIcons {
         else -> R.drawable.ic_turn_straight
     }
 
-    /** 是否属于"需要提前看清路口"的转弯类图标（路口前自动放大用） */
-    fun isTurn(iconType: Int): Boolean = when (iconType) {
-        IconType.LEFT, IconType.RIGHT,
-        IconType.LEFT_FRONT, IconType.RIGHT_FRONT,
-        IconType.LEFT_BACK, IconType.RIGHT_BACK,
-        IconType.LEFT_TURN_AROUND, IconType.U_TURN_RIGHT,
-        IconType.ENTER_ROUNDABOUT, IconType.OUT_ROUNDABOUT -> true
-        else -> false
-    }
+    /** 是否属于"需要提前看清路口"的转弯类图标（路口前自动放大用）。
+     *  唯一实现下沉到 [IconMapper.isTurn]，此处仅转发，避免两处各写一份走样。 */
+    fun isTurn(iconType: Int): Boolean = IconMapper.isTurn(iconType)
 }

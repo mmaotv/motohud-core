@@ -1379,7 +1379,9 @@ class GuidanceActivity : AppCompatActivity() {
         tvTurnInstruction.text = s.stepInstruction.ifBlank {
             if (s.arrived) getString(R.string.hud_arrived) else getString(R.string.hud_step_remain_label)
         }
-        val roadText = route?.steps?.getOrNull(s.stepIndex)?.road.orEmpty()
+        // 路名也取「即将转弯」那一段（目标路），与图标/引导语/距离同一口径；
+        // 取当前路段会出现「右转进入Y路」却配着"X路"的错位。
+        val roadText = route?.steps?.getOrNull(s.maneuverIndex)?.road.orEmpty()
         tvTurnRoad.text = roadText.ifBlank {
             if (s.onRoute) getString(R.string.hud_step_remain_label) else getString(R.string.guidance_demo_short)
         }
@@ -1459,8 +1461,9 @@ class GuidanceActivity : AppCompatActivity() {
         announceTerrain(s)
         // 喂两个感知器（坡度需要里程增量，行为需要速度/航向）
         feedDriveSenses(s)
-        // 趁还在当前路段，把下一段的引导语先合成好（进入下一段直接命中缓存）
-        prewarmStep(s.stepIndex + 1)
+        // 趁还在当前路段，把"即将转弯"那一段的预告语先合成好（说出口时直接命中缓存）。
+        // 必须用 maneuverIndex 与 announceApproaching 说的目标一致，否则缓存对不上、现场合成必慢半拍。
+        prewarmStep(s.maneuverIndex)
 
         if (s.arrived) {
             if (!stopped) {
@@ -1483,7 +1486,9 @@ class GuidanceActivity : AppCompatActivity() {
     /** 下一步预告：`steps[stepIndex + 1]` 的数据一直都在，以前只是没显示 */
     private fun renderNextStep(s: NaviEngine.NaviState) {
         val steps = route?.steps.orEmpty()
-        val next = steps.getOrNull(s.stepIndex + 1)
+        // banner 现在显示的是"即将转弯"（maneuverIndex），"下一个"要显示它之后那一步，
+        // 否则 banner 与"下一个"都指着同一个动作。
+        val next = if (s.maneuverIndex >= 0) steps.getOrNull(s.maneuverIndex + 1) else null
         val text = next?.instruction.orEmpty().ifBlank { next?.action.orEmpty() }
         if (s.arrived || text.isBlank()) {
             tvTurnNext.visibility = View.GONE
@@ -1633,12 +1638,14 @@ class GuidanceActivity : AppCompatActivity() {
      *  - 阈值念出来的**字面**和刚念的一致（如刚念「前方 500 米」，500 档就别再念一遍）。
      */
     private fun markAnnouncedAt(spokeAt: Int) {
-        val spokeBucket = com.motohud.ble.navi.SpeechScript.distance(spokeAt)
+        // 只抑制"比刚念的距离更远"的档位（那些档已经在你身后，再念就是倒着播）。
+        //
+        // 曾经还加了一条"距离词相同就抑制"，本意是避免进段确认后立刻重复念同一句；
+        // 但进段确认说的是「继续沿 X 路行驶 1.2 公里」，预告说的是「前方 1 公里右转」——
+        // 两者距离词同为"1 公里"、内容却完全不同（后者才给出转弯信息）。按距离词抑制
+        // 会把 1 公里档整档吃掉，配合之前直行引道被当直行的 bug，正好造成"到路口才报"。
         for (i in activeThresholds.indices) {
-            val t = activeThresholds[i]
-            if (t >= spokeAt || com.motohud.ble.navi.SpeechScript.distance(t) == spokeBucket) {
-                remindMask = remindMask or (1 shl i)
-            }
+            if (activeThresholds[i] >= spokeAt) remindMask = remindMask or (1 shl i)
         }
     }
 
@@ -1818,6 +1825,7 @@ class GuidanceActivity : AppCompatActivity() {
 
     private fun announceApproaching(s: NaviEngine.NaviState) {
         if (!s.running || s.arrived || s.stepIndex < 0) return
+        if (s.maneuverIndex < 0) return
         if (activeThresholds.isEmpty()) return
         if (s.stepIndex != remindStepIndex) return
         // 临门档距离按**实时车速**刷新。
@@ -1841,7 +1849,9 @@ class GuidanceActivity : AppCompatActivity() {
         } else {
             com.motohud.ble.navi.SpeechArbiter.APPROACH
         }
-        say(stepText(s.stepIndex, rem, s.speedKmh), cue = cue)
+        // 说「前方 X 米右转」时目标是**即将转弯的那一步**（maneuverIndex），
+        // 不是正在走的直行引道（stepIndex）——否则会念成「前方 500 米直行」。
+        say(stepText(s.maneuverIndex, rem, s.speedKmh), cue = cue)
     }
 
     private fun naviAgain() {

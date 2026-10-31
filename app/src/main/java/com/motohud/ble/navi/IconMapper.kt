@@ -71,4 +71,38 @@ object IconMapper {
             else -> IconType.STRAIGHT
         }
     }
+
+    /**
+     * 是否属于"需要提前看清路口"的转弯类图标（路口前自动放大、提前预告阈值判定用）。
+     *
+     * 唯一定义放这里（纯逻辑，不依赖 UI），[com.motohud.ble.ui.navi.TurnIcons] 委托过来，
+     * 避免引擎反向依赖 UI 包、也避免两处各写一份走样。
+     */
+    fun isTurn(iconType: Int): Boolean = when (iconType) {
+        IconType.LEFT, IconType.RIGHT,
+        IconType.LEFT_FRONT, IconType.RIGHT_FRONT,
+        IconType.LEFT_BACK, IconType.RIGHT_BACK,
+        IconType.LEFT_TURN_AROUND, IconType.U_TURN_RIGHT,
+        IconType.ENTER_ROUNDABOUT, IconType.OUT_ROUNDABOUT -> true
+        else -> false
+    }
+
+    /**
+     * 「即将转弯」所在步骤的下标。AMap 把「直行引道」和「转弯」拆成相邻两步：
+     * steps[curStep] 是正在走的路段（action=直行），真正的转弯动作在 steps[curStep+1]。
+     * 所以：
+     *  - 当前段本身就是转弯（短转弯段）→ 取 curStep；
+     *  - 当前段是直行引道 → 取 curStep+1；
+     *  - 已是最后一段 / 无路线 → 退回 curStep（没有下一段可指）。
+     *
+     * 这个下标决定 banner 图标/文字、提前预告阈值、车机图标与「前方 X 米右转」的口径，
+     * 读错就会把整段直行引道当成直行、提前预告全消失，只剩到路口才报。
+     *
+     * @param curIcon 当前段 [of] 出来的图标
+     */
+    fun maneuverIndexOf(curStep: Int, curIcon: Int, stepCount: Int): Int = when {
+        curStep < 0 || stepCount <= 0 -> -1
+        isTurn(curIcon) || curStep + 1 >= stepCount -> curStep
+        else -> curStep + 1
+    }
 }

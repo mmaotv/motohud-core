@@ -36,7 +36,16 @@ interface NaviEngine {
         val stepRemain: Int = 0,
         /** 当前步骤索引（无路线时为 -1） */
         val stepIndex: Int = -1,
-        /** 当前步骤引导语（如"沿望京路行驶 500 米后右转"） */
+        /**
+         * 即将执行的转向所在步骤索引（无路线或已到终点为 -1）。
+         *
+         * AMap 把「直行引道」与「转弯」拆成相邻两步：steps[stepIndex] 是正在走的路段，
+         * 真正的转弯动作在 steps[stepIndex+1]；若当前段本身就是一个转弯（短转弯段），
+         * 则等于 stepIndex。播报「前方 X 米右转」、banner 图标/文字都该读这一段，
+         * 读 stepIndex 会把整段直行引道当成直行，导致提前预告全部消失。
+         */
+        val maneuverIndex: Int = -1,
+        /** 即将转向的引导语（如"右转进入望京路"）；无转弯时退回当前段引导语 */
         val stepInstruction: String = "",
         /** 高德 IconType 数值 */
         val iconType: Int = IconType.STRAIGHT,
@@ -545,13 +554,24 @@ class RouteNaviEngine(
             // 前方拥堵里程：当前步骤及之后的拥堵分段累加（TMC 状态≥3），用于提示与换线
             val congestionAhead = if (curStep >= 0) steps.drop(curStep).sumOf { it.congestedM.toDouble() }.toInt() else 0
 
+            // 即将转向的那一步：AMap 把直行引道与转弯拆成相邻 step
+            // （steps[i]=直行引道、steps[i+1]=转弯），所以正在走的直行段，其"即将转弯"
+            // 在 steps[i+1]；若当前段本身就是转弯（短转弯段），就是它自己。
+            // banner 图标/文字、提前预告阈值、车机图标都读这一步——之前错用当前段(直行)
+            // 当转弯，导致直行引道整段被当直行、1 公里/500 米预告全消失，只剩到路口才报。
+            val maneuverIdx = IconMapper.maneuverIndexOf(
+                curStep,
+                if (curStep >= 0) IconMapper.of(
+                    steps[curStep].action, steps[curStep].orientation, steps[curStep].instruction
+                ) else IconType.STRAIGHT,
+                steps.size
+            )
+            val maneuverStep = if (maneuverIdx >= 0) steps.getOrNull(maneuverIdx) else null
             val icon = when {
                 arrived -> IconType.ARRIVED_DESTINATION
                 manualIcon != null -> manualIcon!!
-                curStep >= 0 -> IconMapper.of(
-                    steps[curStep].action,
-                    steps[curStep].orientation,
-                    steps[curStep].instruction
+                maneuverStep != null -> IconMapper.of(
+                    maneuverStep.action, maneuverStep.orientation, maneuverStep.instruction
                 )
                 else -> IconType.STRAIGHT
             }
@@ -570,7 +590,9 @@ class RouteNaviEngine(
                 pathRemain = remaining.toInt(),
                 stepRemain = stepRemain.toInt(),
                 stepIndex = curStep,
-                stepInstruction = if (curStep >= 0) steps[curStep].instruction else "",
+                maneuverIndex = maneuverIdx,
+                stepInstruction = maneuverStep?.instruction
+                    ?: (if (curStep >= 0) steps[curStep].instruction else ""),
                 iconType = icon,
                 bearing = curBearing,
                 etaSeconds = if (arrived) 0 else etaSeconds(remaining),
@@ -612,6 +634,9 @@ class RouteNaviEngine(
                 longitude = curLng,
                 pathRemain = dist2.toInt(),
                 stepRemain = dist2.toInt(),
+                stepIndex = -1,
+                maneuverIndex = -1,
+                stepInstruction = "",
                 iconType = icon,
                 bearing = curBearing,
                 etaSeconds = if (arrived) 0 else etaSeconds(dist2),
