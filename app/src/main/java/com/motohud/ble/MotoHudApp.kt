@@ -9,8 +9,8 @@ import com.motohud.ble.data.CrashHandler
 import com.motohud.ble.data.FaultRepository
 import com.motohud.ble.data.SearchEngine
 import com.motohud.ble.data.bike.BikePrefs
+import com.motohud.ble.navi.AmapNaviEngine
 import com.motohud.ble.navi.NaviForwarder
-import com.motohud.ble.navi.RouteNaviEngine
 
 class MotoHudApp : Application() {
 
@@ -22,13 +22,15 @@ class MotoHudApp : Application() {
     val bleManager by lazy { BleConnectionManager(this) }
     val faultRepository get() = FaultRepository
 
-    /** 全局单例导航引擎（手机导航页与车机投屏 HUD 共享同一实例） */
-    val naviEngine: RouteNaviEngine by lazy {
-        RouteNaviEngine(
-            this,
-            getSystemService(android.content.Context.LOCATION_SERVICE) as? android.location.LocationManager
-        )
-    }
+    /**
+     * 全局单例导航引擎（手机导航页与车机投屏 HUD 共享同一实例）。
+     *
+     * 已从自研 [RouteNaviEngine] 切换到**高德导航 SDK** 驱动的 [AmapNaviEngine]：
+     * 路线规划/实时引导/电子眼/限速/车道线/路口放大图全部走 SDK 原生能力。
+     * 没配 Key 或未同意隐私时，[AmapNaviEngine] 内部自动降级回自研引擎，
+     * 保证车机投屏导航在任何情况下都不失能。
+     */
+    val naviEngine: AmapNaviEngine by lazy { AmapNaviEngine(this) }
 
     /** BLE 导航指令转发器（保证同一时刻只有一个界面在发指令） */
     val naviForwarder: NaviForwarder by lazy { NaviForwarder(bleManager) }
@@ -69,6 +71,8 @@ class MotoHudApp : Application() {
             AmapManager.initMap(this)
             AmapManager.initSearch(this)
             AmapManager.initLocation(this)
+            // 导航 SDK 必须在隐私合规之后、AMapNavi.getInstance 之前完成 Key 下发
+            AmapManager.initNavi(this)
         }
 
         // 离线语音模型装了就先在后台加载好（约 3 秒）。

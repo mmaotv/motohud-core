@@ -65,6 +65,7 @@ import com.motohud.ble.navi.NaviEngine
 import com.motohud.ble.navi.RouteData
 import com.motohud.ble.navi.RouteHandoff
 import com.motohud.ble.navi.RouteNaviEngine
+import com.motohud.ble.navi.RouteStep
 import com.motohud.ble.navi.SpeechPriority
 import com.motohud.ble.navi.SpeechScript
 import com.motohud.ble.navi.tts.TtsModelStore
@@ -98,7 +99,7 @@ import kotlin.math.roundToInt
  */
 
 /**
- * 转弯提前播报的距离阶梯（米，降序）：1 公里 → 500 → 200 → 50。
+ * 转弯提前播报的距离阶梯（米，降序）：1 公里 → 300 → 临门。
  *
  * 骑行时最需要的是「快到路口了」的紧迫感，而不是到达后才知道该转。
  * 档位不能堆：以前是 1km/500/300/200/100/50 六档，300 与 200、100 与 50
@@ -110,32 +111,36 @@ import kotlin.math.roundToInt
  * "recoverDist": {"default": 200, "lastPlay": 550}   // 最后一次播报在 550 米
  * "times": {"default": 2}               // 同一路口只播 2 次
  * ```
- * 即 **1100 预警 + 550 确认 + 临门动作**，加进来正好 3 次。以前我们多一档 200，
- * 与 550 只隔两百来米（高速上不到 8 秒），听感是同一句话说两遍。
+ * 我们取 1000 / 300 两档 + 临门一句，档距 700 米，比官方 550 那一档更晚、更贴路口。
  *
- *  - **1100 米**：预警，「前方 1 公里右转进入南滨路」；
- *  - **550 米**：确认，最后一次带距离的提醒；
+ *  - **1000 米**：预警，「前方 1 公里，第 2 个路口右转进入南滨路」；
+ *  - **300 米**：确认，最后一次带距离的提醒（顺带把车道指引并进同一句）；
  *  - **临门**：只报动作（「右转」「进入环岛，第 3 个出口」），见
  *    [com.motohud.ble.navi.VoiceGuidance.closeDistOf]。
  *
  * 前两档固定；最后一档出厂值 50 米，实际由 `thresholdsFor` 按车速替换
  * （30/45/60/80），所以这里写的是兜底值。
  */
-private val TURN_THRESHOLDS = intArrayOf(1_100, 550, 50)
+private val TURN_THRESHOLDS = intArrayOf(1_000, 300, 50)
 
-/** 直行路口的提醒档：200 米预警 + 临门一句「路口直行」，长直路不啰嗦 */
-private val STRAIGHT_THRESHOLDS = intArrayOf(200, 50)
+/** 直行路口的提醒档：只提醒一次「路口直行」，长直路不啰嗦 */
+private val STRAIGHT_THRESHOLDS = intArrayOf(300)
 
-/** 简洁模式：砍掉 1100 预警，只留 550 确认 + 临门动作 */
-private val BRIEF_THRESHOLDS = intArrayOf(550, 50)
+/** 简洁模式：砍掉 1 公里预警，只留 300 确认 + 临门动作 */
+private val BRIEF_THRESHOLDS = intArrayOf(300, 50)
 
-/** 只播转弯模式：只在 200 米处念一句 */
-private val TURN_ONLY_THRESHOLDS = intArrayOf(200)
+/** 只播转弯模式：只在 300 米处念一句 */
+private val TURN_ONLY_THRESHOLDS = intArrayOf(300)
 
 class GuidanceActivity : AppCompatActivity() {
 
     private lateinit var app: MotoHudApp
-    private lateinit var engine: RouteNaviEngine
+    /**
+     * 导航引擎。类型用接口 [NaviEngine]，具体实现由 [MotoHudApp.naviEngine] 决定：
+     * 现在是高德导航 SDK（[com.motohud.ble.navi.AmapNaviEngine]），
+     * SDK 不可用时它内部会降级到自研引擎 —— 页面本身不关心是哪种。
+     */
+    private lateinit var engine: NaviEngine
     private lateinit var ble: BleConnectionManager
 
     private var mapView: MapView? = null
@@ -172,6 +177,20 @@ class GuidanceActivity : AppCompatActivity() {
     private lateinit var tvGpsQuality: TextView
     private lateinit var statGps: View
     private lateinit var tvSignalWarn: View
+
+    // ---- 导航 SDK 新增能力对应的控件 ----
+    /** 车道线（showLaneInfo）：自绘箭头，见 [LaneGuideView] */
+    private lateinit var laneGuideView: LaneGuideView
+    /** 电子眼提示整行（含限速徽章），显隐要整行控制 */
+    private lateinit var llCameraWarn: View
+    /** 电子眼 / 限速提示（updateCameraInfo） */
+    private lateinit var tvCameraWarn: TextView
+    /** 限速徽章（红圈数字）；0 = 无已知限速，隐藏 */
+    private lateinit var tvLimitBadge: TextView
+    /** 路口放大图（showCross） */
+    private lateinit var ivCrossImage: ImageView
+    /** SDK 提示条：服务区 / 交通事件 / 可切主辅路（三者共用一行，按优先级取一条） */
+    private lateinit var tvNaviNote: TextView
     private lateinit var tvBleHint: TextView
     private lateinit var tvLights: TextView
     private lateinit var tvTolls: TextView
@@ -210,7 +229,7 @@ class GuidanceActivity : AppCompatActivity() {
      */
     private var presetPack = false
     private var route: RouteData? = null
-    private var destName: String = "目的地"
+    private var destName: String = ""
     private var destLat = 0.0
     private var destLng = 0.0
     private var lastCameraMs = 0L
@@ -251,11 +270,37 @@ class GuidanceActivity : AppCompatActivity() {
     /** 当前路段实际生效的阈值集合（随 voiceMode / 是否转弯而定） */
     private var activeThresholds: IntArray = TURN_THRESHOLDS
 
+    /**
+     * 已经播报过的「路口 + 动作 + 档位」，整程只说一次。
+     *
+     * `remindMask` 是按路段序号重置的：路口附近 GPS 抖动、SDK 的 `curStep` 在两个
+     * 值之间跳，掩码就被清掉，同一句话重播 —— 这是"反复提前播报"的直接原因。
+     * 掩码管"本段哪几档说过"，这个集合管"整程哪几档说过"，两者叠加才不重不漏。
+     */
+    private val spokenTiers = HashSet<String>()
+
+    /** 上一次转向播报的时刻，用于 [APPROACH_MIN_GAP_MS] 这个最小间隔闸门 */
+    private var lastApproachMs = 0L
+
     /** 当前是否横屏：镜头缩放/俯角/前移都要跟着变，横屏和竖屏必须有区别 */
     private var landscapeNow = false
 
     /** 上一次已播报过的路段序号：进入新路段时播一次「前方 X 米 左/右转」 */
     private var lastAnnouncedStep = -1
+
+    /**
+     * 电子眼播报去重：`"类型|限速"` → 上次播报时刻。
+     *
+     * 导航 SDK 会在接近电子眼时持续回调 `updateCameraInfo`（同一批数据每秒都来），
+     * 不去重会变成每秒念一遍"前方500米测速摄像头"。
+     */
+    private val cameraSpokenAt = HashMap<String, Long>()
+
+    /** 已经念过的交通事件（按标题去重）：同一条封路信息不该每帧重复播 */
+    private val incidentSpoken = HashSet<String>()
+
+    /** 已经念过的服务区（按名称去重） */
+    private val serviceAreaSpoken = HashSet<String>()
 
     /**
      * 预合成去重：记录已经交给引擎预热的路段序号。
@@ -367,6 +412,20 @@ class GuidanceActivity : AppCompatActivity() {
         // 偏航 → 自动重新规划（开错路时上层负责算新路线）
         engine.onRerouteRequest = { lat, lng -> requestReroute(lat, lng) }
 
+        /*
+         * SDK 模式的播报：直接用高德官方文本（`onGetNavigationText`）。
+         *
+         * 为什么不再走自研的三档阈值：官方文本的**触发时机**由 SDK 按实时车速、
+         * 路口类型、剩余距离综合判断（高速上会提前到 2 公里，市区路口 50 米才报），
+         * 固定的 1100/550/临门 三档做不到这一点。两套同时跑只会互相打断。
+         *
+         * 但发声仍然是本 App 的 TTS（引擎里 `setUseInnerVoice(false)`），
+         * 所以离线语音包念路名、语速音量、播报仲裁全都保留。
+         */
+        engine.onSdkSpeech = { text ->
+            if (!stopped) say(text, cue = com.motohud.ble.navi.SpeechArbiter.TRAFFIC)
+        }
+
         NaviPrefs.init(this)
         // 坡度感知：设备有气压计才创建，没有就留 null（整套逻辑静默关闭）
         terrainSense = com.motohud.ble.navi.TerrainSense(this)
@@ -378,7 +437,7 @@ class GuidanceActivity : AppCompatActivity() {
         )
         applyScreenPrefs()
 
-        destName = intent.getStringExtra(EXTRA_NAME).orEmpty().ifBlank { "目的地" }
+        destName = intent.getStringExtra(EXTRA_NAME).orEmpty().ifBlank { getString(R.string.dest_default) }
         destLat = intent.getDoubleExtra(EXTRA_LAT, 0.0)
         destLng = intent.getDoubleExtra(EXTRA_LNG, 0.0)
         waypoints = parseWaypoints(intent.getStringExtra(EXTRA_WAYPOINTS))
@@ -408,6 +467,14 @@ class GuidanceActivity : AppCompatActivity() {
             View.GONE
         }
 
+        /*
+         * 模拟导航：必须在 planAndStart() 之前置位。
+         * 导航 SDK 的算路是异步的，置位后由引擎在 startNavi 那一刻选 NaviType.EMULATOR。
+         */
+        if (intent.getBooleanExtra(EXTRA_EMULATOR, false)) {
+            engine.startEmulator(EMULATOR_SPEED_KMH)
+        }
+
         planAndStart()
 
         // 周期性检查更优/更畅通路线（偏航重算由引擎回调触发，这里负责"路况变化换线"）
@@ -435,6 +502,12 @@ class GuidanceActivity : AppCompatActivity() {
         tvGpsQuality = findViewById(R.id.tv_gps_quality)
         statGps = findViewById(R.id.stat_gps)
         tvSignalWarn = findViewById(R.id.tv_signal_warn)
+        laneGuideView = findViewById(R.id.ll_lane_guide)
+        llCameraWarn = findViewById(R.id.ll_camera_warn)
+        tvCameraWarn = findViewById(R.id.tv_camera_warn)
+        tvLimitBadge = findViewById(R.id.tv_limit_badge)
+        ivCrossImage = findViewById(R.id.iv_cross_image)
+        tvNaviNote = findViewById(R.id.tv_navi_note)
         tvBleHint = findViewById(R.id.tv_guidance_ble_hint)
         tvLights = findViewById(R.id.tv_lights)
         tvTolls = findViewById(R.id.tv_tolls)
@@ -552,6 +625,22 @@ class GuidanceActivity : AppCompatActivity() {
             true
         }
         tvModeBadge.setOnClickListener { showNaviOptions() }
+
+        /*
+         * 长按转向横幅 = 切主辅路（导航 SDK `switchParallelRoad`）。
+         * 只在 SDK 报了「有平行路」时生效（`notifyParallelRoad(type>0)`），
+         * 否则按了也没反应，用 Toast 说明而不是静默失败。
+         * 骑行最怕的就是上了主路却该走辅路，绕回来要多跑好几公里。
+         */
+        turnBanner.setOnLongClickListener {
+            if (engine.state.value.parallelRoad > 0) {
+                engine.switchParallelRoad()
+                Toast.makeText(this, R.string.navi_parallel_switched, Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, R.string.navi_parallel_unavailable, Toast.LENGTH_SHORT).show()
+            }
+            true
+        }
         findViewById<View>(R.id.btn_overview).setOnClickListener {
             route?.let { drawRoute(it, fitAll = true) }
         }
@@ -674,7 +763,7 @@ class GuidanceActivity : AppCompatActivity() {
                     AmapRepo(this@GuidanceActivity).planDriveRoute(
                         from.first, from.second, destLat, destLng,
                         com.amap.api.services.route.RouteSearch.DRIVING_MULTI_STRATEGY_FASTEST_SHORTEST,
-                        "推荐"
+                        getString(R.string.route_badge_recommended)
                     )
                 }
             }
@@ -702,8 +791,13 @@ class GuidanceActivity : AppCompatActivity() {
         remindMask = 0
         activeThresholds = TURN_THRESHOLDS
         lastAnnouncedStep = -1
+        spokenTiers.clear()
+        lastApproachMs = 0L
         prewarmedStep = -1
         featureAnnounced.clear()
+        cameraSpokenAt.clear()
+        incidentSpoken.clear()
+        serviceAreaSpoken.clear()
         curveAnnounced.clear()
         curveCache.clear()
         // 新一次导航必须重置感知器：上一次的累计里程/加减速历史留着会立刻误报
@@ -731,7 +825,7 @@ class GuidanceActivity : AppCompatActivity() {
             destName = destName,
             destLat = destLat,
             destLng = destLng,
-            startName = start?.let { CoordConverter.formatLatLng(it.first, it.second) } ?: "未知",
+            startName = start?.let { CoordConverter.formatLatLng(it.first, it.second) } ?: getString(R.string.common_unknown),
             startLat = start?.first ?: 0.0,
             startLng = start?.second ?: 0.0,
             distanceM = r?.distanceM?.toDouble() ?: 0.0
@@ -1035,7 +1129,7 @@ class GuidanceActivity : AppCompatActivity() {
                 planOnce(
                     start,
                     com.amap.api.services.route.RouteSearch.DRIVING_MULTI_STRATEGY_FASTEST_SHORTEST_AVOID_CONGESTION,
-                    "避拥堵"
+                    getString(R.string.route_badge_avoid_congestion)
                 )
             } else null
             val candidate = avoid ?: cur ?: return@launch
@@ -1381,7 +1475,10 @@ class GuidanceActivity : AppCompatActivity() {
         }
         // 路名也取「即将转弯」那一段（目标路），与图标/引导语/距离同一口径；
         // 取当前路段会出现「右转进入Y路」却配着"X路"的错位。
-        val roadText = route?.steps?.getOrNull(s.maneuverIndex)?.road.orEmpty()
+        // SDK 模式下直接用 NaviInfo.nextRoadName（官方数据，比从引导语里抠准）。
+        val roadText = s.nextRoadName.takeIf { it.isNotBlank() }
+            ?: s.currentRoadName.takeIf { it.isNotBlank() }
+            ?: route?.steps?.getOrNull(s.maneuverIndex)?.road.orEmpty()
         tvTurnRoad.text = roadText.ifBlank {
             if (s.onRoute) getString(R.string.hud_step_remain_label) else getString(R.string.guidance_demo_short)
         }
@@ -1441,18 +1538,28 @@ class GuidanceActivity : AppCompatActivity() {
 
         renderProgress(s.traveled)
 
-        // 进入新路段 → 播一次，并重置本段的阈值调度
+        // 进入新路段 → 重置本段的阈值调度
         if (s.stepIndex != lastAnnouncedStep) {
             lastAnnouncedStep = s.stepIndex
             remindStepIndex = s.stepIndex
             remindMask = 0
             activeThresholds = thresholdsFor(s)
+            // 进段确认在两种引擎下都要说：刚拐完弯是"我在不在对的路"最需要确认的时刻。
+            // SDK 模式没有 DriveStep，用 currentRoadName/stepRemain 合成等价的一句。
             val spokeAt = announceStepEntered(s)
             // 进入时就已念过的距离，把同一档及更远的档位标记为已播，避免复读/倒着播
             if (spokeAt > 0) markAnnouncedAt(spokeAt)
         }
-        // 按距离阈值逐级提前提醒（1 公里/500/200/50），最后一档只报动作
+        // 播报统一走本页的叙事层。SDK 的转向文本已经在引擎侧被过滤掉
+        // （只放行事故/施工这类非转向信息），所以这里不再按 sdkDriven 分叉。
         announceApproaching(s)
+        // 预合成只对兜底引擎有意义：它按 route.steps[maneuverIndex] 取句子，
+        // 而 SDK 模式下 maneuverIndex 是引导点下标，两套索引不是一回事，算出来的句子用不上。
+        if (!s.sdkDriven) prewarmStep(s.maneuverIndex)
+        // 电子眼 / 区间测速：SDK 的官方播报文本里不含这块，必须自己念
+        announceCamera(s)
+        // 服务区 / 沿途交通事件：同样不在官方播报里，各念一次
+        announceSdkNotes(s)
         // 沿途道路要素（隧道/桥梁/立交/匝道/天桥）：进入前单独播一次
         announceRoadFeatures(s)
         // 弯道预警（急转弯/连续弯道）：从折线曲率自算，提前 300 米
@@ -1461,9 +1568,8 @@ class GuidanceActivity : AppCompatActivity() {
         announceTerrain(s)
         // 喂两个感知器（坡度需要里程增量，行为需要速度/航向）
         feedDriveSenses(s)
-        // 趁还在当前路段，把"即将转弯"那一段的预告语先合成好（说出口时直接命中缓存）。
-        // 必须用 maneuverIndex 与 announceApproaching 说的目标一致，否则缓存对不上、现场合成必慢半拍。
-        prewarmStep(s.maneuverIndex)
+        // SDK 新增能力的界面（车道线 / 电子眼 / 路口放大图 / 重新规划提示）
+        renderSdkAlerts(s)
 
         if (s.arrived) {
             if (!stopped) {
@@ -1485,11 +1591,21 @@ class GuidanceActivity : AppCompatActivity() {
 
     /** 下一步预告：`steps[stepIndex + 1]` 的数据一直都在，以前只是没显示 */
     private fun renderNextStep(s: NaviEngine.NaviState) {
-        val steps = route?.steps.orEmpty()
-        // banner 现在显示的是"即将转弯"（maneuverIndex），"下一个"要显示它之后那一步，
-        // 否则 banner 与"下一个"都指着同一个动作。
-        val next = if (s.maneuverIndex >= 0) steps.getOrNull(s.maneuverIndex + 1) else null
-        val text = next?.instruction.orEmpty().ifBlank { next?.action.orEmpty() }
+        val text = if (s.sdkDriven) {
+            // SDK 模式下不能用 route.steps[maneuverIndex + 1]：那是另一套索引空间，
+            // 指到哪一步全看运气。改用引擎从引导点列表取出的 guides[curStep + 1]。
+            val act = SpeechScript.action(s.nextManeuverIcon)
+            if (act.isBlank()) "" else {
+                val road = s.nextManeuverRoad
+                if (SpeechScript.isUsableRoad(road)) "$act，进入$road" else act
+            }
+        } else {
+            val steps = route?.steps.orEmpty()
+            // banner 现在显示的是"即将转弯"（maneuverIndex），"下一个"要显示它之后那一步，
+            // 否则 banner 与"下一个"都指着同一个动作。
+            val next = if (s.maneuverIndex >= 0) steps.getOrNull(s.maneuverIndex + 1) else null
+            next?.instruction.orEmpty().ifBlank { next?.action.orEmpty() }
+        }
         if (s.arrived || text.isBlank()) {
             tvTurnNext.visibility = View.GONE
         } else {
@@ -1498,25 +1614,38 @@ class GuidanceActivity : AppCompatActivity() {
         }
     }
 
-    /** 展开区：红绿灯 / 过路费 / 步骤进度 / 路况估算 */
+    /** 展开区：红绿灯 / 过路费 / 步骤进度 / 路况 */
     private fun renderExtraStats(s: NaviEngine.NaviState) {
         val r = route ?: return
         if (!cardExpanded) return
-        tvLights.text = r.trafficLights.toString()
-        tvTolls.text = if (r.tolls > 0f) String.format(Locale.US, "%.0f 元", r.tolls) else "免费"
+        // 导航中优先用 SDK 的「剩余红绿灯」：路线算路时给的是全程总数，
+        // 跑了一半还挂着 4 个容易误判，`routeRemainLightCount` 才是当下的数
+        tvLights.text = if (s.sdkDriven && s.remainLights >= 0) {
+            s.remainLights.toString()
+        } else {
+            r.trafficLights.toString()
+        }
+        tvTolls.text = if (r.tolls > 0f) getString(R.string.route_fare, r.tolls) else getString(R.string.common_free)
         val total = r.steps.size
         tvStepProgress.text = if (total > 0) "${(s.stepIndex + 1).coerceIn(1, total)}/$total" else "--"
-        tvTrafficEstimate.text = buildTrafficEstimate(r)
+        tvTrafficEstimate.text = buildTrafficEstimate(r, s)
     }
 
     /**
-     * 路况估算。
+     * 路况。
      *
-     * 高德**搜索 SDK 没有实时路况分段**（那是导航 SDK 的能力），所以这里只能用
-     * 每步「距离 ÷ 时长」推出的平均速度来估三档，并明确标注"估算"——
-     * 不能伪装成实时路况，否则用户按这个决策会出问题。
+     * 导航 SDK 下 `congestionAheadM` 是**实测的实时拥堵里程**（`onTrafficStatusUpdate`
+     * 汇总路线上 status≥3 的 link 长度），有就直接说，不再拿平均车速去猜；
+     * 只有走兜底引擎时才退回「距离÷时长」的三档估算，并明确标注"估算"。
      */
-    private fun buildTrafficEstimate(r: RouteData): String {
+    private fun buildTrafficEstimate(r: RouteData, s: NaviEngine.NaviState): String {
+        if (s.sdkDriven) {
+            return if (s.congestionAheadM >= 100f) {
+                getString(R.string.navi_congestion_ahead, CoordConverter.formatDistance(s.congestionAheadM.toInt()))
+            } else {
+                getString(R.string.guidance_traffic_smooth)
+            }
+        }
         if (r.durationS <= 1f || r.distanceM <= 1f) return ""
         val kmh = r.distanceM / 1000f / (r.durationS / 3600f)
         val level = when {
@@ -1603,11 +1732,9 @@ class GuidanceActivity : AppCompatActivity() {
      */
     private fun announceStepEntered(s: NaviEngine.NaviState): Int {
         if (!s.running || s.arrived || s.stepIndex < 0) return -1
-        val step = route?.steps?.getOrNull(s.stepIndex) ?: return -1
         val r = s.stepRemain.toInt()
         if (r <= 0) return -1
-        val icon = IconMapper.of(step.action, step.orientation, step.instruction)
-        val isTurn = TurnIcons.isTurn(icon)
+        val isTurn = IconMapper.isTurn(s.iconType)
         val mode = NaviPrefs.voiceMode.value
         // 只播转弯：只在路口段开口；其余模式长直段也报一次路名，短碎段不抢话
         val should = when {
@@ -1617,10 +1744,26 @@ class GuidanceActivity : AppCompatActivity() {
             else -> false
         }
         if (!should) return -1
-        // 内置语音包念不出路名，别拼「继续沿烟雨路行驶」——把路名去掉，
-        // 直接说「继续直行 500 米」，这段在语音包里有整句，一次命中
-        val stepForVoice = if (presetPack) step.copy(road = "") else step
-        val text = com.motohud.ble.navi.VoiceGuidance.entry(stepForVoice, icon, r.toFloat())
+        val text = if (s.sdkDriven) {
+            // 导航 SDK 没有 DriveStep，但 `currentRoadName` + `stepRemain` 就是同一份信息：
+            // 合成一个临时 RouteStep 交给叙事层，句式与兜底引擎逐字一致（内置语音包才命中）
+            val road = if (presetPack) "" else s.currentRoadName
+            val step = RouteStep(
+                instruction = if (s.currentRoadName.isNotBlank()) "继续沿${s.currentRoadName}行驶" else "直行",
+                action = if (isTurn) SpeechScript.action(s.iconType) else "直行",
+                orientation = "",
+                road = road,
+                distanceM = r.toFloat(),
+                polyline = emptyList()
+            )
+            com.motohud.ble.navi.VoiceGuidance.entry(step, s.iconType, r.toFloat())
+        } else {
+            val step = route?.steps?.getOrNull(s.stepIndex) ?: return -1
+            // 内置语音包念不出路名，别拼「继续沿烟雨路行驶」——把路名去掉，
+            // 直接说「继续直行 500 米」，这段在语音包里有整句，一次命中
+            val stepForVoice = if (presetPack) step.copy(road = "") else step
+            com.motohud.ble.navi.VoiceGuidance.entry(stepForVoice, s.iconType, r.toFloat())
+        }
         if (text.isBlank()) return -1
         say(
             text,
@@ -1825,13 +1968,12 @@ class GuidanceActivity : AppCompatActivity() {
 
     private fun announceApproaching(s: NaviEngine.NaviState) {
         if (!s.running || s.arrived || s.stepIndex < 0) return
-        if (s.maneuverIndex < 0) return
         if (activeThresholds.isEmpty()) return
         if (s.stepIndex != remindStepIndex) return
         // 临门档距离按**实时车速**刷新。
         // 进段时算的那一档只反映进入那一刻的车速：高速驶入、到路口前减速停车时，
         // 固定的 80 米会让「右转」那句永远不触发（人已经停在路口，车机还静着）。
-        // 只在档位数 >= 2 时刷新 —— "只播转弯"模式只有一档 [200]，那是提醒档不是临门档。
+        // 只在档位数 >= 2 时刷新 —— "只播转弯"模式只有一档 [300]，那是提醒档不是临门档。
         if (activeThresholds.size >= 2) activeThresholds = withCloseDist(activeThresholds, s)
         val rem = s.stepRemain.toInt()
         if (rem <= 0) return
@@ -1841,17 +1983,307 @@ class GuidanceActivity : AppCompatActivity() {
             if (rem <= t && (remindMask and (1 shl i)) == 0) chosen = i
         }
         if (chosen < 0) return
+        // 两道闸门，缺一不可：
+        //  ① 掩码（本段这一档说过没）—— 路口附近步骤序号抖动会把掩码清零；
+        //  ② 硬去重（整程这个路口这一档说过没）+ 最小间隔（防止序号来回跳时
+        //     key 变了又念一遍）。
+        // 用户听到的"六七百米处反复播报左转"，就是只有 ① 没有 ② 的结果。
+        val now = System.currentTimeMillis()
+        if (now - lastApproachMs < APPROACH_MIN_GAP_MS) return
         for (i in 0..chosen) remindMask = remindMask or (1 shl i)
-        // 临门那句是「右转」，和预警句「前方 500 米右转进入X路」在仲裁表里分属两档：
-        // 到跟前时哪怕有路况提示在说，也该让临门动作抢进来。
-        val cue = if (rem <= com.motohud.ble.navi.VoiceGuidance.closeDistOf(s.speedKmh)) {
+
+        val closeDist = com.motohud.ble.navi.VoiceGuidance.closeDistOf(s.speedKmh)
+        val isClose = rem <= closeDist
+        val key = "${s.stepIndex}|${s.iconType}|$chosen"
+        if (!spokenTiers.add(key)) return
+        if (spokenTiers.size > 200) spokenTiers.clear()
+
+        val cue = if (isClose) {
             com.motohud.ble.navi.SpeechArbiter.CLOSE_ACTION
         } else {
             com.motohud.ble.navi.SpeechArbiter.APPROACH
         }
-        // 说「前方 X 米右转」时目标是**即将转弯的那一步**（maneuverIndex），
-        // 不是正在走的直行引道（stepIndex）——否则会念成「前方 500 米直行」。
-        say(stepText(s.maneuverIndex, rem, s.speedKmh), cue = cue)
+        // 临门只说动作；更远的档位说完整句（距离 + 第几个路口 + 动作 + 目标路 + 车道）
+        val text = if (isClose) closeText(s) else maneuverText(s, rem, withLane = rem <= LANE_HINT_M)
+        if (text.isBlank()) return
+        lastApproachMs = now
+        say(text, cue = cue)
+    }
+
+    /**
+     * 某一档的完整播报句：**距离 + 第几个路口 + 动作 + 目标路名（+ 车道指引）**。
+     *
+     * 为什么必须自己拼、不念 SDK 的文本：
+     *  - SDK 的转向文本只给「600米后 左转」，没有路口序号，也说不出"请走左侧车道"；
+     *  - 它按自己的节奏反复下发，我们无法控制哪一档该说、哪一档不该说；
+     *  - 一旦它给的图标与文本不同步，就会出现"直行路口被念成左转"。
+     * 现在这一段只读 `NaviInfo` 的结构化字段（`iconType` / `curStepRetainDistance` /
+     * `nextRoadName` / `maneuverOrdinal`），三者同源同一帧，不可能对不上。
+     *
+     * 句式对齐高德：官方模板就是 `{meter}米后 {action}`（见 `libAMapSDK_NAVI` 里的
+     * `{meter}米后 {action}` / `左转，进入`），我们只是把「第几个路口」补回去 —
+     * 那是高德原文里有、而被我们上一版丢掉的字段。
+     */
+    private fun maneuverText(s: NaviEngine.NaviState, remainM: Int, withLane: Boolean): String {
+        val act = SpeechScript.action(s.iconType)
+        if (act.isEmpty()) return ""
+        val d = SpeechScript.distance(remainM)
+        if (d.isEmpty()) return ""
+        val sb = StringBuilder(d)
+        // 路口序号：1 也要说。骑行时"第一个还是第二个口子"是最容易拐错的地方，
+        // 省略反而让「左转」变成一个没有锚点的动作。
+        // 环岛例外：环岛本身就是一个明确的点（"走第几个出口"才是它的序号），
+        // 说"第 1 个路口进入环岛"是病句。
+        val ord = s.maneuverOrdinal
+        if (ord in 1..9 && !SpeechScript.isRoundabout(s.iconType)) {
+            sb.append("，第 ").append(ord).append(" 个路口")
+        }
+        if (s.iconType == IconType.STRAIGHT) {
+            sb.append("直行")
+            // 内置语音包念不出任意路名，别拼进去 —— 整句匹配不到会被拆成碎片
+            val road = if (presetPack) "" else s.nextRoadName
+            if (SpeechScript.isUsableRoad(road) && road != s.currentRoadName) {
+                sb.append("进入").append(road)
+            }
+        } else {
+            sb.append(act)
+            val road = if (presetPack) "" else s.nextRoadName
+            if (SpeechScript.isUsableRoad(road)) sb.append("进入").append(road)
+        }
+        if (withLane) laneHint(s)?.let { sb.append("，").append(it) }
+        return sb.toString()
+    }
+
+    /** 临门一句：只说动作（环岛带上出口序号），不带距离/路名/车道 */
+    private fun closeText(s: NaviEngine.NaviState): String {
+        // 借叙事层同一套规则，保证「进入环岛，第 3 个出口」这类特例只有一份实现
+        val icon = s.iconType
+        if (icon == IconType.STRAIGHT) return getString(R.string.voice_straight_cross)
+        return SpeechScript.actionOnly(icon, "")
+    }
+
+    /**
+     * 车道级指引：「请走左侧车道」。
+     *
+     * 高德的做法是把车道建议**并进转向句**（`建议走左侧第二车道，排队较短`），
+     * 而不是单独再说一句 —— 两句之间隔一次合成，路口早就过去了。
+     * 所以这里只返回半句，由 [maneuverText] 拼接。
+     *
+     * 位置判定用**推荐车道在整排车道里的相对位置**：最左/最右/中间，
+     * 比数"第几条"更符合骑手抬头看一眼的实际感知（横屏侧栏只有 300dp）。
+     */
+    private fun laneHint(s: NaviEngine.NaviState): String? {
+        val lane = s.lane ?: return null
+        if (lane.count < 2) return null
+        // `usable` = 这条车道能不能通往下一段（SDK `frontLane` / `isRecommended`）。
+        // 连续几条都可走时取它们的**中心**：只说"左侧车道"就够了，
+        // 报"第 2 和第 3 条"既啰嗦，横屏侧栏也放不下。
+        var first = -1
+        var last = -1
+        for (i in 0 until lane.count) {
+            if (lane.isUsable(i)) {
+                if (first < 0) first = i
+                last = i
+            }
+        }
+        if (first < 0) return null
+        // 整排车道都能走 → 没有"该走哪条"的问题，别多嘴
+        if (first == 0 && last == lane.count - 1) return null
+        val center = (first + last) / 2
+        return when {
+            center * 2 < lane.count - 1 -> getString(R.string.lane_hint_left)
+            center * 2 > lane.count - 1 -> getString(R.string.lane_hint_right)
+            else -> getString(R.string.lane_hint_middle)
+        }
+    }
+
+    /**
+     * 电子眼 / 区间测速播报（导航 SDK 能力）。
+     *
+     * 官方播报文本里**不含**电子眼（那是 `updateCameraInfo` 独立回调），所以这块要自己念。
+     * 再加一层去重：同类型 + 同限速的电子眼 30 秒内只念一次 ——
+     * 一条路上连着三个测速头，不必每个都完整念一遍。
+     */
+    private fun announceCamera(s: NaviEngine.NaviState) {
+        val cam = s.camera ?: return
+        if (!s.running || s.arrived) return
+        if (cam.distanceM <= 0 || cam.distanceM > CAMERA_SPEAK_M) return
+        if (!com.motohud.ble.navi.CameraKind.worthSpeaking(cam.type)) return
+        val key = "${cam.type}|${cam.speedKmh}"
+        val now = System.currentTimeMillis()
+        if (now - (cameraSpokenAt[key] ?: 0L) < CAMERA_SPEAK_COOLDOWN_MS) return
+        cameraSpokenAt[key] = now
+        if (cameraSpokenAt.size > 32) {
+            cameraSpokenAt.entries.removeAll { now - it.value > 120_000L }
+        }
+        say(cameraSpeech(cam), cue = com.motohud.ble.navi.SpeechArbiter.APPROACH)
+    }
+
+    /**
+     * 电子眼的**播报**文本（跟界面文案分开）。
+     *
+     * 界面可以写"限速 60"给人看，但内置语音包是预录片段，念不出任意数字
+     * —— 只能念「前方 200 米测速摄像头，请注意车速」这种固定句式。
+     * 装了离线模型的链路可以随便说数字，仍用带限速的完整句。
+     */
+    private fun cameraSpeech(cam: com.motohud.ble.navi.CameraAlert): String {
+        val d = com.motohud.ble.navi.SpeechScript.span(cam.distanceM)
+        val name = getString(com.motohud.ble.navi.CameraKind.labelRes(cam.type))
+        return when {
+            !presetPack -> cameraText(cam)
+            cam.interval -> getString(R.string.camera_ahead_interval_preset, d, name)
+            else -> getString(R.string.camera_ahead_slow, d, name)
+        }
+    }
+
+    /**
+     * 服务区 / 沿途交通事件播报（两者都由导航 SDK 独有地提供）。
+     *
+     * 各念一次就够：交通事件常在几秒内反复回调同一份数据，
+     * 服务区更是几十公里只出现一次，重复念只会吵。
+     */
+    private fun announceSdkNotes(s: NaviEngine.NaviState) {
+        if (!s.running || s.arrived) return
+
+        val incident = s.incident
+        if (incident != null) {
+            val title = incident.title.trim()
+            if (title.isNotEmpty() && incidentSpoken.add(title)) {
+                // 内置包念不了自由文本（"XX路施工封闭"），换成固定提示；模型链路读原文
+                val text = if (presetPack) getString(R.string.navi_incident_generic) else title
+                say(text, cue = com.motohud.ble.navi.SpeechArbiter.TRAFFIC)
+            }
+        }
+
+        val area = s.serviceArea
+        if (area != null && area.distanceM in 1..SERVICE_AREA_SPEAK_M) {
+            if (serviceAreaSpoken.add(area.name)) {
+                // 服务区名是自由文本（"白鹤服务区"），内置包念不出，只念固定半句
+                val text = if (presetPack) {
+                    getString(R.string.navi_service_area_call_preset)
+                } else {
+                    getString(R.string.navi_service_area_call, area.name)
+                }
+                say(text, cue = com.motohud.ble.navi.SpeechArbiter.ROAD_FEATURE)
+            }
+        }
+    }
+
+    /** 电子眼的完整文案（播报与界面共用，保证听到的和看到的是同一句） */
+    private fun cameraText(cam: com.motohud.ble.navi.CameraAlert): String {
+        // 注意用 span() 而不是 distance()：后者自带「前方」前缀，
+        // 再拼上模板里的「前方」会变成"前方前方 200 米"。
+        val d = com.motohud.ble.navi.SpeechScript.span(cam.distanceM)
+        val name = getString(com.motohud.ble.navi.CameraKind.labelRes(cam.type))
+        return when {
+            cam.interval ->
+                getString(R.string.camera_ahead_interval, d, cam.speedKmh, cam.intervalRemainM)
+            cam.speedKmh > 0 -> getString(R.string.camera_ahead_limit, d, name, cam.speedKmh)
+            else -> getString(R.string.camera_ahead, d, name)
+        }
+    }
+
+    /**
+     * 限速徽章（红圈数字）。
+     *
+     * 只在数值变化时写控件 —— 这个函数每帧都会被调，TextView 反复 setText
+     * 会触发重新测量，横屏小屏上能看出抖动。
+     */
+    private fun bindLimitBadge(limit: Int) {
+        if (limit > 0) {
+            val text = limit.toString()
+            if (tvLimitBadge.text?.toString() != text) tvLimitBadge.text = text
+            if (tvLimitBadge.visibility != View.VISIBLE) tvLimitBadge.visibility = View.VISIBLE
+        } else if (tvLimitBadge.visibility != View.GONE) {
+            tvLimitBadge.visibility = View.GONE
+        }
+    }
+
+    /**
+     * 导航 SDK 新增能力的界面渲染：车道线 / 电子眼限速 / 路口放大图 / 重新规划提示。
+     *
+     * 这四样在接入导航 SDK 之前**一项都做不到**（搜索 SDK 不给这些数据），
+     * 所以单独收在一个函数里，方便一眼看出"这些是 SDK 带来的"。
+     */
+    private fun renderSdkAlerts(s: NaviEngine.NaviState) {
+        // ---- 车道线：几条车道、该走哪条（自绘箭头，可走的亮、不可走的灰）----
+        val lane = s.lane
+        if (lane != null && lane.count > 0) {
+            laneGuideView.setGuide(lane)
+            // 无障碍：把"左/直/右"逐车道念出来，读屏和车机文字兜底都靠它
+            laneGuideView.contentDescription = (0 until lane.count)
+                .map { getString(lane.describeRes(it)) }
+                .joinToString("，")
+            if (laneGuideView.visibility != View.VISIBLE) laneGuideView.visibility = View.VISIBLE
+        } else if (laneGuideView.visibility != View.GONE) {
+            laneGuideView.setGuide(null)
+            laneGuideView.visibility = View.GONE
+        }
+
+        // ---- 电子眼 / 限速 ----
+        val cam = s.camera
+        val showLimit = s.limitSpeedKmh > 0 && s.running
+        when {
+            cam != null && cam.distanceM in 1..CAMERA_SHOW_M -> {
+                llCameraWarn.visibility = View.VISIBLE
+                tvCameraWarn.text = if (cam.interval) {
+                    getString(R.string.camera_interval_remain, cam.intervalRemainM)
+                } else {
+                    cameraText(cam)
+                }
+                // 徽章优先用该电子眼的限速，没有就退回路段限速
+                val limit = cam.speedKmh.takeIf { it > 0 } ?: s.limitSpeedKmh
+                bindLimitBadge(limit)
+            }
+            // 没有电子眼但路段有限速：只显示限速，别空着
+            showLimit -> {
+                llCameraWarn.visibility = View.VISIBLE
+                tvCameraWarn.text = getString(R.string.navi_limit_only, s.limitSpeedKmh)
+                bindLimitBadge(s.limitSpeedKmh)
+            }
+            else -> {
+                if (llCameraWarn.visibility != View.GONE) llCameraWarn.visibility = View.GONE
+            }
+        }
+
+        // ---- 路口放大图（画中画里不显示，小窗放不下）----
+        val cross = s.cross
+        if (cross != null && cross.valid && !inPip) {
+            if (ivCrossImage.tag !== cross.bitmap) {
+                ivCrossImage.setImageBitmap(cross.bitmap)
+                ivCrossImage.tag = cross.bitmap
+            }
+            ivCrossImage.visibility = View.VISIBLE
+        } else if (ivCrossImage.visibility != View.GONE) {
+            ivCrossImage.setImageDrawable(null)
+            ivCrossImage.tag = null
+            ivCrossImage.visibility = View.GONE
+        }
+
+        /*
+         * 一行提示，三种来源按优先级取一个：
+         * ① 交通事件（封路/施工/管制）—— 影响是否还能走这条线，最要紧；
+         * ② 服务区 —— 高速/长途才出现；
+         * ③ 可切主辅路 —— 走错会绕远，骑行最常踩的坑。
+         * 同时显示会顶掉地图可视面积，路口前尤其忌讳。
+         */
+        val note = when {
+            s.incident != null -> getString(R.string.navi_incident, s.incident.title)
+            s.serviceArea != null && s.serviceArea.distanceM > 0 ->
+                getString(
+                    R.string.navi_service_area_ahead,
+                    s.serviceArea.name,
+                    CoordConverter.formatDistance(s.serviceArea.distanceM)
+                )
+            s.parallelRoad > 0 -> getString(R.string.navi_parallel_road)
+            else -> null
+        }
+        if (note != null) {
+            tvNaviNote.text = note
+            tvNaviNote.visibility = View.VISIBLE
+        } else if (tvNaviNote.visibility != View.GONE) {
+            tvNaviNote.visibility = View.GONE
+        }
     }
 
     private fun naviAgain() {
@@ -1980,6 +2412,7 @@ class GuidanceActivity : AppCompatActivity() {
         if (stopped) return
         stopped = true
         engine.onStepChanged = null
+        engine.onSdkSpeech = null
         engine.onRerouteRequest = null
         betterRouteHandler.removeCallbacks(betterRouteTask)
         hideBetterRouteCard()
@@ -2292,6 +2725,13 @@ class GuidanceActivity : AppCompatActivity() {
             rightMargin = 0
             turnBanner.layoutParams = this
         }
+        // 路口放大图：横屏侧栏只有 300dp 宽，104dp 会挤掉下方信息，
+        // 缩到 72dp —— 但**不隐藏**：骑行时这张图比多一行文字有用。
+        val crossSize = dp(if (landscape) 72 else 104)
+        ivCrossImage.layoutParams = ivCrossImage.layoutParams.apply {
+            width = crossSize
+            height = crossSize
+        }
         (tvSignalWarn.layoutParams as ViewGroup.MarginLayoutParams).apply {
             rightMargin = 0
             tvSignalWarn.layoutParams = this
@@ -2363,6 +2803,7 @@ class GuidanceActivity : AppCompatActivity() {
         if (!stopped) {
             stopped = true
             engine.onStepChanged = null
+            engine.onSdkSpeech = null
             engine.stop()
             com.motohud.ble.service.NaviForegroundService.stop(this)
             app.naviForwarder.forwardExit()
@@ -2398,11 +2839,47 @@ class GuidanceActivity : AppCompatActivity() {
 
         /** 途经点，`lat,lng;lat,lng`。中途追加途经点时要拿它一起重算 */
         const val EXTRA_WAYPOINTS = "extra_waypoints"
+
+        /**
+         * 模拟导航（`NaviType.EMULATOR`）：不读 GPS，SDK 按固定车速沿路线推演。
+         * 用于室内把「转向图标 / 播报 / 投屏帧」整条链路走一遍。
+         */
+        const val EXTRA_EMULATOR = "extra_emulator"
+
+        /** 模拟导航车速（km/h），市区路口的播报节奏接近真实骑行 */
+        const val EMULATOR_SPEED_KMH = 45
         private const val TAG_FORWARD = "guidance"
         private const val ACTION_PIP_STOP = "com.motohud.ble.action.PIP_STOP"
 
         /** 路口前自动放大的触发距离 */
         private const val AUTO_ZOOM_RANGE_M = 200
+
+        /** 电子眼进入该距离内才播报（再远念了没意义，还盖住转向提示） */
+        private const val CAMERA_SPEAK_M = 800
+
+        /** 电子眼进入该距离内才显示在界面上 */
+        private const val CAMERA_SHOW_M = 1200
+
+        /**
+         * 距路口该距离内把车道指引并进转向句（「…左转，请走左侧车道」）。
+         *
+         * 500 米：按 30km/h 约 60 秒，够听清也够变道；再远说"走哪条车道"没有行动意义。
+         */
+        private const val LANE_HINT_M = 500
+
+        /**
+         * 两次转向播报的最小间隔。
+         *
+         * 4 秒 ≈ 一句「前方 300 米，第 1 个路口右转进入四新路」的念完时间。
+         * 比这更密就会叠音（前一句还没念完后一句就抢进来），听起来就是"反复播报"。
+         */
+        private const val APPROACH_MIN_GAP_MS = 4_000L
+
+        /** 同类型电子眼的播报冷却，避免一条路上连续几个测速头反复念 */
+        private const val CAMERA_SPEAK_COOLDOWN_MS = 30_000L
+
+        /** 服务区在 3 公里内才播报（再早念了没有行动价值） */
+        private const val SERVICE_AREA_SPEAK_M = 3000
 
         /**
          * 坡度提示的最小间隔（90 秒）。

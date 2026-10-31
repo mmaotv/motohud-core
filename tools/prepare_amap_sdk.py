@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-准备高德 SDK（地图 / 搜索 / 定位）。
+准备高德 SDK（地图 / 导航 / 搜索 / 定位）。
 
 两条通道，默认走官网：
 
-  【官网合包 · 推荐】高德从 V11 起不再往 Maven 发版（`com.amap.api:3dmap` 的
-  latest 永远停在 10.0.600），想用新版只能下官网的整包。合包 jar 里地图、搜索、
-  定位三者已经是一体的，不需要再去重合并；so 在旁边按 abi 分目录。
+  【官网导航全包 · 推荐】高德从 V11 起不再往 Maven 发版（`com.amap.api:3dmap` 的
+  latest 永远停在 10.0.600），想用新版只能下官网的整包。导航全包 jar 里地图、导航、
+  搜索、定位四者已经是一体的，不需要再去重合并；so 在旁边按 abi 分目录。
 
-      python tools/prepare_amap_sdk.py                # 自动下载官网整包（约 120MB）
+  导航全包比纯地图包多出：`libAMapSDK_NAVI_*.so`（71MB/arm64）+ NUI 一整套
+  （libnui / libneonui_shared / libneonuijni / libopenssl / libc++_shared），
+  以及 assets 里的 navi / tts / ring / svg / horusAssets —— 这些是导航引擎和
+  官方语音播报的运行时资源，缺一个就会在运行期 UnsatisfiedLinkError 或播报无声。
+
+      python tools/prepare_amap_sdk.py                # 自动下载导航全包（约 236MB）
       python tools/prepare_amap_sdk.py --bundle DIR   # 用已经解压好的目录
       python tools/prepare_amap_sdk.py --bundle X.zip # 用官网下载的 zip
 
@@ -41,9 +46,14 @@ JNI = os.path.join(APP, "src", "main", "jniLibs")
 ASSETS = os.path.join(APP, "src", "main", "assets")
 CACHE = os.path.join(ROOT, "tools", ".cache")
 
-BUNDLE_URL = "https://a.amap.com/lbs/static/zip/AMap_Android_SDK_All.zip"
-# 整包里还套着一层，这个是地图+搜索+定位合包
-BUNDLE_INNER = "AMap3DMap_AMapSearch_AMapLocation.zip"
+# 官网「导航 SDK 一键下载」全包（外层 zip 套内层 zip）
+BUNDLE_URL = ("https://amappc.cn-hangzhou.oss-pub.aliyun-inc.com/lbs/static/zip/"
+              "AMap_Android_Navi_SDK_All.zip")
+# 两种内层合包名都认：带导航的（当前）与纯地图的（老包）
+BUNDLE_INNERS = (
+    "AMap3DMap_AMapNavi_AMapSearch_AMapLocation.zip",
+    "AMap3DMap_AMapSearch_AMapLocation.zip",
+)
 
 # Maven 通道（老路）。3dmap 的天花板就是 10.0.600，改不动。
 MAVEN_ARTIFACTS = [
@@ -127,22 +137,29 @@ def write_natives(natives):
                   % (abi, name, len(data) / 1048576.0, [hex(a) for a in aligns], flag))
 
 
-def write_assets(assets):
-    """assets: {相对路径: 字节}。先清旧 SDK 资源，再写新的，自有目录搬走再搬回。"""
+def write_assets(assets, reset=True):
+    """assets: {相对路径: 字节}。
+
+    reset=True 先清旧 SDK 资源再写新的（跨版本升级用）；
+    reset=False 只增量覆盖写入（同一个 SDK 版本补模块，例如给已有地图包补导航资源）。
+    后者也用于绕开某些环境对"批量删除"的拦截。
+    """
     keep_dir = os.path.join(APP, "src", "main", "_assets_keep")
-    if os.path.isdir(keep_dir):
-        shutil.rmtree(keep_dir)
-    os.makedirs(keep_dir)
     kept = []
-    for name in LOCAL_ASSET_DIRS:
-        src = os.path.join(ASSETS, name)
-        if os.path.isdir(src):
-            shutil.copytree(src, os.path.join(keep_dir, name))
-            kept.append(name)
+    if reset:
+        # 只有跨版本重置才需要"搬走自有目录再搬回"；增量模式下它们原地不动
+        if os.path.isdir(keep_dir):
+            shutil.rmtree(keep_dir)
+        os.makedirs(keep_dir)
+        for name in LOCAL_ASSET_DIRS:
+            src = os.path.join(ASSETS, name)
+            if os.path.isdir(src):
+                shutil.copytree(src, os.path.join(keep_dir, name))
+                kept.append(name)
 
     removed = 0
     failed = []
-    if os.path.isdir(ASSETS):
+    if reset and os.path.isdir(ASSETS):
         for child in os.listdir(ASSETS):
             if child in LOCAL_ASSET_DIRS:
                 continue
@@ -169,9 +186,11 @@ def write_assets(assets):
         if os.path.isdir(dst):
             shutil.rmtree(dst)
         shutil.move(os.path.join(keep_dir, name), dst)
-    shutil.rmtree(keep_dir)
-    print("assets -> 清掉旧 %d 项，写入 %d 个文件，保留 %s"
-          % (removed, len(assets), sorted(kept) or "无"))
+    if reset and os.path.isdir(keep_dir):
+        shutil.rmtree(keep_dir)
+    print("assets -> %s %d 项，写入 %d 个文件，保留 %s"
+          % ("清掉旧" if reset else "增量模式，跳过清理", removed, len(assets),
+             sorted(kept) or "（原地未动）"))
 
 
 # ---------------------------------------------------------------- 官网合包通道
@@ -197,10 +216,12 @@ def prepare_from_bundle(bundle):
             shutil.rmtree(work)
         os.makedirs(work)
         with zipfile.ZipFile(bundle) as z:
-            if BUNDLE_INNER in z.namelist():
-                inner = os.path.join(CACHE, BUNDLE_INNER)
+            names = z.namelist()
+            inner_name = next((n for n in BUNDLE_INNERS if n in names), None)
+            if inner_name:
+                inner = os.path.join(CACHE, inner_name)
                 with open(inner, "wb") as f:
-                    f.write(z.read(BUNDLE_INNER))
+                    f.write(z.read(inner_name))
                 with zipfile.ZipFile(inner) as z2:
                     z2.extractall(work)
             else:
@@ -211,11 +232,18 @@ def prepare_from_bundle(bundle):
     if not jars:
         sys.exit("%s 下找不到 AMap3DMap_*.jar" % bundle)
     jar_name = jars[0]
-    m = re.search(r"AMap3DMap_([0-9.]+)_AMapSearch_([0-9.]+)_AMapLocation_([0-9.]+)", jar_name)
+    m = re.search(
+        r"AMap3DMap_([0-9.]+)(?:_AMapNavi_([0-9.]+))?_AMapSearch_([0-9.]+)_AMapLocation_([0-9.]+)",
+        jar_name)
     if not m:
         sys.exit("无法从文件名识别版本: " + jar_name)
-    map_ver, search_ver, loc_ver = m.groups()
-    print("高德 SDK：3D地图 %s / 搜索 %s / 定位 %s（官网合包）" % (map_ver, search_ver, loc_ver))
+    map_ver, navi_ver, search_ver, loc_ver = m.groups()
+    if navi_ver:
+        print("高德 SDK：3D地图 %s / 导航 %s / 搜索 %s / 定位 %s（导航全包）"
+              % (map_ver, navi_ver, search_ver, loc_ver))
+    else:
+        print("高德 SDK：3D地图 %s / 搜索 %s / 定位 %s（纯地图包，不含导航）"
+              % (map_ver, search_ver, loc_ver))
 
     classes, assets, natives = {}, {}, {}
     with zipfile.ZipFile(os.path.join(bundle, jar_name)) as z:
@@ -273,6 +301,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bundle", help="官网合包（zip 或已解压目录）；不给则自动下载整包")
     ap.add_argument("--maven", action="store_true", help="走 Maven 通道（仅能拿到 10.0.600）")
+    ap.add_argument("--keep-assets", action="store_true",
+                    help="assets 增量写入、不清旧（同版本补模块时用，也给批量删除受限的环境兜底）")
     ap.add_argument("--mirror", default="https://maven.aliyun.com/repository/public")
     args = ap.parse_args()
 
@@ -286,7 +316,7 @@ def main():
     jar = os.path.join(LIBS, "amap-sdk-%s.jar" % map_ver)
     write_jar(jar, classes)
     drop_old_jars(jar)
-    write_assets(assets)
+    write_assets(assets, reset=not args.keep_assets)
     write_natives(natives)
 
     print("\n完成。app/build.gradle.kts 里的 jar 名应为 libs/%s" % os.path.basename(jar))

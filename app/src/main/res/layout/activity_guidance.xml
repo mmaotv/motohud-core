@@ -167,11 +167,17 @@
             android:paddingBottom="12dp"
             android:visibility="gone">
 
+            <!--
+              转向图标放大到 88dp 并靠左：横屏侧栏只有 300dp 宽，原来 52dp 的图标
+              在车机视角下（人眼到屏 40~60cm）几乎看不清是左转还是左前方。
+              高德的导航卡也是"左边一个大箭头、右边一列文字"的结构。
+            -->
             <ImageView
                 android:id="@+id/iv_turn_icon"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
+                android:layout_width="88dp"
+                android:layout_height="88dp"
                 android:contentDescription="@string/hud_turn_icon"
+                android:scaleType="fitCenter"
                 android:src="@drawable/ic_turn_straight"
                 app:tint="@color/accent" />
 
@@ -182,15 +188,30 @@
                 android:layout_weight="1"
                 android:orientation="vertical">
 
+                <!-- 距离放在最上面、跟图标同一视觉重心，和高德一致：先说还有多远 -->
+                <TextView
+                    android:id="@+id/tv_turn_distance"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/inter"
+                    android:maxLines="1"
+                    android:textColor="@color/accent"
+                    android:textSize="30sp"
+                    android:textStyle="bold"
+                    app:autoSizeMaxTextSize="30sp"
+                    app:autoSizeMinTextSize="18sp"
+                    app:autoSizeTextType="uniform" />
+
                 <TextView
                     android:id="@+id/tv_turn_instruction"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
                     android:ellipsize="end"
                     android:fontFamily="@font/inter"
                     android:maxLines="2"
                     android:textColor="@color/text_primary"
-                    android:textSize="18sp"
+                    android:textSize="17sp"
                     android:textStyle="bold" />
 
                 <TextView
@@ -217,23 +238,100 @@
                     android:textSize="11sp"
                     android:visibility="gone" />
             </LinearLayout>
+        </LinearLayout>
+
+        <!-- 车道线指引（导航 SDK showLaneInfo）：几条车道 + 该走哪条 -->
+        <!--
+          车道线（导航 SDK showLaneInfo）：自绘箭头。SDK 给的是"每车道动作码 + 可用性"，
+          不给箭头图；官方 AMapNaviView 内部渲染不对外，所以按同一套编码自绘。
+        -->
+        <com.motohud.ble.ui.navi.LaneGuideView
+            android:id="@+id/ll_lane_guide"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_navi_panel"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:visibility="gone" />
+
+        <!--
+          电子眼 / 限速（导航 SDK updateCameraInfo）：
+          左边是限速徽章（红圈白底数字，和高德一样一眼可辨），右边是文字提示。
+        -->
+        <LinearLayout
+            android:id="@+id/ll_camera_warn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_navi_panel"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="8dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone">
 
             <TextView
-                android:id="@+id/tv_turn_distance"
+                android:id="@+id/tv_limit_badge"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:background="@drawable/bg_limit_badge"
+                android:fontFamily="@font/inter"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:textColor="@color/red"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tv_camera_warn"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:fontFamily="@font/inter"
-                android:maxLines="1"
-                android:minWidth="72dp"
-                android:gravity="end"
-                android:textColor="@color/accent"
-                android:textSize="26sp"
-                android:textStyle="bold"
-                app:autoSizeMaxTextSize="26sp"
-                app:autoSizeMinTextSize="15sp"
-                app:autoSizeTextType="uniform" />
+                android:textColor="@color/orange"
+                android:textSize="12sp"
+                android:textStyle="bold" />
         </LinearLayout>
+
+        <!-- 路口放大图（导航 SDK showCross）：SDK 直接给位图，setImageBitmap 即可 -->
+        <ImageView
+            android:id="@+id/iv_cross_image"
+            android:layout_width="104dp"
+            android:layout_height="104dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_navi_panel"
+            android:contentDescription="@string/hud_turn_icon"
+            android:padding="4dp"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+
+        <!--
+          SDK 提示条：服务区 / 沿途交通事件（封路·施工）/ 可切主辅路。
+          这三样都来自导航 SDK（onServiceAreaUpdate / onNaviRouteNotify / notifyParallelRoad），
+          优先级一次只显示一条，避免路口前同时冒三行字盖住地图。
+        -->
+        <TextView
+            android:id="@+id/tv_navi_note"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_navi_panel"
+            android:fontFamily="@font/inter"
+            android:paddingStart="12dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="6dp"
+            android:textColor="@color/accent"
+            android:textSize="12sp"
+            android:visibility="gone" />
 
         <!-- 信号弱提示 -->
         <TextView

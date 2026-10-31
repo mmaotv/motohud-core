@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  限速徽章：红圈 + 白底 + 数字，和真实限速牌/高德导航的限速标识一致。
+  用 shape 而不是图片，是为了不随密度分桶、任意尺寸都清晰。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#FFFFFFFF" />
+    <stroke
+        android:width="3dp"
+        android:color="@color/red" />
+</shape>

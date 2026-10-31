@@ -784,4 +784,91 @@
     <string name="offline_map_err_service">离线地图下载被高德服务端拒绝：当前 Key 未开通离线地图服务。离线地图不在免费基础服务列表（地图/定位/导航/室内地图/室内定位/猎鹰）中，需向高德单独申请开通并更新 Key 后才能下载。</string>
     <string name="offline_map_err_start">离线地图下载启动失败，请稍后重试。</string>
     <string name="offline_map_err_unknown">离线地图下载失败（错误码 %1$d），请重试。</string>
+
+    <!-- ==================== 导航 SDK 新增能力（电子眼/限速/车道线/路口放大） ==================== -->
+
+    <!-- 电子眼类型：文案与高德 CameraType 一一对应，见 CameraKind.labelRes -->
+    <string name="camera_speed">测速摄像头</string>
+    <string name="camera_surveillance">监控摄像头</string>
+    <string name="camera_traffic_light">闯红灯拍照</string>
+    <string name="camera_break_rule">违章拍照</string>
+    <string name="camera_bus_way">占用公交道拍照</string>
+    <string name="camera_emergency">占用应急车道拍照</string>
+    <string name="camera_bicycle">非机动车道拍照</string>
+    <string name="camera_interval_start">区间测速起点</string>
+    <string name="camera_interval_end">区间测速终点</string>
+    <string name="camera_flow_speed">车流量检测</string>
+    <string name="camera_etc">ETC 计费</string>
+    <string name="camera_generic">电子眼</string>
+
+    <!-- 播报/提示：%1$s=距离（已含「200 米 / 1 公里」，不带「前方」），%2$s=电子眼类型 -->
+    <string name="camera_ahead">前方 %1$s%2$s</string>
+    <string name="camera_ahead_limit">前方 %1$s%2$s，限速%3$d</string>
+    <string name="camera_ahead_interval">前方 %1$s进入区间测速，限速%2$d，区间剩余%3$d米</string>
+    <string name="camera_interval_remain">区间剩余%1$d米</string>
+
+    <!-- 内置语音包（预录片段，念不出任意数字）专用的固定句式；装离线模型时走带数字的版本 -->
+    <string name="camera_ahead_slow">前方 %1$s%2$s，请注意车速</string>
+    <string name="camera_ahead_interval_preset">前方 %1$s进入区间测速，请注意车速</string>
+    <string name="navi_incident_generic">前方路况异常，请注意</string>
+    <string name="navi_limit_only">限速 %1$d</string>
+
+    <!-- 车道线：单字/两字，尽量短，横屏侧栏放得下 -->
+    <string name="lane_left">左</string>
+    <string name="lane_right">右</string>
+    <string name="lane_straight">直</string>
+    <string name="lane_left_right">左/右</string>
+    <string name="lane_bus">公交专用道</string>
+    <string name="lane_uturn">掉头</string>
+    <string name="lane_left_front">左前</string>
+    <string name="lane_right_front">右前</string>
+    <string name="lane_left_back">左后</string>
+    <string name="lane_right_back">右后</string>
+    <string name="lane_curve">弯</string>
+    <string name="lane_left_left">左左</string>
+    <string name="lane_right_right">右右</string>
+
+    <!-- 其他 SDK 提示 -->
+    <string name="navi_service_area">服务区：%1$s</string>
+    <string name="navi_service_area_call">前方有服务区 %1$s</string>
+    <string name="navi_service_area_call_preset">前方有服务区</string>
+    <string name="navi_rerouting">正在重新规划路线…</string>
+    <string name="navi_remain_lights">前方红绿灯 %1$d 个</string>
+    <string name="navi_incident">前方路况：%1$s</string>
+    <string name="navi_service_area_ahead">前方服务区 %1$s · %2$s</string>
+    <string name="navi_parallel_road">可切主辅路 · 长按转向提示切换</string>
+    <string name="navi_parallel_switched">已切换主辅路</string>
+    <string name="navi_parallel_unavailable">当前没有可切换的主辅路</string>
+    <string name="navi_congestion_ahead">前方拥堵 %1$s</string>
+
+    <!-- ============ 界面通用文案（原先硬编码在 Kotlin 里，国际化的第一批） ============ -->
+    <string name="common_unknown">未知</string>
+    <string name="common_free">免费</string>
+    <string name="dest_default">目的地</string>
+
+    <!-- 选路页 -->
+    <string name="route_badge_recommended">推荐</string>
+    <string name="route_badge_fastest">最快</string>
+    <string name="route_badge_shortest">最短</string>
+    <string name="route_badge_fewer_lights">灯少</string>
+    <string name="route_badge_avoid_congestion">避拥堵</string>
+    <string name="route_badge_backup">备选 %1$d</string>
+    <string name="route_scheme">方案</string>
+    <string name="route_scheme_n">方案 %1$d</string>
+    <string name="route_waypoint_count">途经 %1$d 点</string>
+    <string name="route_avoid_zone_count">避开 %1$d 区</string>
+    <string name="route_lights_count">红绿灯 %1$d 个</string>
+    <string name="route_toll_suffix"> · 过路费 </string>
+    <string name="route_no_toll_suffix"> · 无过路费</string>
+    <string name="route_restricted_suffix"> · ⚠ 经限行区</string>
+    <string name="route_fare">%.0f 元</string>
+
+    <!-- 车道级指引：并进转向句里说（"前方 300 米，第 2 个路口左转，请走左侧车道"） -->
+    <string name="lane_hint_left">请走左侧车道</string>
+    <string name="lane_hint_right">请走右侧车道</string>
+    <string name="lane_hint_middle">请走中间车道</string>
+    <string name="lane_hint_left_mid">请走中间偏左车道</string>
+    <string name="lane_hint_right_mid">请走中间偏右车道</string>
+    <!-- 直行路口的临门一句（只说动作，不带距离） -->
+    <string name="voice_straight_cross">路口直行</string>
 </resources>

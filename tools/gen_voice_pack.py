@@ -125,6 +125,41 @@ BEHAVIOR = [
     "转弯过快，注意车速",
 ]
 
+# ---- 以下三类只有**导航 SDK** 才给（搜索 SDK 没有），接入 AMapNavi 后新增 ----
+
+# 电子眼类型名（与 res/values/strings.xml 的 camera_* 逐字一致）。
+# 内置包念不出任意限速数字，播报走固定句式：
+#   "前方 X 米<类型>，请注意车速"  → 片段：前方 X 米 + 类型 + 请注意车速
+# 界面上的"限速 60"只给人看，不进语音。
+CAMERA_LABELS = [
+    "测速摄像头", "监控摄像头", "闯红灯拍照", "违章拍照",
+    "占用公交道拍照", "占用应急车道拍照", "非机动车道拍照",
+    "区间测速起点", "区间测速终点", "车流量检测", "ETC 计费", "电子眼",
+]
+# 电子眼播报的固定尾句 + 区间测速句式
+CAMERA_NOTICES = [
+    "请注意车速",
+    "进入区间测速",
+]
+
+# 服务区 / 沿途交通事件（onServiceAreaUpdate / onNaviRouteNotify）。
+# 事件正文是自由文本（"XX路施工封闭"），内置包一律念固定句，模型链路才读原文。
+SDK_NOTICES = [
+    "前方有服务区",
+    "前方路况异常，请注意",
+]
+
+# 车道级指引（SDK showLaneInfo → 并进转向句）。
+# 与 res/values/strings.xml 的 lane_hint_* 逐字一致 —— 文本一变这里必须同步，
+# 否则语音包整句匹配不到，只能拆碎片，听感立刻变差。
+LANE_HINTS = [
+    "请走左侧车道",
+    "请走右侧车道",
+    "请走中间车道",
+    "请走中间偏左车道",
+    "请走中间偏右车道",
+]
+
 
 def build_phrases():
     phrases, seen = [], set()
@@ -152,8 +187,18 @@ def build_phrases():
         add(n)
     for n in BEHAVIOR:
         add(n)
+    for n in CAMERA_LABELS:
+        add(n)
+    for n in CAMERA_NOTICES:
+        add(n)
+    for n in SDK_NOTICES:
+        add(n)
     add("路口直行")
-    for n in range(2, 10):
+    for n in LANE_HINTS:
+        add(n)
+    # 路口序号 1~9：播报句是「前方 300 米，第 1 个路口左转」，
+    # 1 也要有 —— 骑行时说清"第一个还是第二个口子"才是关键
+    for n in range(1, 10):
         add(f"第 {n} 个路口")
 
     # 2) 常用整句：距离 × 常用动作

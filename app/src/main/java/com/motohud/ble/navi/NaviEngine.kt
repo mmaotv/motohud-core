@@ -75,7 +75,56 @@ interface NaviEngine {
          */
         val gpsAccuracyStatus: Int = -1,
         /** 前方剩余路段上的拥堵里程（米，TMC 状态≥3 拥堵/严重拥堵累加） */
-        val congestionAheadM: Float = 0f
+        val congestionAheadM: Float = 0f,
+
+        // ---------- 以下字段由导航 SDK（AMapNavi）直接提供，自研引擎拿不到 ----------
+
+        /** 当前所在道路名（SDK `NaviInfo.currentRoadName`） */
+        val currentRoadName: String = "",
+        /**
+         * 转向后将进入的道路名（SDK `NaviInfo.nextRoadName`）。
+         *
+         * 播报"右转进入望京路"靠它 —— 比从引导语里正则抠路名可靠得多。
+         */
+        val nextRoadName: String = "",
+        /**
+         * 这次转向是「一串连续路口」里的第几个（1 起；1 = 就是下一个路口）。
+         *
+         * 骑行最容易拐错的地方不是单个路口，而是**连着几十米一个路口**的商业街：
+         * 只说「前方 300 米左转」，第一个口子就在眼前时人已经拐了，其实是第二个。
+         * 高德原文里就带这条信息（「在第 2 个路口左转」），导航 SDK 不给文本，
+         * 我们按引导点间距自己推（见 `AmapNaviEngine.ordinalAt`）。
+         */
+        val maneuverOrdinal: Int = 1,
+        /** 再下一个转向动作的图标（SDK 引导点 `curStep + 1`；0 = 未知） */
+        val nextManeuverIcon: Int = 0,
+        /** 再下一个转向后进入的路名（同上；空 = 未知） */
+        val nextManeuverRoad: String = "",
+        /** 剩余红绿灯数（SDK `NaviInfo.routeRemainLightCount`；-1 = 未知） */
+        val remainLights: Int = -1,
+        /** 当前路段限速 km/h（0 = 未知）；来自电子眼下发的限速或路线限速信息 */
+        val limitSpeedKmh: Int = 0,
+        /** 正在接近的电子眼（null = 无） */
+        val camera: CameraAlert? = null,
+        /** 车道线指引（null = 无） */
+        val lane: LaneGuide? = null,
+        /** 路口放大图（null = 无） */
+        val cross: CrossImage? = null,
+        /** 前方服务区（null = 无） */
+        val serviceArea: ServiceAreaAlert? = null,
+        /** 沿途交通事件（null = 无） */
+        val incident: RouteIncident? = null,
+        /**
+         * 平行路（主/辅路）可切换标志，0 = 无可切换。
+         *
+         * SDK `notifyParallelRoad(type)` 给的非 0 值；仅在此时「切主辅路」才有意义
+         * —— 高架下的辅路、主路旁的辅道，走错会绕一大圈，这是骑行最常踩的坑。
+         */
+        val parallelRoad: Int = 0,
+        /** SDK 正在重新规划（偏航 / 拥堵触发） */
+        val rerouting: Boolean = false,
+        /** 数据源是否为高德导航 SDK（false = 演示/兜底模式） */
+        val sdkDriven: Boolean = false
     )
 
     val state: StateFlow<NaviState>
@@ -102,8 +151,37 @@ interface NaviEngine {
 
     fun release()
 
+    /**
+     * 模拟导航（不读 GPS，按设定车速沿路线推演）。
+     *
+     * 导航 SDK 原生支持（`startNavi(NaviType.EMULATOR)` + `setEmulatorNaviSpeed`），
+     * 用来在室内验证播报/投屏/转向图标，不必实车跑一趟。
+     */
+    fun startEmulator(speedKmh: Int = 60) {}
+
+    /** 暂停导航（保留路线，不再推进） */
+    fun pause() {}
+
+    /** 恢复导航 */
+    fun resume() {}
+
+    /** 切换主辅路 / 平行路（SDK `switchParallelRoad`）；不在导航中时无效果 */
+    fun switchParallelRoad() {}
+
     /** 步骤切换回调（TTS 播报） */
     var onStepChanged: ((String) -> Unit)?
+
+    /**
+     * 导航 SDK 给出的**官方播报文本**（`AMapNaviListener.onGetNavigationText`）。
+     *
+     * SDK 模式下播报以它为准：什么时候报 1 公里、什么时候报到路口、环岛第几个出口，
+     * 都是高德按实时车速和路况调好的，比自研的固定阈值准。
+     * 自研那套三档阈值（1100/550/临门）在 SDK 模式下会停用 —— 两套同时跑会重复播报。
+     *
+     * 仍由本 App 的 TTS 发声（`setUseInnerVoice(false)`），所以离线语音包、
+     * 语速/音量设置、播报仲裁全都照旧生效。
+     */
+    var onSdkSpeech: ((String) -> Unit)?
 
     /** 偏航回调：开错路、持续偏离路线时触发，携带当前坐标供上层重新规划 */
     var onRerouteRequest: ((Double, Double) -> Unit)?
@@ -180,7 +258,16 @@ data class RouteData(
      */
     val restriction: Int = 0,
     /** 收费路段里程（米） */
-    val tollDistanceM: Float = 0f
+    val tollDistanceM: Float = 0f,
+    /**
+     * 该方案在**导航 SDK** 里的 routeId（`AMapNavi.calculateDriveRoute` 回调的
+     * `onCalculateRouteSuccess(int[] routeIds)` 里的值）。
+     *
+     * 用户在选路页选中的方案，必须靠这个 id 通过 `selectRouteId` 告诉导航引擎走哪条，
+     * 否则 SDK 会用默认方案 —— 表现为"选了避开拥堵，导航却走了原来那条"。
+     * -1 = 不是导航 SDK 算出来的（例如缓存里的老数据），进导航时按起终点重算。
+     */
+    val sdkRouteId: Int = -1
 )
 
 /** 高德 IconType 常用值（com.amap.api.navi.enums.IconType） */
@@ -226,6 +313,9 @@ class RouteNaviEngine(
     override val state: StateFlow<NaviEngine.NaviState> = _state.asStateFlow()
 
     override var onStepChanged: ((String) -> Unit)? = null
+
+    /** 自研引擎没有官方播报文本，恒为 null（SDK 模式下才会有值） */
+    override var onSdkSpeech: ((String) -> Unit)? = null
 
     override var onRerouteRequest: ((Double, Double) -> Unit)? = null
 

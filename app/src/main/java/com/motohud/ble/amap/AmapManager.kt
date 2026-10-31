@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.amap.api.location.AMapLocationClient
 import com.amap.api.maps.MapsInitializer
+import com.amap.api.navi.AMapNavi
+import com.amap.api.navi.NaviSetting
 import com.amap.api.services.core.ServiceSettings
 import com.motohud.ble.BuildConfig
 
@@ -129,6 +131,32 @@ object AmapManager {
         return true
     }
 
+    /**
+     * 导航 SDK 初始化（创建 `AMapNavi` 引擎前调用）。
+     *
+     * 导航 SDK 的隐私合规入口在 [NaviSetting]（不是 `MapsInitializer`），
+     * Key 走 `AMapNavi.setApiKey` 静态方法 —— 两者都必须在 `AMapNavi.getInstance` 之前完成，
+     * 否则引擎会以"未授权"状态起来，表现是 `onInitNaviFailure` + 算路一直失败。
+     */
+    fun initNavi(context: Context): Boolean {
+        if (!isPrivacyAgreed(context)) return false
+        val key = apiKey(context)
+        if (key.isEmpty()) return false
+        runCatching {
+            NaviSetting.updatePrivacyShow(context, true, true)
+            NaviSetting.updatePrivacyAgree(context, true)
+            AMapNavi.setApiKey(context, key)
+            // 导航走的是高频长连接（路径下发/实时引导），隧道与弱网下 DNS 抖动的
+            // 影响比地图瓦片更大，跟着地图侧一起开 HTTPDNS。
+            AMapNavi.setHttpDnsEnabled(true)
+        }
+        return true
+    }
+
+    /** 导航 SDK 当前是否可用（Key + 隐私都满足） */
+    fun canUseNavi(context: Context): Boolean =
+        isPrivacyAgreed(context) && apiKey(context).isNotEmpty()
+
     /** Key 变更后同步到各 SDK */
     private fun applyKey(context: Context) {
         if (!isPrivacyAgreed(context)) return
@@ -139,6 +167,8 @@ object AmapManager {
             MapsInitializer.setHttpDnsEnabled(true)
             ServiceSettings.getInstance().setApiKey(key)
             AMapLocationClient.setApiKey(key)
+            AMapNavi.setApiKey(context, key)
+            AMapNavi.setHttpDnsEnabled(true)
         }
     }
 
@@ -150,6 +180,8 @@ object AmapManager {
             ServiceSettings.updatePrivacyAgree(context, true)
             AMapLocationClient.updatePrivacyShow(context, true, true)
             AMapLocationClient.updatePrivacyAgree(context, true)
+            NaviSetting.updatePrivacyShow(context, true, true)
+            NaviSetting.updatePrivacyAgree(context, true)
         }
     }
 }

@@ -23,6 +23,7 @@ import com.motohud.ble.amap.AmapCache
 import com.motohud.ble.amap.AmapLocator
 import com.motohud.ble.amap.AmapManager
 import com.motohud.ble.amap.AmapRepo
+import com.motohud.ble.amap.NaviPlanner
 import com.motohud.ble.amap.RoutePlanResult
 import com.motohud.ble.amap.RouteQueryOptions
 import com.motohud.ble.data.AvoidZoneStore
@@ -51,7 +52,7 @@ class RouteSelectActivity : AppCompatActivity() {
     private lateinit var empty: TextView
     private lateinit var prefValue: TextView
 
-    private var destName = "目的地"
+    private var destName = ""
     private var destLat = 0.0
     private var destLng = 0.0
     private var startLat = 0.0
@@ -159,7 +160,7 @@ class RouteSelectActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_route_select)
 
-        destName = intent.getStringExtra(EXTRA_NAME).orEmpty().ifBlank { "目的地" }
+        destName = intent.getStringExtra(EXTRA_NAME).orEmpty().ifBlank { getString(R.string.dest_default) }
         destLat = intent.getDoubleExtra(EXTRA_LAT, 0.0)
         destLng = intent.getDoubleExtra(EXTRA_LNG, 0.0)
         startLat = intent.getDoubleExtra(EXTRA_FROM_LAT, 0.0)
@@ -183,6 +184,7 @@ class RouteSelectActivity : AppCompatActivity() {
         loading = findViewById(R.id.rs_loading)
         empty = findViewById(R.id.rs_empty)
         adapter = RouteOptionAdapter(
+            context = this,
             onClick = { index ->
                 selected = index
                 adapter.setSelected(index)
@@ -202,6 +204,17 @@ class RouteSelectActivity : AppCompatActivity() {
         findViewById<View>(R.id.rs_pref_row).setOnClickListener { showPrefs() }
         findViewById<View>(R.id.rs_origin_row).setOnClickListener { showOriginPicker() }
         findViewById<View>(R.id.rs_start).setOnClickListener { startNavi() }
+        /*
+         * 长按「开始导航」= 模拟导航（不读 GPS，按 60km/h 沿路线推演）。
+         *
+         * 这是导航 SDK 的原生能力（`startNavi(NaviType.EMULATOR)` + `setEmulatorNaviSpeed`），
+         * 用来在室内把「转向图标 / 播报 / 投屏帧」整条链路走一遍，不必实车跑一趟。
+         * 做成隐藏手势而不是显式按钮：正常用户不需要它，多一个按钮只会增加误触。
+         */
+        findViewById<View>(R.id.rs_start).setOnLongClickListener {
+            startNavi(emulator = true)
+            true
+        }
         findViewById<View>(R.id.rs_other_map).setOnClickListener { showThirdPartyMaps() }
         findViewById<View>(R.id.rs_add_waypoint).setOnClickListener { addWaypoint() }
         findViewById<View>(R.id.rs_along_row).setOnClickListener { openAlongRouteSearch() }
@@ -705,8 +718,10 @@ class RouteSelectActivity : AppCompatActivity() {
                 options.waypoints, options.avoidPolygons, options.excludeMotorway,
                 options.avoidFerry, options.carType
             )
+            // 缓存 key 里带 "navi" 标记：接入导航 SDK 后算路算法变了，
+            // 老的搜索 SDK 缓存（没有 sdkRouteId）不能再命中，否则"选了方案进导航又重算"。
             val cacheKey = AmapCache.routeKey(
-                fromLat, fromLng, destLat, destLng, strategy, LIMIT, optionsTag
+                fromLat, fromLng, destLat, destLng, strategy, LIMIT, "$optionsTag|navi"
             )
             val cached = AmapCache.get<RoutePlanResult>(cacheKey, AmapCache.TTL_ROUTE_MS)
             if (cached != null) {
@@ -715,14 +730,33 @@ class RouteSelectActivity : AppCompatActivity() {
                 return@launch
             }
 
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    AmapRepo(this@RouteSelectActivity)
-                        .planCandidates(
-                            fromLat, fromLng, destLat, destLng, strategy, summary, LIMIT, options
-                        )
-                }
+            // 首选：导航 SDK 算路（与导航页同一个引擎，选中的方案就是走的那条）
+            val viaSdk = runCatching {
+                NaviPlanner.planCandidates(
+                    context = this@RouteSelectActivity,
+                    fromLat = fromLat,
+                    fromLng = fromLng,
+                    toLat = destLat,
+                    toLng = destLng,
+                    waypoints = options.waypoints,
+                    strategy = NaviPrefs.naviSdkStrategy(),
+                    modeLabel = summary
+                )
             }.getOrNull()
+
+            // 兜底：导航 SDK 不可用（无 Key / 未授权 / 算路失败）时才回搜索 SDK
+            val result = if (viaSdk is RoutePlanResult.Many || viaSdk is RoutePlanResult.Success) {
+                viaSdk
+            } else {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        AmapRepo(this@RouteSelectActivity)
+                            .planCandidates(
+                                fromLat, fromLng, destLat, destLng, strategy, summary, LIMIT, options
+                            )
+                    }
+                }.getOrNull() ?: viaSdk
+            }
 
             // 只有算成功了才进缓存：失败/错误码不缓存，避免一次抖动被记十分钟
             if (result is RoutePlanResult.Many) AmapCache.put(cacheKey, result)
@@ -740,8 +774,8 @@ class RouteSelectActivity : AppCompatActivity() {
      */
     private fun routeOptionsSummary(): String {
         val parts = mutableListOf<String>()
-        if (waypoints.isNotEmpty()) parts += "途经 ${waypoints.size} 点"
-        if (avoidZoneCount > 0) parts += "避开 $avoidZoneCount 区"
+        if (waypoints.isNotEmpty()) parts += getString(R.string.route_waypoint_count, waypoints.size)
+        if (avoidZoneCount > 0) parts += getString(R.string.route_avoid_zone_count, avoidZoneCount)
         return parts.joinToString(" · ")
     }
 
@@ -824,7 +858,7 @@ class RouteSelectActivity : AppCompatActivity() {
         btn.alpha = if (routes.isNotEmpty()) 1f else 0.5f
     }
 
-    private fun startNavi() {
+    private fun startNavi(emulator: Boolean = false) {
         val r = routes.getOrNull(selected) ?: return
         RouteHandoff.put(destName, destLat, destLng, r)
         startActivity(
@@ -834,6 +868,7 @@ class RouteSelectActivity : AppCompatActivity() {
                 putExtra(GuidanceActivity.EXTRA_LNG, destLng)
                 putExtra(GuidanceActivity.EXTRA_FROM_LAT, startLat)
                 putExtra(GuidanceActivity.EXTRA_FROM_LNG, startLng)
+                putExtra(GuidanceActivity.EXTRA_EMULATOR, emulator)
                 // 途经点要带过去：导航中途再追加途经点时，必须拿原有的整串一起重算，
                 // 否则"加一个点"会把之前设的途经点全丢了。
                 putExtra(
@@ -892,6 +927,7 @@ class RouteSelectActivity : AppCompatActivity() {
 
 /** 候选路线列表 */
 private class RouteOptionAdapter(
+    private val context: android.content.Context,
     private val onClick: (Int) -> Unit
 ) : RecyclerView.Adapter<RouteOptionAdapter.VH>() {
 
@@ -921,16 +957,16 @@ private class RouteOptionAdapter(
     private fun buildBadges(list: List<RouteData>): List<String> {
         if (list.isEmpty()) return emptyList()
         val distinct = list.map { it.label }.distinct().size
-        if (distinct > 1) return list.map { it.label.ifBlank { "方案" } }
+        if (distinct > 1) return list.map { it.label.ifBlank { context.getString(R.string.route_scheme) } }
         val fastest = list.indices.minByOrNull { list[it].durationS } ?: 0
         val shortest = list.indices.minByOrNull { list[it].distanceM } ?: 0
         val fewestLights = list.indices.minByOrNull { list[it].trafficLights } ?: 0
         return list.indices.map { i ->
             when {
-                i == fastest -> "最快"
-                i == shortest -> "最短"
-                i == fewestLights -> "灯少"
-                else -> "备选 ${i + 1}"
+                i == fastest -> context.getString(R.string.route_badge_fastest)
+                i == shortest -> context.getString(R.string.route_badge_shortest)
+                i == fewestLights -> context.getString(R.string.route_badge_fewer_lights)
+                else -> context.getString(R.string.route_badge_backup, i + 1)
             }
         }
     }
@@ -960,22 +996,22 @@ private class RouteOptionAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val r = data[position]
-        holder.label.text = badges.getOrElse(position) { "方案 ${position + 1}" }
+        holder.label.text = badges.getOrElse(position) { context.getString(R.string.route_scheme_n, position + 1) }
         holder.eta.text = CoordConverter.formatEta(r.durationS.toInt())
         holder.distance.text = CoordConverter.formatDistance(r.distanceM.toInt())
         holder.detail.text = buildString {
-            append("红绿灯 ${r.trafficLights} 个")
+            append(context.getString(R.string.route_lights_count, r.trafficLights))
             if (r.tolls > 0f) {
-                append(" · 过路费 ")
+                append(context.getString(R.string.route_toll_suffix))
                 append(String.format(Locale.US, "¥%.0f", r.tolls))
             } else {
-                append(" · 无过路费")
+                append(context.getString(R.string.route_no_toll_suffix))
             }
             // 限行：高德 DrivePath.getRestriction() 一直在返回，但从来没人读过。
             // 外地牌照骑进限行区是要吃罚单的，这个提示必须放在**选路线时**，
             // 而不是等开进去了才说。
             if (r.restriction != 0) {
-                append(" · ⚠ 经限行区")
+                append(context.getString(R.string.route_restricted_suffix))
             }
             if (r.modeLabel.isNotBlank()) {
                 append(" · ")

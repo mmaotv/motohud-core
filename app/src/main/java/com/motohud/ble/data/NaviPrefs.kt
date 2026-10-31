@@ -2,6 +2,7 @@ package com.motohud.ble.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.amap.api.navi.enums.PathPlanningStrategy
 import com.amap.api.services.route.RouteSearch
 import com.motohud.ble.navi.tts.PresetVoice
 import com.motohud.ble.navi.tts.TtsStyle
@@ -592,6 +593,54 @@ object NaviPrefs {
             else -> RouteSearch.DRIVING_MULTI_STRATEGY_FASTEST_SAVE_MONEY_SHORTEST
         }
     }
+
+    /**
+     * 算路策略（**导航 SDK** 版）。
+     *
+     * 为什么不能直接复用 [strategy]：搜索 SDK 的 `RouteSearch.DRIVING_*` 与
+     * 导航 SDK 的 `PathPlanningStrategy` 是两套互不相干的常量（数值完全不同），
+     * 把搜索 SDK 的 int 直接喂给 `calculateDriveRoute` 会得到一个无意义策略，
+     * 表现为"设了不走高速，算出来还是走高速"。
+     *
+     * 这里刻意都用 `DRIVING_MULTIPLE_ROUTES_*`（多方案）系列：
+     * 选路页要展示 2~3 个方案，单选策略只会返回一条，选路体验直接没了。
+     */
+    fun naviSdkStrategy(): Int {
+        val noHigh = _avoidHighway.value
+        val noToll = _avoidToll.value
+        val noJam = _avoidJam.value
+        val highFirst = _highwayFirst.value
+        val timeFirst = _timeFirst.value
+        val trafficFirst = _trafficFirst.value
+        return when {
+            // 不走高速的各种组合 —— 对摩托车是硬约束
+            noHigh && noToll && noJam ->
+                PathPlanningStrategy.DRIVING_MULTIPLE_ROUTES_AVOID_HIGHSPEED_COST_CONGESTION
+            noHigh && noToll -> PathPlanningStrategy.DRIVING_MULTIPLE_ROUTES_AVOID_HIGHTSPEED_COST
+            noHigh && noJam -> PathPlanningStrategy.DRIVING_MULTIPLE_ROUTES_AVOID_HIGHSPEED_CONGESTION
+            noHigh -> PathPlanningStrategy.DRIVING_MULTIPLE_ROUTES_AVOID_HIGHSPEED
+            // 少收费
+            noToll && noJam -> PathPlanningStrategy.DRIVING_MULTIPLE_ROUTES_AVOID_COST_CONGESTION
+            noToll -> PathPlanningStrategy.DRIVING_MULTIPLE_ROUTES_AVOID_COST
+            // 躲避拥堵 / 高速优先
+            noJam && highFirst ->
+                PathPlanningStrategy.DRIVING_MULTIPLE_ROUTES_PRIORITY_HIGHSPEED_AVOID_CONGESTION
+            noJam -> PathPlanningStrategy.DRIVING_MULTIPLE_ROUTES_AVOID_CONGESTION
+            highFirst -> PathPlanningStrategy.DRIVING_MULTIPLE_ROUTES_PRIORITY_HIGHSPEED
+            // 时间 / 路况
+            timeFirst -> PathPlanningStrategy.DRIVING_MULTIPLE_SHORTEST_TIME_DISTANCE
+            trafficFirst -> PathPlanningStrategy.DRIVING_MULTIPLE_ROUTES_AVOID_CONGESTION
+            else -> PathPlanningStrategy.DRIVING_MULTIPLE_ROUTES_DEFAULT
+        }
+    }
+
+    /**
+     * 摩托车排量（导航 SDK `AMapCarInfo.setMotorcycleCC`）。
+     *
+     * 排量直接影响两件事：部分城市的禁摩/限行判定，以及高架/快速路能不能上。
+     * 0 = 不按摩托车处理（按普通小汽车）。
+     */
+    fun motorcycleCc(): Int = if (_motorcycle.value) 250 else 0
 
     /**
      * 算路时要下发的「排除道路类型」参数（高德 `DriveRouteQuery.setExclude`）。

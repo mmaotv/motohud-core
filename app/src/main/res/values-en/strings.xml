@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  English (default fallback for non-Chinese systems).
+
+  怎么"跟随系统语言"：`values/` 是简体中文（主用户群，保持不变），
+  这里放英文。系统语言非中文时 Android 自动取本文件；某个 key 没翻译就回落到中文，
+  所以可以分批补，不用等全部翻完。
+
+  翻译范围（第一批）= 导航链路全部界面文案：转向横幅 / 到达卡 / 电子眼 / 车道线 /
+  服务区 · 交通事件 / 选路卡片。设置页与历史页在后续批次。
+  语音播报（TTS）**不在此列**：内置语音包是中文预录 mp3，播报词库也按中文切分，
+  换语言需要另做一套语音包，属独立工作项。
+-->
+<resources>
+
+    <!-- ============ 通用 ============ -->
+    <string name="common_unknown">Unknown</string>
+    <string name="common_free">Free</string>
+    <string name="dest_default">Destination</string>
+
+    <!-- ============ 选路页 ============ -->
+    <string name="route_badge_recommended">Recommended</string>
+    <string name="route_badge_fastest">Fastest</string>
+    <string name="route_badge_shortest">Shortest</string>
+    <string name="route_badge_fewer_lights">Fewer lights</string>
+    <string name="route_badge_avoid_congestion">Avoid jams</string>
+    <string name="route_badge_backup">Option %1$d</string>
+    <string name="route_scheme">Route</string>
+    <string name="route_scheme_n">Route %1$d</string>
+    <string name="route_waypoint_count">%1$d stop(s)</string>
+    <string name="route_avoid_zone_count">%1$d avoided area(s)</string>
+    <string name="route_lights_count">%1$d lights</string>
+    <string name="route_toll_suffix"> · Toll </string>
+    <string name="route_no_toll_suffix"> · No toll</string>
+    <string name="route_restricted_suffix"> · ⚠ Restricted zone</string>
+    <string name="route_fare">¥%.0f</string>
+
+    <!-- ============ 导航主界面 ============ -->
+    <string name="guidance_title">Navigation</string>
+    <string name="guidance_planning">Planning route…</string>
+    <string name="guidance_plan_failed">Route planning failed: %1$s</string>
+    <string name="guidance_eta">ETA</string>
+    <string name="guidance_remain">Remaining</string>
+    <string name="guidance_speed">Speed</string>
+    <string name="guidance_gps">GPS</string>
+    <string name="guidance_simulated">Offline</string>
+    <string name="guidance_stop">Stop</string>
+    <string name="guidance_finish">Done</string>
+    <string name="guidance_ble_hint">Not connected: turn instructions are not sent. They will resume automatically once connected.</string>
+    <string name="guidance_no_location">No GPS fix yet, using dead reckoning. Real position resumes when GPS returns.</string>
+    <string name="guidance_need_key">Map service unavailable, cannot plan a route.</string>
+    <string name="guidance_demo_mode">Route unavailable, switched to offline guidance.</string>
+    <string name="guidance_demo_short">Offline</string>
+    <string name="guidance_plan_failed_short">Route planning failed, please retry</string>
+    <string name="guidance_exit_title">End navigation?</string>
+    <string name="guidance_exit_message">Instructions will stop being sent to the head unit.</string>
+    <string name="guidance_rerouting">Off route, recalculating</string>
+    <string name="guidance_reroute_failed">Recalculation failed, continue on the current route</string>
+    <string name="guidance_reroute_no_key">Map not configured, cannot recalculate</string>
+    <string name="guidance_better_route_time">Faster route found, saves about %1$d min</string>
+    <string name="guidance_better_route_cong">Traffic ahead, a clearer route saves about %1$d km of jams</string>
+    <string name="guidance_better_route_adopt">Use</string>
+    <string name="guidance_better_route_dismiss">Ignore</string>
+    <string name="guidance_better_route_adopted">Route switched</string>
+    <string name="guidance_next_step">Then %1$s</string>
+    <string name="guidance_lights">Lights</string>
+    <string name="guidance_tolls">Tolls</string>
+    <string name="guidance_step_progress">Progress</string>
+    <string name="guidance_traffic_estimate">%1$s · avg %2$d km/h (estimated)</string>
+    <string name="guidance_traffic_smooth">Clear</string>
+    <string name="guidance_traffic_slow">Slow</string>
+    <string name="guidance_traffic_jam">Congested</string>
+    <string name="guidance_cast_off_hint">Casting off, navigation stays on this device</string>
+    <string name="guidance_arrive_sub">Arrived at %1$s</string>
+    <string name="guidance_arrive_distance">Distance</string>
+    <string name="guidance_arrive_duration">Time</string>
+    <string name="guidance_arrive_avg">Avg speed</string>
+    <string name="guidance_view_track">View track</string>
+    <string name="guidance_navi_again">Ride again</string>
+    <string name="guidance_no_track">No track was recorded for this trip</string>
+    <string name="guidance_voice_no_model">Using the built-in voice pack: direction, distance and exit numbers are spoken, but not road names. Install the offline voice model in Settings → Offline voice to hear road names.</string>
+
+    <!-- ============ 电子眼 / 限速（导航 SDK） ============ -->
+    <string name="camera_speed">speed camera</string>
+    <string name="camera_surveillance">surveillance camera</string>
+    <string name="camera_traffic_light">red-light camera</string>
+    <string name="camera_break_rule">traffic camera</string>
+    <string name="camera_bus_way">bus-lane camera</string>
+    <string name="camera_emergency">emergency-lane camera</string>
+    <string name="camera_bicycle">bike-lane camera</string>
+    <string name="camera_interval_start">average-speed section start</string>
+    <string name="camera_interval_end">average-speed section end</string>
+    <string name="camera_flow_speed">traffic flow detector</string>
+    <string name="camera_etc">ETC toll point</string>
+    <string name="camera_generic">camera</string>
+    <string name="camera_ahead">In %1$s: %2$s</string>
+    <string name="camera_ahead_limit">In %1$s: %2$s, limit %3$d</string>
+    <string name="camera_ahead_interval">In %1$s: average-speed section, limit %2$d, %3$d m remaining</string>
+    <string name="camera_interval_remain">%1$d m left in section</string>
+    <string name="camera_ahead_slow">In %1$s: %2$s, watch your speed</string>
+    <string name="camera_ahead_interval_preset">In %1$s: average-speed section, watch your speed</string>
+    <string name="navi_limit_only">Limit %1$d</string>
+
+    <!-- ============ 车道线（导航 SDK showLaneInfo），供读屏与文字兜底 ============ -->
+    <string name="lane_left">Left</string>
+    <string name="lane_right">Right</string>
+    <string name="lane_straight">Straight</string>
+    <string name="lane_left_right">Left/right</string>
+    <string name="lane_bus">Bus lane</string>
+    <string name="lane_uturn">U-turn</string>
+    <string name="lane_left_front">Slight left</string>
+    <string name="lane_right_front">Slight right</string>
+    <string name="lane_left_back">Bear left back</string>
+    <string name="lane_right_back">Bear right back</string>
+    <string name="lane_curve">Curve</string>
+    <string name="lane_left_left">Double left</string>
+    <string name="lane_right_right">Double right</string>
+
+    <!-- ============ 服务区 / 交通事件 / 主辅路（导航 SDK） ============ -->
+    <string name="navi_service_area">Service area: %1$s</string>
+    <string name="navi_service_area_call">Service area ahead: %1$s</string>
+    <string name="navi_service_area_call_preset">Service area ahead</string>
+    <string name="navi_service_area_ahead">Service area %1$s · %2$s</string>
+    <string name="navi_rerouting">Recalculating…</string>
+    <string name="navi_remain_lights">%1$d lights ahead</string>
+    <string name="navi_incident">Road ahead: %1$s</string>
+    <string name="navi_incident_generic">Road condition ahead, take care</string>
+    <string name="navi_parallel_road">Main/service road switchable · long-press the banner</string>
+    <string name="navi_parallel_switched">Switched main/service road</string>
+    <string name="navi_parallel_unavailable">No switchable road here</string>
+    <string name="navi_congestion_ahead">Congestion ahead %1$s</string>
+    <string name="navi_signal_weak">Weak GPS, continuing along the route direction</string>
+    <string name="navi_replanning">Recalculating…</string>
+    <string name="navi_overview">Overview</string>
+    <string name="navi_recenter">Recenter</string>
+    <string name="navi_pip">Mini window</string>
+    <string name="navi_pip_failed">Mini window not supported on this system</string>
+    <string name="navi_cast_to_car">Cast to head unit</string>
+    <string name="navi_opt_title">Navigation options</string>
+    <string name="navi_opt_add_waypoint">Add a stop</string>
+    <string name="navi_opt_waypoint_added">Stop added: %1$s</string>
+    <string name="navi_opt_waypoint_voice">Stop added, recalculating</string>
+
+    <string name="lane_hint_left">Stay in the left lane</string>
+    <string name="lane_hint_right">Stay in the right lane</string>
+    <string name="lane_hint_middle">Stay in the middle lane</string>
+    <string name="lane_hint_left_mid">Stay in the middle-left lane</string>
+    <string name="lane_hint_right_mid">Stay in the middle-right lane</string>
+    <string name="voice_straight_cross">Continue straight</string>
+
+</resources>

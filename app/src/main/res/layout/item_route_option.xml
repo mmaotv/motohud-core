@@ -1,20 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 候选路线卡片 -->
+<!--
+  候选路线卡片（对齐高德选路页的排版）：
+  左边一列是"多久 / 多远"——决定选哪条的唯一依据，字号最大；
+  右边一列是方案标签与路况细节，字号小、颜色浅，不抢视线。
+  高德选路页就是这么排的：时间在最左，纵向扫一眼就能比大小。
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_card"
-    android:orientation="vertical"
+    android:orientation="horizontal"
     android:paddingStart="14dp"
     android:paddingTop="12dp"
     android:paddingEnd="14dp"
     android:paddingBottom="12dp">
 
     <LinearLayout
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tv_route_eta"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/inter"
+            android:maxLines="1"
+            android:textColor="@color/text_primary"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_route_distance"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:fontFamily="@font/inter"
+            android:maxLines="1"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
+        android:layout_weight="1.25"
+        android:gravity="end"
+        android:orientation="vertical">
 
         <TextView
             android:id="@+id/tv_route_label"
@@ -31,37 +65,15 @@
             android:textStyle="bold" />
 
         <TextView
-            android:id="@+id/tv_route_eta"
-            android:layout_width="0dp"
+            android:id="@+id/tv_route_detail"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_weight="1"
+            android:layout_marginTop="4dp"
+            android:ellipsize="end"
             android:fontFamily="@font/inter"
             android:gravity="end"
-            android:maxLines="1"
-            android:textColor="@color/text_primary"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/tv_route_distance"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:fontFamily="@font/inter"
-            android:maxLines="1"
-            android:textColor="@color/text_secondary"
-            android:textSize="13sp" />
+            android:maxLines="2"
+            android:textColor="@color/text_tertiary"
+            android:textSize="12sp" />
     </LinearLayout>
-
-    <TextView
-        android:id="@+id/tv_route_detail"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:fontFamily="@font/inter"
-        android:maxLines="2"
-        android:ellipsize="end"
-        android:textColor="@color/text_tertiary"
-        android:textSize="12sp" />
 </LinearLayout>
