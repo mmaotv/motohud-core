@@ -62,8 +62,11 @@ object CameraKind {
 /**
  * 电子眼 / 区间测速提示。
  *
+ * @param id 引擎给这一个电子眼分配的流水号（同一次经过始终不变）。
+ *   播报去重必须按它来，不能按"类型+限速"——一条路上连着两个同型号测速头，
+ *   按类型去重会把第二个整个吞掉，用户以为漏报。
  * @param type [CameraKind] 之一
- * @param distanceM 距该电子眼的米数（SDK 已按当前车速与路况算好播报距离）
+ * @param distanceM 距该电子眼的米数（引擎按车速逐秒递减，不是回调时的快照）
  * @param speedKmh 该点限速（0 = 未知）。高德把限速随电子眼一起下发，是免费能力。
  * @param interval 是否区间测速
  * @param intervalRemainM 区间测速剩余里程（仅区间测速有意义）
@@ -73,10 +76,21 @@ data class CameraAlert(
     val distanceM: Int,
     val speedKmh: Int = 0,
     val interval: Boolean = false,
-    val intervalRemainM: Int = 0
+    val intervalRemainM: Int = 0,
+    val id: Int = 0
 ) {
-    /** 去重键：同一个电子眼只会念一次（距离按 400 米分桶，允许"600米/200米"各报一次） */
-    fun speechKey(): String = "$type|$speedKmh|${distanceM / 400}"
+    /**
+     * 去重键：**同一个电子眼**在 [BUCKET_M] 米一档里只播一次。
+     *
+     * 分档的用处是让"前方 800 米有电子眼"和"前方 300 米有电子眼"各说一次 ——
+     * 远的那句给人反应时间，近的那句确认就是这个。
+     */
+    fun speechKey(): String = "$id|${distanceM / BUCKET_M}"
+
+    companion object {
+        /** 播报分档跨度：800m/400m 各一次，再近就不重复了 */
+        const val BUCKET_M = 400
+    }
 }
 
 /**

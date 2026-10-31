@@ -49,8 +49,12 @@ class LaneGuideView @JvmOverloads constructor(
     var dimColor: Int = Color.parseColor("#66FFFFFF")
         set(v) { field = v; invalidate() }
 
-    /** 格子底色 */
-    var laneBgColor: Int = Color.parseColor("#22FFFFFF")
+    /** 格子底色（不可走 / 判定不出可用性时） */
+    var laneBgColor: Int = Color.parseColor("#1AFFFFFF")
+        set(v) { field = v; invalidate() }
+
+    /** 可走车道的格子底色：整格提亮，远看先分辨"哪几格是亮的" */
+    var laneBgActiveColor: Int = Color.parseColor("#33FFFFFF")
         set(v) { field = v; invalidate() }
 
     fun setGuide(g: LaneGuide?) {
@@ -62,12 +66,14 @@ class LaneGuideView @JvmOverloads constructor(
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val density = resources.displayMetrics.density
-        val cellW = (26 * density).toInt()
-        val cellH = (30 * density).toInt()
         val n = guide?.count ?: 0
-        val desiredW = (n * cellW + (n + 1) * (4 * density).toInt()).coerceAtLeast(cellW)
+        // 宽度：布局给了 match_parent（侧栏整宽）就用满，没给就按车道数估。
+        // 以前这里只按 wrap_content 估 26dp/格，4 条道才 116dp —— 车机视角下
+        // 箭头只有指甲盖大，等于没画。现在单格最大 60dp，4 条道能铺满 300dp 侧栏。
+        val cellW = (60 * density).toInt()
+        val desiredW = (n * cellW + (n + 1) * (6 * density).toInt()).coerceAtLeast(cellW)
         val w = resolveSize(desiredW, widthMeasureSpec)
-        val h = resolveSize(cellH + (6 * density).toInt(), heightMeasureSpec)
+        val h = resolveSize((56 * density).toInt(), heightMeasureSpec)
         setMeasuredDimension(w, h)
     }
 
@@ -77,25 +83,29 @@ class LaneGuideView @JvmOverloads constructor(
         if (g.count <= 0) return
 
         val density = resources.displayMetrics.density
-        val gap = 4 * density
-        val pad = 3 * density
-        val cellH = height - 2 * pad
+        val gap = 6 * density
+        val padV = 2 * density
+        val cellH = height - 2 * padV
         if (cellH <= 0f) return
-        // 格子宽度由可用宽度均分，避免车道多时溢出
-        val cellW = min(28 * density, (width - gap * (g.count + 1)) / g.count)
+        // 格子宽度在可用宽度里均分，单格封顶 60dp：车道少时不会拉成一根柱，
+        // 车道多时（6~8 条）自动收窄，一组始终居中、不溢出。
+        val avail = width - paddingLeft - paddingRight
+        val cellW = min(60 * density, (avail - gap * (g.count - 1)) / g.count)
         if (cellW <= 0f) return
 
-        val radius = 4 * density
-        var x = (width - (cellW * g.count + gap * (g.count - 1))) / 2f
+        val radius = 6 * density
+        var x = paddingLeft + (avail - (cellW * g.count + gap * (g.count - 1))) / 2f
 
         for (i in 0 until g.count) {
-            val rect = RectF(x, pad, x + cellW, pad + cellH)
-            lanePaint.color = laneBgColor
+            val rect = RectF(x, padV, x + cellW, padV + cellH)
+            val usable = g.isUsable(i)
+            // 可走的车道整格提亮（高德就是这么做的）：远看先分"哪几格是亮的"，
+            // 再看格里的箭头，比只给箭头换颜色更容易在颠簸中一眼扫到。
+            lanePaint.color = if (usable) laneBgActiveColor else laneBgColor
             canvas.drawRoundRect(rect, radius, radius, lanePaint)
 
-            val usable = g.isUsable(i)
             arrowPaint.color = if (usable) accentColor else dimColor
-            arrowPaint.strokeWidth = (2.1f * density).coerceAtMost(rect.width() / 9f)
+            arrowPaint.strokeWidth = (3.0f * density).coerceAtMost(rect.width() / 8f)
 
             val arrows = g.arrowsAt(i)
             if (arrows.isNotEmpty()) drawGlyph(canvas, rect, arrows)

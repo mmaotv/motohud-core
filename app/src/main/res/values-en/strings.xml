@@ -93,12 +93,13 @@
     <string name="camera_flow_speed">traffic flow detector</string>
     <string name="camera_etc">ETC toll point</string>
     <string name="camera_generic">camera</string>
-    <string name="camera_ahead">In %1$s: %2$s</string>
-    <string name="camera_ahead_limit">In %1$s: %2$s, limit %3$d</string>
-    <string name="camera_ahead_interval">In %1$s: average-speed section, limit %2$d, %3$d m remaining</string>
-    <string name="camera_interval_remain">%1$d m left in section</string>
-    <string name="camera_ahead_slow">In %1$s: %2$s, watch your speed</string>
-    <string name="camera_ahead_interval_preset">In %1$s: average-speed section, watch your speed</string>
+    <string name="camera_ahead">%2$s ahead in %1$s</string>
+    <string name="camera_ahead_limit">%2$s ahead in %1$s, limit %3$d</string>
+    <string name="camera_ahead_interval">Average-speed section ahead in %1$s, limit %2$d, %3$s remaining</string>
+    <string name="camera_interval_remain">%1$s left in section</string>
+    <string name="camera_ahead_slow">%2$s ahead in %1$s, watch your speed</string>
+    <string name="camera_ahead_interval_preset">Average-speed section ahead in %1$s, watch your speed</string>
+    <string name="camera_ahead_eye">Speed camera ahead in %1$s, watch your speed</string>
     <string name="navi_limit_only">Limit %1$d</string>
 
     <!-- ============ 车道线（导航 SDK showLaneInfo），供读屏与文字兜底 ============ -->

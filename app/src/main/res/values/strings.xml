@@ -801,15 +801,23 @@
     <string name="camera_etc">ETC 计费</string>
     <string name="camera_generic">电子眼</string>
 
-    <!-- 播报/提示：%1$s=距离（已含「200 米 / 1 公里」，不带「前方」），%2$s=电子眼类型 -->
-    <string name="camera_ahead">前方 %1$s%2$s</string>
-    <string name="camera_ahead_limit">前方 %1$s%2$s，限速%3$d</string>
-    <string name="camera_ahead_interval">前方 %1$s进入区间测速，限速%2$d，区间剩余%3$d米</string>
-    <string name="camera_interval_remain">区间剩余%1$d米</string>
+    <!--
+      提示/播报句式：%1$s=距离（已含「200 米 / 1 公里」，不带「前方」），%2$s=电子眼类型。
+
+      中文里「前方 500 米违章拍照」是**病句**——它读起来像"摄像头正在拍照"。
+      必须补出存在动词「有」，变成「前方 500 米有违章拍照」，才是"那个位置装了一个探头"。
+      这就是上一版直接叫用户听出问题的句子，改的时候别再省掉「有」。
+    -->
+    <string name="camera_ahead">前方 %1$s有%2$s</string>
+    <string name="camera_ahead_limit">前方 %1$s有%2$s，限速 %3$d</string>
+    <string name="camera_ahead_interval">前方 %1$s进入区间测速，限速 %2$d，区间还剩 %3$s</string>
+    <string name="camera_interval_remain">区间还剩 %1$s</string>
 
     <!-- 内置语音包（预录片段，念不出任意数字）专用的固定句式；装离线模型时走带数字的版本 -->
-    <string name="camera_ahead_slow">前方 %1$s%2$s，请注意车速</string>
+    <string name="camera_ahead_slow">前方 %1$s有%2$s，请注意车速</string>
     <string name="camera_ahead_interval_preset">前方 %1$s进入区间测速，请注意车速</string>
+    <!-- 没有具体类型可念时的兜底（类型名不在语音包里的情况） -->
+    <string name="camera_ahead_eye">前方 %1$s有电子眼，请注意车速</string>
     <string name="navi_incident_generic">前方路况异常，请注意</string>
     <string name="navi_limit_only">限速 %1$d</string>
 

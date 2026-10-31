@@ -24,26 +24,6 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!--
-      路口放大图（导航 SDK showCross）：SDK 直接给位图，setImageBitmap 即可。
-
-      **放在地图层、靠左下角**，而不是塞进右侧 300dp 的侧栏：
-      高德的做法就是"接近路口时左半屏弹一张大图"，靠一张大图让人在
-      两三秒内看清匝道/立交怎么绕。塞进侧栏只有 100dp，等于没有。
-      横屏 260x190dp，竖屏 190x140dp（见 applyOrientationLayout）。
-    -->
-    <ImageView
-        android:id="@+id/iv_cross_image"
-        android:layout_width="260dp"
-        android:layout_height="190dp"
-        android:layout_gravity="bottom|start"
-        android:layout_marginStart="12dp"
-        android:layout_marginBottom="96dp"
-        android:background="@drawable/bg_navi_panel"
-        android:contentDescription="@string/hud_turn_icon"
-        android:padding="4dp"
-        android:scaleType="fitCenter"
-        android:visibility="gone" />
 
     <!-- 顶部渐变（保证状态栏、顶栏在任意底图上可读）
          高度运行时按横竖屏调整：横屏屏矮，220dp 会盖掉大半张地图 -->
@@ -268,13 +248,14 @@
         -->
         <com.motohud.ble.ui.navi.LaneGuideView
             android:id="@+id/ll_lane_guide"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="6dp"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="8dp"
             android:background="@drawable/bg_navi_panel"
-            android:paddingStart="6dp"
-            android:paddingEnd="6dp"
+            android:paddingStart="8dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="6dp"
             android:visibility="gone" />
 
         <!--
@@ -955,4 +936,26 @@
             android:textColor="@color/text_secondary"
             android:textSize="14sp" />
     </LinearLayout>
+    <!--
+      路口放大图（导航 SDK showCross / showModeCross）：SDK 直接给位图。
+
+      **放在最后一层、压住右侧整栏**，而不是塞在地图角落里。
+      这块图只在靠近路口时出现两三秒，作用是"看清这个路口怎么过"；
+      骑手这时的视线本来就在路口上，侧栏的转向/车道/ETA 全是重复信息。
+      盖住整栏换来的是：图可以做到侧栏满宽满高（500x320 的位图不再被压扁），
+      图的边缘也不会和侧栏文字混在一起。
+      大图撤掉后侧栏原样恢复（见 GuidanceActivity.setCrossMode）。
+
+      环岛、匝道、立交、大桥同样走这两个回调，出现的就是对应的图。
+    -->
+    <ImageView
+        android:id="@+id/iv_cross_image"
+        android:layout_width="300dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="top|end"
+        android:background="@drawable/bg_cross_panel"
+        android:contentDescription="@string/hud_turn_icon"
+        android:padding="8dp"
+        android:scaleType="fitCenter"
+        android:visibility="gone" />
 </FrameLayout>

@@ -134,6 +134,22 @@ class AmapNaviEngine(
      */
     private var guides: List<com.amap.api.navi.model.AMapNaviGuide> = emptyList()
 
+    /**
+     * 当前盯着的那个电子眼：原始距离 + 快照时刻 + 流水号。
+     *
+     * 为什么要在本地按车速递减距离：`updateCameraInfo` 是**事件回调**，不是每秒一次。
+     * SDK 在手机会话里通常只在进入播报范围、或距离档位跳变时才回调 —— 直接拿回调里的
+     * `distance` 当实时距离，屏幕上会一直卡在"800 米"，播报也只能说一次。
+     * 这里用 `NaviInfo`（约 1Hz）做时间基准自己推，距离才会真的往下走。
+     */
+    private var camBase: CameraAlert? = null
+    private var camBaseAt: Long = 0L
+    /** 电子眼坐标（用于判断"还是不是同一个点位"；SDK 不带坐标时留 0） */
+    private var camLat = 0.0
+    private var camLng = 0.0
+    /** 电子眼流水号：同一个点位全程不变，换点位才 +1（播报去重靠它） */
+    private var camSeq = 0
+
     // ---------------------------------------------------------------- 公开 API
 
     override fun start(
@@ -424,6 +440,10 @@ class AmapNaviEngine(
             -1
         }
 
+        // 电子眼距离按车速往前推（回调不是每秒一次，见 camBase 注释）
+        val camNow = decayCamera(info.currentSpeed)
+        val nowMs = System.currentTimeMillis()
+
         _state.update { s ->
             s.copy(
                 running = true,
@@ -442,9 +462,14 @@ class AmapNaviEngine(
                 maneuverIndex = if (step >= 0) step else s.maneuverIndex,
                 speedKmh = if (info.currentSpeed > 0) info.currentSpeed.toFloat() else s.speedKmh,
                 maneuverOrdinal = ordinalAt(step),
+                maneuverCount = clusterCountAt(step),
                 nextManeuverIcon = nextGuideIcon(step),
                 nextManeuverRoad = nextGuideRoad(step),
                 remainLights = info.routeRemainLightCount,
+                // 不能用 `camNow ?: s.camera`：decayCamera 返回 null 有两种含义
+                // （本来就没有 / 刚通过），后者必须真的清掉，否则界面会一直挂着
+                // 上一个电子眼和它的限速。
+                camera = camNow,
                 traveled = if (traveled >= 0) traveled else s.traveled,
                 rerouting = false
             )
@@ -452,27 +477,77 @@ class AmapNaviEngine(
     }
 
     /**
+     * 电子眼距离递减（速度 × 时间），到点位就清掉。
+     *
+     * 只推距离、不推类型/限速：那些是 SDK 回调时给的静态属性，推了没意义。
+     * `speedMps` 用 `NaviInfo.currentSpeed`（km/h，javap 与真机日志双向核实过，
+     * **不是 m/s**，别再乘 3.6）。
+     */
+    private fun decayCamera(speedKmh: Int): CameraAlert? {
+        val base = camBase ?: return null
+        val now = System.currentTimeMillis()
+        val dtS = (now - camBaseAt).coerceAtLeast(0L) / 1000.0
+        // 半秒以内不重算：NaviInfo 有时一秒来两次，反复改会让界面数字抖动
+        if (dtS < 0.5) return base
+        val left = base.distanceM - (speedKmh / 3.6 * dtS)
+        if (left <= 8) {
+            // 已经到跟前（或 GPS 跳过点位）：清掉，别让界面挂着"3 米"这种残值
+            camBase = null
+            camBaseAt = 0L
+            camLat = 0.0
+            camLng = 0.0
+            return null
+        }
+        val updated = base.copy(distanceM = left.toInt())
+        camBase = updated
+        camBaseAt = now
+        return updated
+    }
+
+    /**
      * 当前引导点是「一串连续路口」里的第几个。
      *
-     * 判定规则：从当前引导点往前走，只要**相邻两个路口的间距 < 150 米**就算同一串
+     * 判定规则：从当前引导点往前走，只要**相邻两个路口直线间距 < 150 米**就算同一串
      * （商业街、老城区、辅路出口连成串的场景），同一个串里的序号就是答案。
      * 间距 ≥ 150 米说明中间够骑一段，用户不会把两个路口搞混，序号归 1。
      *
-     * 依据：`AMapNaviGuide.length` 是"从上一个引导点到这个引导点"的距离，
-     * 因此 `guides[i-1].length` 就是上一个路口到当前路口的间距。
+     * 以前拿 `AMapNaviGuide.length` 当间距，那是「上一引导点到本引导点的路径长度」，
+     * 单位是米还是别的取决于 SDK 内部填充 —— 实测常常恒为 0，导致序号永远是 1、
+     * 或者整条路线都被判成一串。改成**用两点坐标算真实距离**，语义明确、不受字段口径影响。
      */
-    private fun ordinalAt(step: Int): Int {
+    private fun ordinalAt(step: Int): Int = clusterAt(step).first
+
+    /** 同一串路口的总个数（≥2 时序号才有区分度，单路口说「第 1 个」是噪音） */
+    private fun clusterCountAt(step: Int): Int = clusterAt(step).second
+
+    private fun clusterAt(step: Int): Pair<Int, Int> {
         val g = guides
-        if (step <= 0 || step >= g.size) return 1
+        if (step < 0 || step >= g.size) return 1 to 1
+        // 向后串：从这一步往前数，相邻间距 < 150m 的
         var ord = 1
-        var i = step - 1
-        while (i >= 0 && ord < 9) {
-            val gap = runCatching { g[i].length }.getOrDefault(Int.MAX_VALUE)
-            if (gap >= JUNCTION_CLUSTER_M) break
+        var i = step
+        while (i > 0 && ord < 9) {
+            if (gapBetween(g, i - 1, i) >= JUNCTION_CLUSTER_M) break
             ord++
             i--
         }
-        return ord
+        // 向前串：从这一步往后数，同一个路口串还有几个
+        var after = 0
+        var j = step
+        while (j + 1 < g.size && ord + after < 9) {
+            if (gapBetween(g, j, j + 1) >= JUNCTION_CLUSTER_M) break
+            after++
+            j++
+        }
+        return ord to (ord + after)
+    }
+
+    /** 相邻两个引导点之间的直线距离（米）；坐标取不到时给一个大数，等于"不并成一串" */
+    private fun gapBetween(g: List<com.amap.api.navi.model.AMapNaviGuide>, a: Int, b: Int): Double {
+        val pa = runCatching { g.getOrNull(a)?.coord }.getOrNull() ?: return Double.MAX_VALUE
+        val pb = runCatching { g.getOrNull(b)?.coord }.getOrNull() ?: return Double.MAX_VALUE
+        val d = Geo.distanceM(pa.latitude, pa.longitude, pb.latitude, pb.longitude)
+        return if (d.isFinite()) d else Double.MAX_VALUE
     }
 
     /**
@@ -615,20 +690,50 @@ class AmapNaviEngine(
         override fun updateCameraInfo(cameras: Array<AMapNaviCameraInfo>?) {
             val list = cameras.orEmpty()
             if (list.isEmpty()) {
-                _state.update { it.copy(camera = null) }
+                clearCamera()
                 return
             }
-            val nearest = list
-                .map { toCameraAlert(it, interval = false) }
-                .filter { CameraKind.worthSpeaking(it.type) && it.distanceM > 0 }
-                .minByOrNull { it.distanceM }
+            val picked = list
+                .map { it to toCameraAlert(it, interval = false) }
+                .filter { (_, c) -> CameraKind.worthSpeaking(c.type) && c.distanceM > 0 }
+                .minByOrNull { (_, c) -> c.distanceM }
+                ?: run {
+                    clearCamera()
+                    return
+                }
+            val now = System.currentTimeMillis()
+            // 同一个点位继续沿用旧流水号：SDK 每次回调都新建对象，用坐标认身份。
+            // 坐标缺失（个别版本给 0）时退化成"类型+限速相同就算同一个"，
+            // 宁可少报一次，也别让同一条路上一串同型号探头各报一遍。
+            val (raw, alert) = picked
+            val same = camBase != null && run {
+                val near = if (camLat != 0.0 && camLng != 0.0 && raw.x != 0.0 && raw.y != 0.0) {
+                    Geo.distanceM(camLat, camLng, raw.y, raw.x) < CAMERA_SAME_POINT_M
+                } else {
+                    true
+                }
+                near && camBase?.type == alert.type && camBase?.speedKmh == alert.speedKmh
+            }
+            val id = if (same) camBase?.id ?: ++camSeq else ++camSeq
+            val withId = alert.copy(id = id)
+            camBase = withId
+            camLat = raw.y
+            camLng = raw.x
+            camBaseAt = now
             _state.update {
                 it.copy(
-                    camera = nearest,
+                    camera = withId,
                     // 电子眼过去之后要把限速清掉，否则界面上会一直挂着上一个路段的限速
-                    limitSpeedKmh = nearest?.speedKmh?.takeIf { s -> s > 0 } ?: 0
+                    limitSpeedKmh = if (withId.speedKmh > 0) withId.speedKmh else 0
                 )
             }
+        }
+
+        /** 点位消失（已通过 / 离开范围）：清提示与限速，同时让下一个探头重新拿流水号 */
+        private fun clearCamera() {
+            camBase = null
+            camBaseAt = 0L
+            _state.update { it.copy(camera = null, limitSpeedKmh = 0) }
         }
 
         /** 区间测速：起点/终点 + 剩余里程 */
@@ -884,6 +989,15 @@ class AmapNaviEngine(
          * 分清楚；再远就是两件独立的事了，报"第 2 个路口"反而让人以为要连着拐。
          */
         const val JUNCTION_CLUSTER_M = 150
+
+        /**
+         * 两次电子眼回调的坐标相差小于该值 → 认为是**同一个点位**（继续用同一个流水号）。
+         *
+         * 取 40 米：高德同一点位的两次回调坐标可能因吸附有十几米抖动，而相邻两个
+         * 测速头在主干道上也很少挨到 40 米以内。取小了会把同一个探头当成两个、重复播报；
+         * 取大了会把相邻两个探头并成一个、漏报。
+         */
+        const val CAMERA_SAME_POINT_M = 40.0
 
         /**
          * 官方播报文本里属于「转向指令」的那一类，形如：

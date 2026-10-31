@@ -189,6 +189,12 @@ class GuidanceActivity : AppCompatActivity() {
     private lateinit var tvLimitBadge: TextView
     /** 路口放大图（showCross） */
     private lateinit var ivCrossImage: ImageView
+
+    /** 最近一张路口放大图 + 它最后一次出现的时刻（用于最短展示时长，见 renderSdkAlerts） */
+    private var lastCross: com.motohud.ble.navi.CrossImage? = null
+    private var crossShownAt = 0L
+    /** 侧栏是否正被路口大图独占（见 setCrossMode） */
+    private var crossMode = false
     /** SDK 提示条：服务区 / 交通事件 / 可切主辅路（三者共用一行，按优先级取一条） */
     private lateinit var tvNaviNote: TextView
     private lateinit var tvBleHint: TextView
@@ -279,6 +285,14 @@ class GuidanceActivity : AppCompatActivity() {
      */
     private val spokenTiers = HashSet<String>()
 
+    /**
+     * 已经说过**完整句**的路口（`"序号|动作"`）。
+     *
+     * 作用是保证每个路口的第一句一定带距离和序号 —— 否则起手就在临门距离内时，
+     * 用户只会听到孤零零一声"左转"（真机日志里连续两次"左转"就是这么来的）。
+     */
+    private val spokenIntersections = HashSet<String>()
+
     /** 上一次转向播报的时刻，用于 [APPROACH_MIN_GAP_MS] 这个最小间隔闸门 */
     private var lastApproachMs = 0L
 
@@ -289,12 +303,18 @@ class GuidanceActivity : AppCompatActivity() {
     private var lastAnnouncedStep = -1
 
     /**
-     * 电子眼播报去重：`"类型|限速"` → 上次播报时刻。
+     * 电子眼播报去重：`"点位流水号|距离档"` 的集合。
      *
-     * 导航 SDK 会在接近电子眼时持续回调 `updateCameraInfo`（同一批数据每秒都来），
-     * 不去重会变成每秒念一遍"前方500米测速摄像头"。
+     * 以前按「类型 + 限速」+ 30 秒冷却去重，问题有两个：
+     *  1. 一条路上连着两个同型号测速头，第二个会被 30 秒冷却整个吞掉 → 漏报；
+     *  2. 同一个探头只能念一次，800 米那句听完，到 300 米就没有确认了。
+     * 现在按引擎给的点位流水号（同一点位全程不变）+ 距离档（400 米一档）记，
+     * 同一个探头最多念两次（远一句、近一句），不同探头互不影响。
      */
-    private val cameraSpokenAt = HashMap<String, Long>()
+    private val cameraSpoken = HashSet<String>()
+
+    /** 上一条电子眼播报的时刻，用于 [CAMERA_MIN_GAP_MS] 最小间隔 */
+    private var lastCameraSpeakMs = 0L
 
     /** 已经念过的交通事件（按标题去重）：同一条封路信息不该每帧重复播 */
     private val incidentSpoken = HashSet<String>()
@@ -792,10 +812,14 @@ class GuidanceActivity : AppCompatActivity() {
         activeThresholds = TURN_THRESHOLDS
         lastAnnouncedStep = -1
         spokenTiers.clear()
+        spokenIntersections.clear()
         lastApproachMs = 0L
         prewarmedStep = -1
         featureAnnounced.clear()
-        cameraSpokenAt.clear()
+        cameraSpoken.clear()
+        lastCameraSpeakMs = 0L
+        lastCross = null
+        crossShownAt = 0L
         incidentSpoken.clear()
         serviceAreaSpoken.clear()
         curveAnnounced.clear()
@@ -1476,9 +1500,13 @@ class GuidanceActivity : AppCompatActivity() {
         // 路名也取「即将转弯」那一段（目标路），与图标/引导语/距离同一口径；
         // 取当前路段会出现「右转进入Y路」却配着"X路"的错位。
         // SDK 模式下直接用 NaviInfo.nextRoadName（官方数据，比从引导语里抠准）。
-        val roadText = s.nextRoadName.takeIf { it.isNotBlank() }
+        val roadText = (s.nextRoadName.takeIf { it.isNotBlank() }
             ?: s.currentRoadName.takeIf { it.isNotBlank() }
-            ?: route?.steps?.getOrNull(s.maneuverIndex)?.road.orEmpty()
+            ?: route?.steps?.getOrNull(s.maneuverIndex)?.road.orEmpty())
+            // 「无名道路」「当前道路」是 SDK 的占位值，印在卡上等于没说；
+            // 空出来时下面那行会显示「剩余里程」，信息量反而更大
+            .takeUnless { SpeechScript.isPlaceholderRoad(it) }
+            .orEmpty()
         tvTurnRoad.text = roadText.ifBlank {
             if (s.onRoute) getString(R.string.hud_step_remain_label) else getString(R.string.guidance_demo_short)
         }
@@ -1580,6 +1608,7 @@ class GuidanceActivity : AppCompatActivity() {
                 finishHistory()
             }
             hideBetterRouteCard()
+            setCrossMode(false)
             showArrivalCard(s)
             turnBanner.visibility = View.GONE
         } else {
@@ -1994,17 +2023,39 @@ class GuidanceActivity : AppCompatActivity() {
 
         val closeDist = com.motohud.ble.navi.VoiceGuidance.closeDistOf(s.speedKmh)
         val isClose = rem <= closeDist
-        val key = "${s.stepIndex}|${s.iconType}|$chosen"
+
+        // ---- 去重键 ----
+        // 以前用 `stepIndex|iconType|档位`，两个字段都是会抖的：
+        //  · `curStep` 在路口附近两个值之间跳；
+        //  · `iconType` 在 SDK 还没填充时是 0（直行），下一帧才变左转。
+        // 键一变，"已经说过"就失效 —— 真机日志里连续两次「左转」就是这么来的。
+        // 换成**沿路线的绝对里程**（已走 + 到该路口还剩），这个数在接近路口的
+        // 整个过程中是恒定的，与索引抖动、图标抖动都无关。按 50 米分桶消掉 GPS 噪声。
+        val absM = (s.traveled + rem).takeIf { s.traveled > 0 && it > 0 }?.toInt()
+        val place = if (absM != null) "A${absM / 50}" else "S${s.stepIndex}"
+        val key = "$place|$chosen"
         if (!spokenTiers.add(key)) return
         if (spokenTiers.size > 200) spokenTiers.clear()
 
-        val cue = if (isClose) {
+        // ---- 这个路口有没有说过一句完整的话？----
+        // 用户抱怨"转向播报不清楚"，根因就在这里：起手就在临门距离内（或中途跳档）时，
+        // 第一句直接是"左转"两个字，没有距离、没有序号、没有目标路 ——
+        // 等于什么都没说。所以每个路口的**第一句必须是完整句**，
+        // 之后才允许用"左转"这种短句收尾。
+        val firstForThisTurn = spokenIntersections.add(place)
+        if (spokenIntersections.size > 200) spokenIntersections.clear()
+
+        val cue = if (isClose && !firstForThisTurn) {
             com.motohud.ble.navi.SpeechArbiter.CLOSE_ACTION
         } else {
             com.motohud.ble.navi.SpeechArbiter.APPROACH
         }
-        // 临门只说动作；更远的档位说完整句（距离 + 第几个路口 + 动作 + 目标路 + 车道）
-        val text = if (isClose) closeText(s) else maneuverText(s, rem, withLane = rem <= LANE_HINT_M)
+        // 完整句：距离 + 第几个路口 + 动作 + 目标路 + 车道
+        val text = if (isClose && !firstForThisTurn) {
+            closeText(s)
+        } else {
+            maneuverText(s, rem, withLane = rem <= LANE_HINT_M || isClose)
+        }
         if (text.isBlank()) return
         lastApproachMs = now
         say(text, cue = cue)
@@ -2030,12 +2081,12 @@ class GuidanceActivity : AppCompatActivity() {
         val d = SpeechScript.distance(remainM)
         if (d.isEmpty()) return ""
         val sb = StringBuilder(d)
-        // 路口序号：1 也要说。骑行时"第一个还是第二个口子"是最容易拐错的地方，
-        // 省略反而让「左转」变成一个没有锚点的动作。
-        // 环岛例外：环岛本身就是一个明确的点（"走第几个出口"才是它的序号），
-        // 说"第 1 个路口进入环岛"是病句。
+        // 路口序号：**只有这一串路口不止一个时**才说。
+        // 单个路口说「第 1 个路口左转」是噪音 —— 眼前就一个口子，编号毫无信息量；
+        // 而两三个口子挨在一起时，「第 2 个」是唯一能防拐错的说法。
+        // 环岛也排除：环岛的序号在"第几个出口"，说"第 1 个路口进入环岛"是病句。
         val ord = s.maneuverOrdinal
-        if (ord in 1..9 && !SpeechScript.isRoundabout(s.iconType)) {
+        if (s.maneuverCount >= 2 && ord in 1..9 && !SpeechScript.isRoundabout(s.iconType)) {
             sb.append("，第 ").append(ord).append(" 个路口")
         }
         if (s.iconType == IconType.STRAIGHT) {
@@ -2109,13 +2160,14 @@ class GuidanceActivity : AppCompatActivity() {
         if (!s.running || s.arrived) return
         if (cam.distanceM <= 0 || cam.distanceM > CAMERA_SPEAK_M) return
         if (!com.motohud.ble.navi.CameraKind.worthSpeaking(cam.type)) return
-        val key = "${cam.type}|${cam.speedKmh}"
+        // 两个电子眼挨得近时（真机日志里出现过相隔 1 秒的两句），
+        // 连着念像是卡带；留一个最小间隔，第二句只进界面不进语音。
         val now = System.currentTimeMillis()
-        if (now - (cameraSpokenAt[key] ?: 0L) < CAMERA_SPEAK_COOLDOWN_MS) return
-        cameraSpokenAt[key] = now
-        if (cameraSpokenAt.size > 32) {
-            cameraSpokenAt.entries.removeAll { now - it.value > 120_000L }
-        }
+        if (now - lastCameraSpeakMs < CAMERA_MIN_GAP_MS) return
+        // 同一个点位、同一距离档只说一次：远档给反应时间，近档做确认，最多两句
+        if (!cameraSpoken.add(cam.speechKey())) return
+        if (cameraSpoken.size > 64) cameraSpoken.clear()
+        lastCameraSpeakMs = now
         say(cameraSpeech(cam), cue = com.motohud.ble.navi.SpeechArbiter.APPROACH)
     }
 
@@ -2130,8 +2182,11 @@ class GuidanceActivity : AppCompatActivity() {
         val d = com.motohud.ble.navi.SpeechScript.span(cam.distanceM)
         val name = getString(com.motohud.ble.navi.CameraKind.labelRes(cam.type))
         return when {
+            // 装了离线模型：能念任意数字，把限速一起说出来，这是最有用的一句
             !presetPack -> cameraText(cam)
-            cam.interval -> getString(R.string.camera_ahead_interval_preset, d, name)
+            // 区间测速：出口距离在变，内置包念不了，只说"进入区间测速"
+            cam.interval -> getString(R.string.camera_ahead_interval_preset, d)
+            // 内置包：类型名 + 「有」，句式与界面完全一致（"前方 500 米有测速摄像头，请注意车速"）
             else -> getString(R.string.camera_ahead_slow, d, name)
         }
     }
@@ -2177,7 +2232,12 @@ class GuidanceActivity : AppCompatActivity() {
         val name = getString(com.motohud.ble.navi.CameraKind.labelRes(cam.type))
         return when {
             cam.interval ->
-                getString(R.string.camera_ahead_interval, d, cam.speedKmh, cam.intervalRemainM)
+                getString(
+                    R.string.camera_ahead_interval,
+                    d,
+                    cam.speedKmh,
+                    com.motohud.ble.navi.SpeechScript.span(cam.intervalRemainM)
+                )
             cam.speedKmh > 0 -> getString(R.string.camera_ahead_limit, d, name, cam.speedKmh)
             else -> getString(R.string.camera_ahead, d, name)
         }
@@ -2227,7 +2287,10 @@ class GuidanceActivity : AppCompatActivity() {
             cam != null && cam.distanceM in 1..CAMERA_SHOW_M -> {
                 llCameraWarn.visibility = View.VISIBLE
                 tvCameraWarn.text = if (cam.interval) {
-                    getString(R.string.camera_interval_remain, cam.intervalRemainM)
+                    getString(
+                        R.string.camera_interval_remain,
+                        com.motohud.ble.navi.SpeechScript.span(cam.intervalRemainM)
+                    )
                 } else {
                     cameraText(cam)
                 }
@@ -2247,17 +2310,26 @@ class GuidanceActivity : AppCompatActivity() {
         }
 
         // ---- 路口放大图（画中画里不显示，小窗放不下）----
+        // SDK 的 showCross/hideCross 是**成对但不等时**的：复杂路口给两三秒，
+        // 简单路口可能只闪一帧就 hide —— 骑手抬头时图已经没了，感觉"根本没有路口图"。
+        // 所以这里留一个最短展示时间：hide 之后仍挂 [CROSS_MIN_SHOW_MS] 再撤。
         val cross = s.cross
-        if (cross != null && cross.valid && !inPip) {
-            if (ivCrossImage.tag !== cross.bitmap) {
-                ivCrossImage.setImageBitmap(cross.bitmap)
-                ivCrossImage.tag = cross.bitmap
+        val nowMs = System.currentTimeMillis()
+        if (cross != null && cross.valid) {
+            lastCross = cross
+            crossShownAt = nowMs
+        }
+        val crossBitmap = lastCross?.takeIf { it.valid }?.bitmap
+        val showCross = !inPip && crossBitmap != null && nowMs - crossShownAt < CROSS_MIN_SHOW_MS
+        setCrossMode(showCross)
+        if (showCross) {
+            if (ivCrossImage.tag !== crossBitmap) {
+                ivCrossImage.setImageBitmap(crossBitmap)
+                ivCrossImage.tag = crossBitmap
             }
-            ivCrossImage.visibility = View.VISIBLE
-        } else if (ivCrossImage.visibility != View.GONE) {
+        } else if (ivCrossImage.tag != null) {
             ivCrossImage.setImageDrawable(null)
             ivCrossImage.tag = null
-            ivCrossImage.visibility = View.GONE
         }
 
         /*
@@ -2284,6 +2356,32 @@ class GuidanceActivity : AppCompatActivity() {
         } else if (tvNaviNote.visibility != View.GONE) {
             tvNaviNote.visibility = View.GONE
         }
+    }
+
+    /**
+     * 路口大图「独占侧栏」模式开关。
+     *
+     * 开：把右栏整个让给大图 —— 转向卡、车道箭头、电子眼、ETA 全部 INVISIBLE（不是 GONE，
+     *     这样恢复时不用重算布局，也不会因为尺寸跳变让地图重新居中）。
+     * 关：原样恢复。返回键在左上角、独立于侧栏，所以大图期间仍然能退出导航。
+     *
+     * 为什么要独占：骑行时这块图只活两三秒，叠在侧栏上方会让字和图糊成一片；
+     * 而它的信息量（这个路口怎么过）本来就覆盖了侧栏那几行字。
+     */
+    private fun setCrossMode(on: Boolean) {
+        if (crossMode == on) return
+        crossMode = on
+        val v = if (on) View.INVISIBLE else View.VISIBLE
+        topBar.visibility = v
+        bottomInfo.visibility = v
+        mapActions.visibility = v
+        // 底部按钮行横屏本来就 GONE，恢复时不能一律给 VISIBLE，否则会冒出一整行红按钮
+        findViewById<View>(R.id.bottom_buttons).visibility = when {
+            on -> View.INVISIBLE
+            landscapeNow -> View.GONE
+            else -> View.VISIBLE
+        }
+        ivCrossImage.visibility = if (on) View.VISIBLE else View.GONE
     }
 
     private fun naviAgain() {
@@ -2725,13 +2823,38 @@ class GuidanceActivity : AppCompatActivity() {
             rightMargin = 0
             turnBanner.layoutParams = this
         }
-        // 路口放大图现在挂在地图层左下角（不再塞进 300dp 侧栏）：
-        // 高德是"接近路口时左半屏弹大图"，横向 2/3 的地图区域正好放得下。
-        // 横屏屏高只有 360dp，所以给 190dp 高；竖屏宽松一些，但不必更大。
-        ivCrossImage.layoutParams = ivCrossImage.layoutParams.apply {
-            width = dp(if (landscape) 260 else 190)
-            height = dp(if (landscape) 190 else 140)
+        // 路口放大图：横屏**整栏盖住右侧侧栏**（与侧栏同宽、满高），
+        // 竖屏贴底通栏盖住 ETA/按钮那一段。大图撤掉后侧栏由 setCrossMode 恢复。
+        ivCrossImage.layoutParams = (ivCrossImage.layoutParams as FrameLayout.LayoutParams).apply {
+            if (landscape) {
+                width = dp(DP_PANEL_LAND)
+                height = ViewGroup.LayoutParams.MATCH_PARENT
+                gravity = Gravity.TOP or Gravity.END
+                marginStart = 0
+                topMargin = 0
+                bottomMargin = 0
+            } else {
+                width = ViewGroup.LayoutParams.MATCH_PARENT
+                height = dp(260)
+                gravity = Gravity.BOTTOM
+                marginStart = 0
+                topMargin = 0
+                bottomMargin = 0
+            }
         }
+        // 车道行横屏压到 44dp：侧栏竖向只有 360dp，转向卡（大图标）+ 车道行
+        // + 电子眼行要一起塞下，56dp 会把电子眼那行顶到下方信息卡底下（真机已复现重叠）。
+        laneGuideView.layoutParams = laneGuideView.layoutParams.apply {
+            height = dp(if (landscape) 44 else 56)
+        }
+        // 横屏把转向图标收到 72dp、上下内边距收到 10dp：仍然是"一个大箭头"的视觉重心，
+        // 但给车道行/电子眼行腾出整整 30dp —— 360dp 高的屏上这 30dp 就是"会不会重叠"。
+        val turnIconSize = dp(if (landscape) 72 else 88)
+        ivTurnIcon.layoutParams = ivTurnIcon.layoutParams.apply {
+            width = turnIconSize
+            height = turnIconSize
+        }
+        turnBanner.setPadding(dp(12), dp(if (landscape) 10 else 12), dp(14), dp(if (landscape) 10 else 12))
         (tvSignalWarn.layoutParams as ViewGroup.MarginLayoutParams).apply {
             rightMargin = 0
             tvSignalWarn.layoutParams = this
@@ -2860,6 +2983,17 @@ class GuidanceActivity : AppCompatActivity() {
         /** 电子眼进入该距离内才显示在界面上 */
         private const val CAMERA_SHOW_M = 1200
 
+        /** 两条电子眼播报之间的最小间隔：6 秒 ≈ 一句完整的话念完 */
+        private const val CAMERA_MIN_GAP_MS = 6_000L
+
+        /**
+         * 路口放大图最短展示时间。
+         *
+         * SDK 的 show/hide 不等时，简单路口可能只闪一帧。2.5 秒是"抬头能看到、
+         * 又不会挡住地图太久"的折中：按 30km/h 只走 20 米，不影响判断。
+         */
+        private const val CROSS_MIN_SHOW_MS = 2_500L
+
         /**
          * 距路口该距离内把车道指引并进转向句（「…左转，请走左侧车道」）。
          *
@@ -2874,9 +3008,6 @@ class GuidanceActivity : AppCompatActivity() {
          * 比这更密就会叠音（前一句还没念完后一句就抢进来），听起来就是"反复播报"。
          */
         private const val APPROACH_MIN_GAP_MS = 4_000L
-
-        /** 同类型电子眼的播报冷却，避免一条路上连续几个测速头反复念 */
-        private const val CAMERA_SPEAK_COOLDOWN_MS = 30_000L
 
         /** 服务区在 3 公里内才播报（再早念了没有行动价值） */
         private const val SERVICE_AREA_SPEAK_M = 3000

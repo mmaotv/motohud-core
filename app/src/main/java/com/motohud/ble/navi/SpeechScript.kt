@@ -268,6 +268,15 @@ object SpeechScript {
         ENTER_ROAD.find(instruction)?.groupValues?.getOrNull(1)?.trim()
             ?.takeIf { it.isNotEmpty() && it !in PLACEHOLDER_ROAD } ?: ""
 
+    /**
+     * 是不是占位路名（「无名道路」「当前道路」这类）。
+     *
+     * 界面用：这类词印在转向卡上等于没有信息，宁可留空显示「剩余里程」。
+     * 与 [isUsableRoad] 分开是因为后者还带"长度 ≤ 12（能进语音包）"的约束，
+     * 界面没必要受那个限制。
+     */
+    fun isPlaceholderRoad(road: String): Boolean = road.trim() in PLACEHOLDER_ROAD
+
     /** 高德会用这些词占位，它们不是真实路名 */
     private val PLACEHOLDER_ROAD = setOf(
         "当前道路", "无名道路", "未知道路", "道路", "环岛", "-", "无"

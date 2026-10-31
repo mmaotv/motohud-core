@@ -96,6 +96,13 @@ interface NaviEngine {
          * 我们按引导点间距自己推（见 `AmapNaviEngine.ordinalAt`）。
          */
         val maneuverOrdinal: Int = 1,
+        /**
+         * 这一串路口一共有几个（见 `AmapNaviEngine.clusterAt`）。
+         *
+         * 只有 ≥2 时「第几个路口」才有区分度：单一路口说「第 1 个路口左转」，
+         * 等于把人绕进一个不存在的编号里，听着反而糊涂。
+         */
+        val maneuverCount: Int = 1,
         /** 再下一个转向动作的图标（SDK 引导点 `curStep + 1`；0 = 未知） */
         val nextManeuverIcon: Int = 0,
         /** 再下一个转向后进入的路名（同上；空 = 未知） */
