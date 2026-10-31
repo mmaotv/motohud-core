@@ -18,6 +18,30 @@
     android:layout_height="match_parent"
     android:background="@color/bg_window">
 
+    <!--
+      路口放大图触发器（影子导航视图）
+
+      **为什么必须有它**：路口/环岛/匝道/立交/大桥的放大图（`AMapNaviCross`）只在
+      挂着 `AMapNaviView` 时才会由 SDK 生成并回调 `showCross()`。只拿裸 `AMapNavi`
+      时 SDK 压根不向服务端请求这份图片数据，`showCross` 一次都不回调。
+      `AMapNavi` 侧也没有任何替代入口（已 javap 全量核对）。
+
+      真机验证（2026-10-31）：挂上它、且补调
+      `AMapNaviCoreManager.setCrossImageSize(w,h)` 之后，机场路一趟连续回调了
+      `showCross seq=1` / `seq=2`。两件事都做才有图，缺一不可。
+
+      这里只作触发器：铺满全屏但 alpha=0.01（肉眼不可见）、放在**最底层**，
+      触摸事件由上层的地图和按钮先接走；代码里另外关掉了它的 clickable/focusable。
+      真正的图由我们自己画在 `ll_cross_panel` 里。
+    -->
+    <com.amap.api.navi.AMapNaviView
+        android:id="@+id/shadow_navi_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0.01"
+        android:clickable="false"
+        android:focusable="false" />
+
     <!-- 地图 -->
     <com.amap.api.maps.MapView
         android:id="@+id/guidance_map"
@@ -117,28 +141,16 @@
                     android:textSize="11sp" />
             </LinearLayout>
 
-            <ImageView
-                android:id="@+id/btn_voice"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_navi_circle"
-                android:contentDescription="@string/navi_voice"
-                android:padding="11dp"
-                android:src="@drawable/ic_volume_on"
-                app:tint="@color/text_primary" />
-
-            <ImageView
-                android:id="@+id/btn_cast"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:layout_marginStart="6dp"
-                android:background="@drawable/bg_navi_circle"
-                android:contentDescription="@string/navi_cast"
-                android:padding="11dp"
-                android:src="@drawable/ic_cast"
-                app:tint="@color/accent" />
-
+            <!--
+              语音 / 投屏两个按钮已从这一行移出，改成根布局里的悬浮容器
+              @id/quick_actions（见文件末尾）：
+                竖屏 —— 贴右上角，与原来位置视觉一致；
+                横屏 —— 贴左上角返回键右边。
+              横屏侧栏只有 300dp 宽、整屏才 360dp 高，这一行原来被两个 44dp 圆钮
+              占掉整整 52dp，转向横幅就只能往下挤。挪走后顶栏第一行只剩目的地卡
+              （横屏也是 GONE），整行塌陷，转向横幅直接顶到栏顶，横幅/车道行/电子眼行
+              才够地方摆 —— 用户要的"右边露出更大空间"就是这 52dp。
+            -->
             <!-- 画中画（Android 8+ 才显示，低版本隐藏） -->
             <ImageView
                 android:id="@+id/btn_pip"
@@ -404,6 +416,50 @@
         android:padding="11dp"
         android:src="@drawable/ic_arrow_back"
         app:tint="@color/text_primary" />
+
+    <!--
+      语音 / 投屏：独立悬浮容器，不再挂在顶栏第一行里。
+
+      位置由 applyOrientationLayout() 按方向切换：
+        竖屏 gravity = top|end，marginEnd 12dp —— 与原来右上角位置一致，零回归；
+        横屏 gravity = top|start，marginStart 64dp —— 紧贴左上角返回键右边（12+44+8）。
+
+      为什么要挪：横屏右侧侧栏只有 300dp 宽、整屏 360dp 高，这两个 44dp 圆钮
+      占掉顶栏第一行整整 52dp，转向横幅 + 车道行 + 电子眼行只能一路往下挤
+      （真机上曾出现车道行与电子眼行重叠）。挪到左边后侧栏第一行塌陷，
+      转向横幅直接顶到栏顶，52dp 全给横幅 —— 用户要的"右边露出更大空间"就是它。
+      左上角本来就只承担"退出"，再加两个低频开关不会误触到导航内容。
+    -->
+    <LinearLayout
+        android:id="@+id/quick_actions"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginStart="64dp"
+        android:layout_marginEnd="12dp"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/btn_voice"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_navi_circle"
+            android:contentDescription="@string/navi_voice"
+            android:padding="11dp"
+            android:src="@drawable/ic_volume_on"
+            app:tint="@color/text_primary" />
+
+        <ImageView
+            android:id="@+id/btn_cast"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/bg_navi_circle"
+            android:contentDescription="@string/navi_cast"
+            android:padding="11dp"
+            android:src="@drawable/ic_cast"
+            app:tint="@color/accent" />
+    </LinearLayout>
 
     <!-- 浮动：全览 / 回中 -->
     <LinearLayout
@@ -939,23 +995,168 @@
     <!--
       路口放大图（导航 SDK showCross / showModeCross）：SDK 直接给位图。
 
-      **放在最后一层、压住右侧整栏**，而不是塞在地图角落里。
-      这块图只在靠近路口时出现两三秒，作用是"看清这个路口怎么过"；
-      骑手这时的视线本来就在路口上，侧栏的转向/车道/ETA 全是重复信息。
-      盖住整栏换来的是：图可以做到侧栏满宽满高（500x320 的位图不再被压扁），
-      图的边缘也不会和侧栏文字混在一起。
-      大图撤掉后侧栏原样恢复（见 GuidanceActivity.setCrossMode）。
+      不是"一个黑底放张图"，而是一张完整的卡：**标题行（箭头 + 距离 + 动作）
+      + 大图 + 底部 ETA 行**。理由：
+       · 只给图时，骑手不知道"这张图是几米后的那个路口"，也不知道还剩多远到目的地；
+       · 侧栏的转向卡/车道/电子眼在这两三秒里确实重复，但"预计到达 + 剩余里程"
+         **不重复、且一直在被看**，所以保留在卡片底部（用户明确要求）。
+      大图撤掉后整栏原样恢复（见 GuidanceActivity.setCrossMode）。
 
-      环岛、匝道、立交、大桥同样走这两个回调，出现的就是对应的图。
+      环岛 / 匝道 / 立交 / 大桥 走的是同两个回调，SDK 认为需要放大时就会推对应的图。
     -->
-    <ImageView
-        android:id="@+id/iv_cross_image"
+    <LinearLayout
+        android:id="@+id/ll_cross_panel"
         android:layout_width="300dp"
         android:layout_height="match_parent"
         android:layout_gravity="top|end"
         android:background="@drawable/bg_cross_panel"
-        android:contentDescription="@string/hud_turn_icon"
-        android:padding="8dp"
-        android:scaleType="fitCenter"
-        android:visibility="gone" />
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="10dp"
+        android:visibility="gone">
+
+        <!-- 标题行：和转向卡同一套视觉语言（大箭头 + 大距离 + 动作） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/iv_cross_turn"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:contentDescription="@string/hud_turn_icon"
+                android:src="@drawable/ic_turn_straight"
+                app:tint="@color/accent" />
+
+            <TextView
+                android:id="@+id/tv_cross_distance"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:fontFamily="@font/inter"
+                android:maxLines="1"
+                android:textColor="@color/accent"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                app:autoSizeMaxTextSize="26sp"
+                app:autoSizeMinTextSize="16sp"
+                app:autoSizeTextType="uniform" />
+
+            <TextView
+                android:id="@+id/tv_cross_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:fontFamily="@font/inter"
+                android:maxLines="2"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="8dp"
+            android:background="#1FFFFFFF" />
+
+        <!-- 大图：占满中间剩余空间，fitCenter 不裁切路形 -->
+        <ImageView
+            android:id="@+id/iv_cross_image"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="6dp"
+            android:layout_weight="1"
+            android:contentDescription="@string/hud_turn_icon"
+            android:scaleType="fitCenter" />
+
+        <!-- 底部：预计到达 / 剩余距离（用户要求保留），空间够时再加当前速度 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tv_cross_eta"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/inter"
+                    android:maxLines="1"
+                    android:textColor="@color/accent"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/guidance_eta"
+                    android:textColor="@color/text_tertiary"
+                    android:textSize="10sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tv_cross_remain"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/inter"
+                    android:maxLines="1"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/guidance_remain"
+                    android:textColor="@color/text_tertiary"
+                    android:textSize="10sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tv_cross_speed"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/inter"
+                    android:maxLines="1"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/guidance_speed"
+                    android:textColor="@color/text_tertiary"
+                    android:textSize="10sp" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
 </FrameLayout>

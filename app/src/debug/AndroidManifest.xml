@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  仅 debug 构建生效的清单叠加层（release 包不含本文件，不影响线上安全边界）。
+
+  用途：GuidanceActivity 在主清单里是 exported="false"（正确，导航页不该被外部拉起），
+  但真机验证时没法用 adb shell am start 直达，只能手动点进 App 走一遍搜索选路，
+  改一行代码就要重复一次。这里给导航页加一个**只在 debug 存在的别名入口**，
+  让 adb 能带着 extra 直接拉起，配合 extra_emulator=true 跑模拟导航。
+
+  用法见 tools/demo_navi.sh（同样只在本地用，不入 git）。
+
+  注意：XML 注释里不能出现连续两个减号，写 adb 参数时别照抄命令原文。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+
+        <activity-alias
+            android:name=".ui.navi.DebugGuidanceAlias"
+            android:exported="true"
+            android:targetActivity="com.motohud.ble.ui.navi.GuidanceActivity" />
+
+    </application>
+
+</manifest>

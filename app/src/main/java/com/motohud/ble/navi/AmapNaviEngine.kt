@@ -150,6 +150,38 @@ class AmapNaviEngine(
     /** 电子眼流水号：同一个点位全程不变，换点位才 +1（播报去重靠它） */
     private var camSeq = 0
 
+    /**
+     * 路口放大图流水号：每收到一次新的放大图回调 +1。
+     *
+     * **不能用 bitmap 引用判断"有没有换图"**：SDK 很可能复用同一个 Bitmap 实例、
+     * 把新图的像素重新写进去（尤其 `hideCross → showCross` 连续切换时）。
+     * 界面层若用 `tag !== bitmap` 判重，就会认定"没变化"而不重新 setImageBitmap，
+     * 结果整程只看到第一张路口图，后面的环岛/匝道/立交/大桥图全都刷不出来。
+     * 这里给每张图编号，界面按编号变化才刷新。
+     */
+    private var crossSeq = 0
+
+    /**
+     * 把 SDK 给的放大图**立刻复制一份自己持有**。
+     *
+     * `AMapNaviCross.getBitmap()` 返回的位图**所有权在 SDK 手里**：它会复用同一个实例
+     * 重写像素，并在 `hideCross()` 之后随时回收。我们直接存引用的话，界面层过一会儿
+     * 拿到的就是一张 `isRecycled == true` 的废图，`CrossImage.valid` 判假 → 不显示。
+     *
+     * 这正是"大图时有时无"的根因：同一个路口，SDK 回收得早我们一次都画不出来，
+     * 回收得晚就能画出来一张。表现上像是随机抽风，实际是跟 SDK 的回收时序赛跑。
+     * 复制之后像素归我们，SDK 怎么回收都与显示无关。
+     *
+     * 尺寸参考：SDK 下发的路口图通常 500x320 左右，ARGB_8888 一份约 640KB，
+     * 全程只有一张（新图覆盖旧图，旧图交 GC），内存可忽略。
+     */
+    private fun ownBitmap(src: android.graphics.Bitmap?): android.graphics.Bitmap? {
+        if (src == null || src.isRecycled) return null
+        // 复制失败（内存紧张）退回原图，至少先画出来一帧，总比全黑好
+        return runCatching { src.copy(android.graphics.Bitmap.Config.ARGB_8888, false) }
+            .getOrNull() ?: src.takeUnless { it.isRecycled }
+    }
+
     // ---------------------------------------------------------------- 公开 API
 
     override fun start(
@@ -524,9 +556,12 @@ class AmapNaviEngine(
         val g = guides
         if (step < 0 || step >= g.size) return 1 to 1
         // 向后串：从这一步往前数，相邻间距 < 150m 的
+        // 注意 `i > 1` 而不是 `i > 0`：`guides[0]` 是**路线起点**，不是路口。
+        // 起手就拐弯时（起点距第一个路口 50 米），把起点当成"已经过一个路口"
+        // 会让序号凭空多 1 —— 播报就会把第一个路口说成「第 2 个路口」。
         var ord = 1
         var i = step
-        while (i > 0 && ord < 9) {
+        while (i > 1 && ord < 9) {
             if (gapBetween(g, i - 1, i) >= JUNCTION_CLUSTER_M) break
             ord++
             i--
@@ -777,8 +812,16 @@ class AmapNaviEngine(
 
         /** 路口放大图：SDK 直接给位图 */
         override fun showCross(cross: AMapNaviCross?) {
-            val bitmap = runCatching { cross?.bitmap }.getOrNull() ?: return
-            _state.update { it.copy(cross = CrossImage(bitmap)) }
+            val src = runCatching { cross?.bitmap }.getOrNull() ?: return
+            // 必须复制：SDK 之后会回收 / 复用这张位图，只存引用会导致界面画不出来
+            val bitmap = ownBitmap(src) ?: return
+            // 打一行日志：路口/环岛/匝道/立交/大桥的放大图全都走这条回调，
+            // 排查"只出第一张"时先看这里有没有连续回调进来。
+            android.util.Log.i(
+                "NaviCross",
+                "showCross seq=${crossSeq + 1} ${bitmap.width}x${bitmap.height}"
+            )
+            _state.update { it.copy(cross = CrossImage(bitmap, ++crossSeq)) }
         }
 
         override fun hideCross() {
@@ -792,7 +835,11 @@ class AmapNaviEngine(
             val bitmap = runCatching {
                 android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             }.getOrNull() ?: return
-            _state.update { it.copy(cross = CrossImage(bitmap)) }
+            android.util.Log.i(
+                "NaviCross",
+                "showModeCross seq=${crossSeq + 1} ${bitmap.width}x${bitmap.height}"
+            )
+            _state.update { it.copy(cross = CrossImage(bitmap, ++crossSeq)) }
         }
 
         override fun hideModeCross() {

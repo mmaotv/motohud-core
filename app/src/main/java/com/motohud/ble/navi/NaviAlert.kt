@@ -225,7 +225,18 @@ data class LaneGuide(
 
 
 /** 路口放大图（SDK `showCross` 给的位图，直接 setImageBitmap 即可） */
-data class CrossImage(val bitmap: Bitmap?) {
+/**
+ * 路口放大图。
+ *
+ * @param seq 流水号，每次收到新的放大图回调 +1。
+ *
+ * **不能靠 bitmap 引用判断要不要刷新界面**：SDK 每次回调很可能复用**同一个 Bitmap
+ * 实例**（把像素重新写进去），引用相等但内容已经变了。UI 用 `tag !== bitmap` 判重
+ * 就会认定"没变化"、不重新 setImageBitmap，结果整程只看到第一张路口图 ——
+ * 用户反馈的"只展示第一张，后面再也不展示"就是这个原因。
+ * 现在以 seq 为准：seq 变了就重新设一次。
+ */
+data class CrossImage(val bitmap: Bitmap?, val seq: Int = 0) {
     val valid: Boolean get() = bitmap != null && !bitmap.isRecycled
 }
 

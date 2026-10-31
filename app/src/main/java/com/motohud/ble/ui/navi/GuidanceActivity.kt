@@ -45,6 +45,7 @@ import com.amap.api.maps.model.MarkerOptions
 import com.amap.api.maps.model.Polyline
 import com.amap.api.location.AMapLocation
 import com.amap.api.maps.model.PolylineOptions
+import com.amap.api.navi.AMapNaviView
 import com.motohud.ble.MotoHudApp
 import com.motohud.ble.R
 import com.motohud.ble.amap.AmapManager
@@ -146,6 +147,12 @@ class GuidanceActivity : AppCompatActivity() {
     private var mapView: MapView? = null
     private var aMap: AMap? = null
 
+    /**
+     * 影子导航视图：8dp×8dp、alpha=0、被地图盖住，只为让 SDK 生成路口放大图。
+     * 见 [setupShadowNaviView] 的说明。
+     */
+    private var shadowNaviView: AMapNaviView? = null
+
     /** 全程路线（未走部分）与已走路段，两条线叠出"走到哪了"的效果 */
     private var aheadLine: Polyline? = null
     private var doneLine: Polyline? = null
@@ -190,11 +197,24 @@ class GuidanceActivity : AppCompatActivity() {
     /** 路口放大图（showCross） */
     private lateinit var ivCrossImage: ImageView
 
+    /** 路口大图整卡：标题行 + 图 + ETA 行（见布局注释，不是光一块图） */
+    private lateinit var crossPanel: View
+    private lateinit var ivCrossTurn: ImageView
+    private lateinit var tvCrossDistance: TextView
+    private lateinit var tvCrossTitle: TextView
+    private lateinit var tvCrossEta: TextView
+    private lateinit var tvCrossRemain: TextView
+    private lateinit var tvCrossSpeed: TextView
+
     /** 最近一张路口放大图 + 它最后一次出现的时刻（用于最短展示时长，见 renderSdkAlerts） */
     private var lastCross: com.motohud.ble.navi.CrossImage? = null
     private var crossShownAt = 0L
     /** 侧栏是否正被路口大图独占（见 setCrossMode） */
     private var crossMode = false
+
+    /** 路口大图卡的原始上内边距 + 状态栏高度（运行时算，见 onCreate 末尾） */
+    private var crossPanelBaseTop = 0
+    private var statusBarPx = 0
     /** SDK 提示条：服务区 / 交通事件 / 可切主辅路（三者共用一行，按优先级取一条） */
     private lateinit var tvNaviNote: TextView
     private lateinit var tvBleHint: TextView
@@ -467,6 +487,7 @@ class GuidanceActivity : AppCompatActivity() {
 
         ensureLocationPermission()
         setupMap(savedInstanceState)
+        setupShadowNaviView(savedInstanceState)
         initVoice()
         bindActions()
         updateModeBadge()
@@ -527,6 +548,13 @@ class GuidanceActivity : AppCompatActivity() {
         tvCameraWarn = findViewById(R.id.tv_camera_warn)
         tvLimitBadge = findViewById(R.id.tv_limit_badge)
         ivCrossImage = findViewById(R.id.iv_cross_image)
+        crossPanel = findViewById(R.id.ll_cross_panel)
+        ivCrossTurn = findViewById(R.id.iv_cross_turn)
+        tvCrossDistance = findViewById(R.id.tv_cross_distance)
+        tvCrossTitle = findViewById(R.id.tv_cross_title)
+        tvCrossEta = findViewById(R.id.tv_cross_eta)
+        tvCrossRemain = findViewById(R.id.tv_cross_remain)
+        tvCrossSpeed = findViewById(R.id.tv_cross_speed)
         tvNaviNote = findViewById(R.id.tv_navi_note)
         tvBleHint = findViewById(R.id.tv_guidance_ble_hint)
         tvLights = findViewById(R.id.tv_lights)
@@ -574,6 +602,27 @@ class GuidanceActivity : AppCompatActivity() {
             }
             insets
         }
+        // 语音 / 投屏悬浮容器：与返回键同一行，但不在顶栏里，inset 得自己算。
+        // 竖屏贴右上角（让开右侧系统栏/手势条）；横屏贴左上角、排在返回键右边
+        // （marginStart = 返回键 44dp + 8dp 间距，再叠左侧系统栏 inset）。
+        ViewCompat.setOnApplyWindowInsetsListener(
+            findViewById<View>(R.id.quick_actions)
+        ) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val gap = (44 + 8) * resources.displayMetrics.density
+            (v.layoutParams as FrameLayout.LayoutParams).apply {
+                topMargin = bars.top + baseTop
+                if (gravity and Gravity.END == Gravity.END) {
+                    marginStart = 0
+                    marginEnd = bars.right + baseStart
+                } else {
+                    marginStart = bars.left + baseStart + gap.toInt()
+                    marginEnd = 0
+                }
+                v.layoutParams = this
+            }
+            insets
+        }
         ViewCompat.setOnApplyWindowInsetsListener(bottomInfo) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             if (landscapeNow) {
@@ -590,6 +639,15 @@ class GuidanceActivity : AppCompatActivity() {
             }
             insets
         }
+        // 路口大图整卡是满高的深色栏，不做处理会把状态栏的时间/电量压在卡片上。
+        // **不能用 inset listener**：这个 View 初始是 GONE，GONE 的 View 不接收
+        // insets 分发，等它变 VISIBLE 时也不会补发一次（真机截图里电池图标就印在卡上）。
+        // 所以直接量状态栏高度，在 setCrossMode 打开时写进 padding。
+        crossPanelBaseTop = (10 * resources.displayMetrics.density).toInt()
+        statusBarPx = runCatching {
+            val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+            if (id > 0) resources.getDimensionPixelSize(id) else 0
+        }.getOrDefault(0)
     }
 
     private fun bindActions() {
@@ -1199,6 +1257,95 @@ class GuidanceActivity : AppCompatActivity() {
     }
 
     // ---------- 地图 ----------
+
+    /**
+     * 挂一个"影子"导航视图，**只为点亮 SDK 的路口放大图能力**。
+     *
+     * 高德的 `AMapNaviCross` 是**网络下发的图片数据**
+     * （构造器 `AMapNaviCross(int picFormat, byte[] head, byte[] body)`）。
+     * SDK 只在挂着 `AMapNaviView` 时才去请求这份数据、才会回调 `showCross()`；
+     * 只用裸 `AMapNavi` 时一次都不回调，`AMapNavi` 侧也没有任何替代开关
+     * （javap 全量核对，只有与本需求无关的 `setIsNaviTravelView`）。
+     *
+     * 所以"整程看不到环岛/匝道/立交的大图"根因不是去重写错，而是**根本没有图**。
+     *
+     * 真机验证过：挂上它之后 `showCross()` 开始有回调（机场路一趟出 2 张）。
+     * 它自己绘制的结果完全不参与界面（放在 root 最底层、alpha=0、不吃触摸），
+     * 图仍然由我们画在 `ll_cross_panel`。
+     */
+    private fun setupShadowNaviView(savedInstanceState: Bundle?) {
+        val v = findViewById<AMapNaviView?>(R.id.shadow_navi_view) ?: return
+        if (!AmapManager.initMap(this)) return
+        runCatching {
+            // 影子视图只用来点亮能力，绝不能吃触摸事件
+            v.isClickable = false
+            v.isFocusable = false
+            v.isFocusableInTouchMode = false
+            v.setOnTouchListener { _, _ -> false }
+            // ViewOptions 必须在 onCreate 之前配好，之后再改只有部分项生效
+            v.viewOptions?.apply {
+                setRealCrossDisplayShow(true)   // 实景路口放大图
+                setModeCrossDisplayShow(true)   // 3D 模型路口图（环岛/立交多用这个）
+                setEyrieCrossDisplay(true)      // 鹰眼放大图（高速匝道/分岔）
+                setLaneInfoShow(false)          // 车道自己画，别在 8dp 里再画一份
+                setAutoChangeZoom(false)        // 不抢缩放，免得和主地图行为不一致
+                // 放大图必须给明确的显示区域。不设时 View 内部算出来可能是 0 尺寸，
+                // native 侧就会认为“没有地方画”而不请求图片 —— 试验：先给 3/4 屏。
+                val w = resources.displayMetrics.widthPixels
+                val h = resources.displayMetrics.heightPixels
+                val rect = android.graphics.Rect(w / 4, h / 4, w, h)
+                setCrossLocation(rect, rect)
+                setEyrieCrossLocation(rect, rect)
+            }
+            v.onCreate(savedInstanceState)
+            v.onResume()
+            // AMapNaviView.onCreate 会把 AMapNavi 与 View 绑起来，可能顺手把
+            // 内置语音重新打开 —— 那样会和我们的 TTS 叠音。这里压回去。
+            AmapManager.initNavi(this)
+            runCatching { com.amap.api.navi.AMapNavi.getInstance(this)?.setUseInnerVoice(false) }
+            // 同理，过滤开关也重设一次，保证放大图不被 SDK 的默认策略吃掉
+            runCatching {
+                com.amap.api.navi.AMapNavi.getInstance(this)?.naviSetting
+                    ?.SetFilterShowCrossMessageStatus(false)
+            }
+            // 尺寸必须在导航 SDK 起来**之后**设，否则 native manager 还没 init，
+            // 设进去的尺寸直接丢，等于没设。
+            applyCrossImageSize()
+            shadowNaviView = v
+            android.util.Log.i(TAG_CROSS, "shadow AMapNaviView ready")
+        }.onFailure {
+            android.util.Log.w(TAG_CROSS, "shadow AMapNaviView setup failed: $it")
+        }
+    }
+
+    /**
+     * 告诉 native 侧「放大图有多大」。
+     *
+     * `AMapNaviCoreManager.setCrossImageSize(w, h)` 是 `public static`，但整个 SDK 里
+     * **没有任何一处调用它**（已 grep 全 jar 确认），公开文档也没有。它是给调用方自己
+     * 通知 native 绘制尺寸用的：native 拿不到尺寸就按 0 处理，判定「没地方画」，
+     * 于是放大图事件根本不产生 —— 光挂 `AMapNaviView`、开 `setRealCrossDisplayShow`
+     * 都还是出不来。
+     *
+     * 真机验证：加上这一句之后，机场路一趟开始连续回调 `showCross()`（seq=1、seq=2）。
+     * 尺寸按屏幕比例给即可，SDK 会自己决定位图分辨率（实测下发 500x320）并等比缩放。
+     */
+    private fun applyCrossImageSize() {
+        runCatching {
+            // 优先用根视图的实际宽高：旋转不重建 Activity，`resources.displayMetrics`
+            // 不一定会立刻跟着变，而 root 一定是新方向下的真实尺寸。
+            val root = findViewById<View>(R.id.guidance_root)
+            val dm = resources.displayMetrics
+            val sw = root?.width?.takeIf { it > 0 } ?: dm.widthPixels
+            val sh = root?.height?.takeIf { it > 0 } ?: dm.heightPixels
+            val w = (sw * 0.42f).toInt().coerceAtLeast(240)
+            val h = (sh * 0.78f).toInt().coerceAtLeast(240)
+            com.autonavi.amap.navicore.AMapNaviCoreManager.setCrossImageSize(w, h)
+            android.util.Log.i(TAG_CROSS, "setCrossImageSize($w, $h) from ${sw}x$sh")
+        }.onFailure {
+            android.util.Log.w(TAG_CROSS, "setCrossImageSize failed: $it")
+        }
+    }
 
     private fun setupMap(savedInstanceState: Bundle?) {
         if (!AmapManager.initMap(this)) return
@@ -2081,12 +2228,19 @@ class GuidanceActivity : AppCompatActivity() {
         val d = SpeechScript.distance(remainM)
         if (d.isEmpty()) return ""
         val sb = StringBuilder(d)
-        // 路口序号：**只有这一串路口不止一个时**才说。
-        // 单个路口说「第 1 个路口左转」是噪音 —— 眼前就一个口子，编号毫无信息量；
-        // 而两三个口子挨在一起时，「第 2 个」是唯一能防拐错的说法。
-        // 环岛也排除：环岛的序号在"第几个出口"，说"第 1 个路口进入环岛"是病句。
+        /*
+         * 路口序号：**只有从第 2 个路口起才说**，第 1 个路口一律不说。
+         *
+         * 高德的规则就是这么定的 —— 序号的作用是「在连成串的路口里点明是哪一个」。
+         * 眼前只有这一个口子时说「第 1 个路口左转」纯属噪音，用户还得先解码"第一个"
+         * 是什么意思；而且很容易和"第一条路/左侧车道"混淆。
+         * 只有当同一段路上连着好几个路口、我们要在其中一个拐进去时，
+         * 「第 2 个路口右转」才真的在消除歧义。
+         *
+         * 环岛也排除：环岛的序号在"第几个出口"，说"第 1 个路口进入环岛"是病句。
+         */
         val ord = s.maneuverOrdinal
-        if (s.maneuverCount >= 2 && ord in 1..9 && !SpeechScript.isRoundabout(s.iconType)) {
+        if (ord in 2..9 && s.maneuverCount >= 2 && !SpeechScript.isRoundabout(s.iconType)) {
             sb.append("，第 ").append(ord).append(" 个路口")
         }
         if (s.iconType == IconType.STRAIGHT) {
@@ -2310,26 +2464,52 @@ class GuidanceActivity : AppCompatActivity() {
         }
 
         // ---- 路口放大图（画中画里不显示，小窗放不下）----
-        // SDK 的 showCross/hideCross 是**成对但不等时**的：复杂路口给两三秒，
-        // 简单路口可能只闪一帧就 hide —— 骑手抬头时图已经没了，感觉"根本没有路口图"。
-        // 所以这里留一个最短展示时间：hide 之后仍挂 [CROSS_MIN_SHOW_MS] 再撤。
+        // 三条显示规则：
+        // ① SDK 说"要显示"（s.cross 非空）就一直显示 —— 高德真机复杂路口会挂 4~6 秒，
+        //    固定 2.5 秒会把长图硬砍掉；
+        // ② SDK `hideCross()` 之后仍挂 [CROSS_MIN_SHOW_MS] 再撤 —— show/hide 是成对但
+        //    不等时的，简单路口可能只闪一帧就 hide，骑手抬头时图已经没了；
+        // ③ 但无论如何不超过 [CROSS_MAX_SHOW_MS] —— 收不到 hide 时不能把右侧整栏永久占死。
+        //    注意 crossShownAt 每收到一次新回调就刷新，所以只要 SDK 还在持续推图，
+        //    这个上限就不会误伤；它只对"推了一次就再没消息"的僵尸状态生效。
+        //
+        // 判"有没有图"只看 bitmap 非空，**不看 `isRecycled`**：引擎侧已经复制了一份
+        // 自己的位图（见 AmapNaviEngine.ownBitmap），这里再去看回收标志只会误判。
         val cross = s.cross
         val nowMs = System.currentTimeMillis()
-        if (cross != null && cross.valid) {
+        if (cross?.bitmap != null) {
             lastCross = cross
             crossShownAt = nowMs
         }
-        val crossBitmap = lastCross?.takeIf { it.valid }?.bitmap
-        val showCross = !inPip && crossBitmap != null && nowMs - crossShownAt < CROSS_MIN_SHOW_MS
+        val crossBitmap = lastCross?.bitmap
+        // 两层窗口：SDK 还在推图时最多挂 8 秒（防卡死），推完补挂 4 秒（保证看得见）
+        val crossActive = cross?.bitmap != null
+        val cap = if (crossActive) CROSS_MAX_SHOW_MS else CROSS_MIN_SHOW_MS
+        val showCross = !inPip && crossBitmap != null && nowMs - crossShownAt < cap
         setCrossMode(showCross)
         if (showCross) {
-            if (ivCrossImage.tag !== crossBitmap) {
+            /*
+             * 按 [CrossImage.seq] 判重，**不能按 bitmap 引用判重**，有两层原因：
+             *
+             * ① 引擎侧：`_state` 是 MutableStateFlow，只在新旧值 `!=` 时才真的发出来。
+             *    `CrossImage` 是 data class，同实例 bitmap 的两次 `copy(cross=...)` **相等**
+             *    → 第二条及以后的放大图被 StateFlow 直接吞掉，界面根本收不到。
+             * ② 界面侧：SDK 很可能复用同一个 Bitmap 实例重写像素，引用相等、内容已变，
+             *    用 `tag !== crossBitmap` 判重会把后续所有图判成"没变化"而不刷新。
+             *
+             * 两处都靠 seq 解决：每次新回调 seq+1，值必然不等，UI 必然刷新。
+             */
+            val seq = lastCross?.seq ?: 0
+            if (ivCrossImage.tag != seq) {
                 ivCrossImage.setImageBitmap(crossBitmap)
-                ivCrossImage.tag = crossBitmap
+                ivCrossImage.tag = seq
+                android.util.Log.i(TAG_CROSS, "cross 显示 seq=$seq")
             }
+            bindCrossHeader(s)
         } else if (ivCrossImage.tag != null) {
             ivCrossImage.setImageDrawable(null)
             ivCrossImage.tag = null
+            android.util.Log.i(TAG_CROSS, "cross 撤下")
         }
 
         /*
@@ -2382,6 +2562,33 @@ class GuidanceActivity : AppCompatActivity() {
             else -> View.VISIBLE
         }
         ivCrossImage.visibility = if (on) View.VISIBLE else View.GONE
+        crossPanel.visibility = if (on) View.VISIBLE else View.GONE
+        if (on) {
+            // 顶部让开状态栏（见 onCreate 末尾的说明）
+            val d = resources.displayMetrics.density
+            crossPanel.setPadding(
+                (12 * d).toInt(),
+                crossPanelBaseTop + statusBarPx,
+                (12 * d).toInt(),
+                (10 * d).toInt()
+            )
+        }
+    }
+
+    /**
+     * 路口大图卡的头尾信息。
+     *
+     * 只放一张图时骑手会犯迷糊：「这张图是几米外的那个口子？」「我还有多远？」
+     * 所以头部给「箭头 + 距离 + 动作」，底部留「预计到达 / 剩余距离 / 当前速度」——
+     * 这三项在大图期间**唯一不重复**的信息（转向卡里的那些确实被图替代了）。
+     */
+    private fun bindCrossHeader(s: NaviEngine.NaviState) {
+        ivCrossTurn.setImageResource(TurnIcons.res(s.iconType))
+        tvCrossDistance.text = CoordConverter.formatDistance(s.stepRemain)
+        tvCrossTitle.text = s.stepInstruction.ifBlank { getString(R.string.hud_turn_icon) }
+        tvCrossEta.text = clock.format(Date(System.currentTimeMillis() + s.etaSeconds * 1000L))
+        tvCrossRemain.text = CoordConverter.formatDistance(s.pathRemain)
+        tvCrossSpeed.text = String.format(Locale.US, "%.0f", s.speedKmh)
     }
 
     private fun naviAgain() {
@@ -2480,8 +2687,8 @@ class GuidanceActivity : AppCompatActivity() {
         inPip = isInPictureInPictureMode
         val vis = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
         findViewById<View>(R.id.btn_back).visibility = vis
-        findViewById<View>(R.id.btn_voice).visibility = vis
-        findViewById<View>(R.id.btn_cast).visibility = vis
+        // 语音 / 投屏已收进同一个悬浮容器，整箱隐藏即可（不必逐个设）
+        findViewById<View>(R.id.quick_actions).visibility = vis
         findViewById<View>(R.id.btn_pip).visibility =
             if (isInPictureInPictureMode || landscapeNow) View.GONE else View.VISIBLE
         findViewById<View>(R.id.btn_overview).visibility = vis
@@ -2717,7 +2924,10 @@ class GuidanceActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (!inPip) mapView?.onResume()
+        if (!inPip) {
+            mapView?.onResume()
+            shadowNaviView?.onResume()
+        }
         // 画中画切换会把窗口属性重置，亮度与常亮要重新施加一次
         applyScreenPrefs()
         // 设置面板里可能刚改过语音开关，回前台时同步按钮状态
@@ -2756,7 +2966,10 @@ class GuidanceActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
-        if (!inPip) mapView?.onPause()
+        if (!inPip) {
+            mapView?.onPause()
+            shadowNaviView?.onPause()
+        }
         super.onPause()
     }
 
@@ -2800,13 +3013,35 @@ class GuidanceActivity : AppCompatActivity() {
             gravity = if (landscape) Gravity.TOP or Gravity.END else Gravity.TOP
             topBar.layoutParams = this
         }
-        // 顶栏第一行横屏只剩语音 / 投屏两个按钮（返回键已独立、目的地卡隐藏），
-        // 目的地卡一隐藏它们会掉到面板最左边，看着像孤立的小圆点；
-        // 横屏改成靠右对齐，贴着面板右边缘与下方横幅的右端成一条竖线。
+        // 顶栏第一行横屏只剩「画中画」（且已 GONE），目的地卡也隐藏 ——
+        // 整行塌陷，转向横幅因此顶到栏顶，把原来被两个 44dp 圆钮占掉的 52dp 全数拿回来。
         findViewById<LinearLayout>(R.id.top_row).gravity = if (landscape) {
             Gravity.END or Gravity.CENTER_VERTICAL
         } else {
             Gravity.START or Gravity.CENTER_VERTICAL
+        }
+        // 语音 / 投屏改成根布局悬浮容器：横屏贴左上角（返回键右边），竖屏贴右上角。
+        // 竖屏不复刻原位置的话目的地卡会被压住，所以 portrait 时给 dest_card 补
+        // 一个 rightMargin = 8 + 44 + 6 + 44 = 102dp 把圆钮那块让出来。
+        (findViewById<View>(R.id.quick_actions).layoutParams as FrameLayout.LayoutParams).apply {
+            gravity = if (landscape) Gravity.TOP or Gravity.START else Gravity.TOP or Gravity.END
+            if (landscape) {
+                // 返回键：marginStart 12dp + 44dp 宽，再留 8dp 间距
+                marginStart = dp(12 + 44 + 8)
+                marginEnd = 0
+            } else {
+                marginStart = 0
+                marginEnd = dp(12)
+            }
+            findViewById<View>(R.id.quick_actions).layoutParams = this
+        }
+        // 旋转不重建 Activity，insets 不会自动重发；gravity 换了必须让它重新走一遍
+        // listener，否则横屏切竖屏后 marginEnd/marginStart 还是上一方向的值。
+        findViewById<View>(R.id.quick_actions).requestApplyInsets()
+        (findViewById<View>(R.id.dest_card).layoutParams as ViewGroup.MarginLayoutParams).apply {
+            // 竖屏：给右侧悬浮的语音/投屏让位（102dp = 两个 44dp 圆钮 + 间距 + 8dp 空隙）
+            marginEnd = if (landscape) 0 else dp(8 + 44 + 6 + 44)
+            findViewById<View>(R.id.dest_card).layoutParams = this
         }
 
         // 目的地卡横屏整卡收掉：横屏空间只有 300dp 宽，
@@ -2825,7 +3060,7 @@ class GuidanceActivity : AppCompatActivity() {
         }
         // 路口放大图：横屏**整栏盖住右侧侧栏**（与侧栏同宽、满高），
         // 竖屏贴底通栏盖住 ETA/按钮那一段。大图撤掉后侧栏由 setCrossMode 恢复。
-        ivCrossImage.layoutParams = (ivCrossImage.layoutParams as FrameLayout.LayoutParams).apply {
+        crossPanel.layoutParams = (crossPanel.layoutParams as FrameLayout.LayoutParams).apply {
             if (landscape) {
                 width = dp(DP_PANEL_LAND)
                 height = ViewGroup.LayoutParams.MATCH_PARENT
@@ -2909,6 +3144,11 @@ class GuidanceActivity : AppCompatActivity() {
 
         // 横屏空间窄，转向引导语收成单行，避免双行把横幅顶高与侧栏相撞
         tvTurnInstruction.maxLines = if (landscape) 1 else 2
+
+        // 放大图的绘制尺寸跟屏幕方向绑定，旋转后必须重算一次。
+        // 不重算的后果：竖屏启动、转横屏后 native 仍按竖屏缓冲区出图（实测 302x1257），
+        // 图会被压成一条竖条，看起来像"放大图又坏了"。
+        applyCrossImageSize()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -2935,6 +3175,8 @@ class GuidanceActivity : AppCompatActivity() {
         app.naviForwarder.detach(TAG_FORWARD)
         runCatching { unregisterReceiver(pipReceiver) }
         betterRouteHandler.removeCallbacks(betterRouteTask)
+        runCatching { shadowNaviView?.onDestroy() }
+        shadowNaviView = null
         mapView?.onDestroy()
         mapView = null
         aMap = null
@@ -2989,10 +3231,27 @@ class GuidanceActivity : AppCompatActivity() {
         /**
          * 路口放大图最短展示时间。
          *
-         * SDK 的 show/hide 不等时，简单路口可能只闪一帧。2.5 秒是"抬头能看到、
-         * 又不会挡住地图太久"的折中：按 30km/h 只走 20 米，不影响判断。
+         * SDK 的 show/hide 不等时，简单路口可能只闪一帧 —— 骑手抬头时图已经没了，
+         * 感觉"根本没有路口图"。4 秒是"来得及扫一眼、又不至于把地图挡太久"的折中：
+         * 按 30km/h 只走 33 米，不影响判断。
          */
-        private const val CROSS_MIN_SHOW_MS = 2_500L
+        private const val CROSS_MIN_SHOW_MS = 4_000L
+
+        /**
+         * 路口放大图最长展示时间（兜底）。
+         *
+         * 正常情况下 SDK 会调 `hideCross()`，横屏时整栏被大图独占到路口过完为止。
+         * 但真机上有两种异常会让我们永远收不到 hide：
+         * ① SDK 只推一次 show、路口过完不补 hide（模拟导航里偶现）；
+         * ② 引擎在回调线程抛异常，后续回调链断了。
+         * 没有这个上限，右侧整栏（转向箭头 + 车道 + 电子眼）会被一张过期的路口图
+         * 永久盖住 —— 比"看不到大图"严重得多。8 秒按 40km/h 约 90 米，
+         * 正常路口早已通过，留足看的时间又不会赖着不走。
+         */
+        private const val CROSS_MAX_SHOW_MS = 8_000L
+
+        /** 路口大图相关日志（影子导航视图的初始化结果） */
+        private const val TAG_CROSS = "NaviCross"
 
         /**
          * 距路口该距离内把车道指引并进转向句（「…左转，请走左侧车道」）。
