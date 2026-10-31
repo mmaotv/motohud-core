@@ -2725,12 +2725,12 @@ class GuidanceActivity : AppCompatActivity() {
             rightMargin = 0
             turnBanner.layoutParams = this
         }
-        // 路口放大图：横屏侧栏只有 300dp 宽，104dp 会挤掉下方信息，
-        // 缩到 72dp —— 但**不隐藏**：骑行时这张图比多一行文字有用。
-        val crossSize = dp(if (landscape) 72 else 104)
+        // 路口放大图现在挂在地图层左下角（不再塞进 300dp 侧栏）：
+        // 高德是"接近路口时左半屏弹大图"，横向 2/3 的地图区域正好放得下。
+        // 横屏屏高只有 360dp，所以给 190dp 高；竖屏宽松一些，但不必更大。
         ivCrossImage.layoutParams = ivCrossImage.layoutParams.apply {
-            width = crossSize
-            height = crossSize
+            width = dp(if (landscape) 260 else 190)
+            height = dp(if (landscape) 190 else 140)
         }
         (tvSignalWarn.layoutParams as ViewGroup.MarginLayoutParams).apply {
             rightMargin = 0

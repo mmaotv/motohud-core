@@ -24,6 +24,27 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!--
+      路口放大图（导航 SDK showCross）：SDK 直接给位图，setImageBitmap 即可。
+
+      **放在地图层、靠左下角**，而不是塞进右侧 300dp 的侧栏：
+      高德的做法就是"接近路口时左半屏弹一张大图"，靠一张大图让人在
+      两三秒内看清匝道/立交怎么绕。塞进侧栏只有 100dp，等于没有。
+      横屏 260x190dp，竖屏 190x140dp（见 applyOrientationLayout）。
+    -->
+    <ImageView
+        android:id="@+id/iv_cross_image"
+        android:layout_width="260dp"
+        android:layout_height="190dp"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="12dp"
+        android:layout_marginBottom="96dp"
+        android:background="@drawable/bg_navi_panel"
+        android:contentDescription="@string/hud_turn_icon"
+        android:padding="4dp"
+        android:scaleType="fitCenter"
+        android:visibility="gone" />
+
     <!-- 顶部渐变（保证状态栏、顶栏在任意底图上可读）
          高度运行时按横竖屏调整：横屏屏矮，220dp 会盖掉大半张地图 -->
     <View
@@ -299,18 +320,7 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- 路口放大图（导航 SDK showCross）：SDK 直接给位图，setImageBitmap 即可 -->
-        <ImageView
-            android:id="@+id/iv_cross_image"
-            android:layout_width="104dp"
-            android:layout_height="104dp"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="6dp"
-            android:background="@drawable/bg_navi_panel"
-            android:contentDescription="@string/hud_turn_icon"
-            android:padding="4dp"
-            android:scaleType="fitCenter"
-            android:visibility="gone" />
+        <!-- 路口放大图已移到地图层左下角，见布局顶部的 iv_cross_image -->
 
         <!--
           SDK 提示条：服务区 / 沿途交通事件（封路·施工）/ 可切主辅路。
