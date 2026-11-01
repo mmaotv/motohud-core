@@ -802,6 +802,18 @@
     <string name="camera_generic">电子眼</string>
 
     <!--
+      细化类型：**SDK 的 CameraType 里没有这些**，来自官方播报文本
+      （"三百米内,有多个压线拍照"），解析见 navi/CameraText.kt。
+      这几类是高德 App 上能看到的、我们以前完全拿不到的粒度。
+    -->
+    <string name="camera_press_line">压线拍照</string>
+    <string name="camera_seatbelt">不系安全带拍照</string>
+    <string name="camera_phone">接打电话拍照</string>
+    <string name="camera_illegal">违法拍照</string>
+    <string name="camera_wrong_way">逆行拍照</string>
+    <string name="camera_parking">违停拍照</string>
+
+    <!--
       提示/播报句式：%1$s=距离（已含「200 米 / 1 公里」，不带「前方」），%2$s=电子眼类型。
 
       中文里「前方 500 米违章拍照」是**病句**——它读起来像"摄像头正在拍照"。
@@ -818,6 +830,14 @@
     <string name="camera_ahead_interval_preset">前方 %1$s进入区间测速，请注意车速</string>
     <!-- 没有具体类型可念时的兜底（类型名不在语音包里的情况） -->
     <string name="camera_ahead_eye">前方 %1$s有电子眼，请注意车速</string>
+    <!--
+      一串探头（引擎按 300 米并串）在界面上的数量后缀。
+      只在屏上显示，不进语音：内置语音包没有「3 处」这种片段，
+      硬拼会被贪心匹配跳过，听起来像漏字。
+    -->
+    <string name="camera_cluster_suffix">（%1$d 处）</string>
+    <!-- 官方文本说「有多个」但没给数量时用这个，别编数字 -->
+    <string name="camera_cluster_multi">（多处）</string>
     <string name="navi_incident_generic">前方路况异常，请注意</string>
     <string name="navi_limit_only">限速 %1$d</string>
 

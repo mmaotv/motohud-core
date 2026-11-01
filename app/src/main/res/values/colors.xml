@@ -38,6 +38,8 @@
     <color name="red">#FFFF453A</color>
     <color name="red_dim">#4DFF453A</color>
     <color name="orange">#FFFF9F0A</color>
+    <!-- 电子眼色标第三档（占道类拍照）：黄，比橙弱、比灰显眼 -->
+    <color name="yellow">#FFFFD60A</color>
 
     <color name="text_on_accent">#FF1D1D1F</color>
 

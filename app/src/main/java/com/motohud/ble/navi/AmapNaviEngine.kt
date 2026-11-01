@@ -698,7 +698,52 @@ class AmapNaviEngine(
             // 官方文本再念一遍，用户听到的就是同一声"左转"反复出现。
             // 非转向信息（事故、施工、注意避让…）仍然放行。
             if (TURN_TEXT.containsMatchIn(t)) return
+            // 电子眼文本**吞掉**，改由 state.camera 走自己的播报链路：
+            // 官方原句（"三百米内,有多个压线拍照"）只有神经 TTS 念得出，
+            // 内置语音包是预录片段，实测是整句被跳过（等于情报丢失）。
+            // 解析出的细化类型比 cameraType 的 11 类强得多，见 [CameraText]。
+            if (applyCameraText(t)) return
             onSdkSpeech?.invoke(t)
+        }
+
+        /**
+         * 官方电子眼文本 → `state.camera`。
+         *
+         * @return true 表示这条文本已被消化，调用方不要再转发给 TTS。
+         */
+        private fun applyCameraText(text: String): Boolean {
+            val parsed = CameraText.parse(text) ?: return false
+            android.util.Log.i(
+                "CameraText",
+                "官方电子眼「$text」→ type=${parsed.type} ${parsed.distanceM}m multi=${parsed.multi}"
+            )
+            val now = System.currentTimeMillis()
+            // 同一处电子眼官方可能重复播两次（同一类型、距离只差十几米、
+            // 间隔几秒）：这时只更新距离，不换流水号，避免重复念一遍。
+            val prev = camBase
+            val dup = prev != null && prev.type == parsed.type &&
+                Math.abs(prev.distanceM - parsed.distanceM) <= 80 &&
+                now - camBaseAt < 8_000
+            val alert = CameraAlert(
+                type = parsed.type,
+                distanceM = parsed.distanceM,
+                // 官方文本不带限速；沿用当前点位/路段的限速值，别把徽章清空
+                speedKmh = prev?.takeIf { it.type == parsed.type }?.speedKmh ?: 0,
+                id = if (dup) prev!!.id else ++camSeq,
+                // -1 = 官方说"多个"（连排探头），界面显示"（多处）"
+                clusterCount = when {
+                    parsed.multi -> CameraAlert.MULTI
+                    dup -> prev!!.clusterCount
+                    else -> 1
+                }
+            )
+            camBase = alert
+            camBaseAt = now
+            // 坐标未知 → 下一个点位一定拿新流水号（不要拿上一个点的坐标去比距离）
+            camLat = 0.0
+            camLng = 0.0
+            _state.update { it.copy(camera = alert) }
+            return true
         }
 
         override fun onGetNavigationText(type: Int, text: String?) {
@@ -728,29 +773,65 @@ class AmapNaviEngine(
                 clearCamera()
                 return
             }
-            val picked = list
+            // 先按距离排序，再把「相邻 ≤ CAMERA_CLUSTER_M 米」的点位串成一串。
+            // 串的意义：一条街上连排的探头对骑手是**同一件事**（"这段路有电子眼"），
+            // 逐点播报只会变成复读机。所以串内挑一个代表类型 + 记个数，只播一次。
+            val all = list
                 .map { it to toCameraAlert(it, interval = false) }
-                .filter { (_, c) -> CameraKind.worthSpeaking(c.type) && c.distanceM > 0 }
-                .minByOrNull { (_, c) -> c.distanceM }
-                ?: run {
-                    clearCamera()
-                    return
+                .filter { (_, c) -> CameraKind.worthShowing(c.type) && c.distanceM > 0 }
+                .sortedBy { (_, c) -> c.distanceM }
+            if (all.isEmpty()) {
+                clearCamera()
+                return
+            }
+            val (raw, head) = all.first()
+            var cluster = 1
+            var rep = head
+            for (i in 1 until all.size) {
+                // 与"前一个点位"比，不是与串首比：一串 5 个点各隔 200 米时，
+                // 跟串首比会在第 3 个就断串（600 米 > 300），跟邻居比才是真正的"连成一条街"
+                if (all[i].second.distanceM - all[i - 1].second.distanceM > CAMERA_CLUSTER_M) break
+                cluster++
+                if (CameraKind.rank(all[i].second.type) > CameraKind.rank(rep.type)) {
+                    rep = all[i].second
                 }
+            }
+            // 距离取串首（最近的那个），类型取串内最重要的，限速取串内最大的
+            val alert = rep.copy(
+                distanceM = head.distanceM,
+                speedKmh = (0 until cluster).maxOf { all[it].second.speedKmh },
+                clusterCount = cluster
+            )
             val now = System.currentTimeMillis()
+            // 官方文本刚给过**细化**类型（压线/接打电话…）时，这条粗粒度回调不要把它覆盖回去：
+            // 否则界面和播报会在"压线拍照"和"违章拍照"之间来回跳，每跳一次都算新点位、
+            // 又触发一次播报 —— 正是用户抱怨的"复读"。
+            val keepFine = camBase?.let {
+                CameraKind.isFine(it.type) &&
+                    now - camBaseAt < 15_000 &&
+                    Math.abs(it.distanceM - alert.distanceM) <= 150
+            } == true
+            val merged = if (keepFine) {
+                alert.copy(type = camBase!!.type, clusterCount = camBase!!.clusterCount)
+            } else {
+                alert
+            }
             // 同一个点位继续沿用旧流水号：SDK 每次回调都新建对象，用坐标认身份。
             // 坐标缺失（个别版本给 0）时退化成"类型+限速相同就算同一个"，
             // 宁可少报一次，也别让同一条路上一串同型号探头各报一遍。
-            val (raw, alert) = picked
             val same = camBase != null && run {
                 val near = if (camLat != 0.0 && camLng != 0.0 && raw.x != 0.0 && raw.y != 0.0) {
                     Geo.distanceM(camLat, camLng, raw.y, raw.x) < CAMERA_SAME_POINT_M
                 } else {
                     true
                 }
-                near && camBase?.type == alert.type && camBase?.speedKmh == alert.speedKmh
+                // 只比类型，**不比限速**：并串后 `speedKmh` 取的是串内最大值，
+                // 新点位进窗时它会跳变；拿它当身份会让同一个探头每隔几秒换一个新流水号，
+                // 去重全废、播报又开始复读。
+                near && camBase?.type == merged.type
             }
             val id = if (same) camBase?.id ?: ++camSeq else ++camSeq
-            val withId = alert.copy(id = id)
+            val withId = merged.copy(id = id)
             camBase = withId
             camLat = raw.y
             camLng = raw.x
@@ -758,8 +839,13 @@ class AmapNaviEngine(
             _state.update {
                 it.copy(
                     camera = withId,
-                    // 电子眼过去之后要把限速清掉，否则界面上会一直挂着上一个路段的限速
-                    limitSpeedKmh = if (withId.speedKmh > 0) withId.speedKmh else 0
+                    // 电子眼过去之后要把限速清掉，否则界面上会一直挂着上一个路段的限速。
+                    // 例外：细化类型（官方文本）本身不带限速，清零会把刚亮起来的限速徽章灭掉。
+                    limitSpeedKmh = when {
+                        withId.speedKmh > 0 -> withId.speedKmh
+                        CameraKind.isFine(withId.type) -> it.limitSpeedKmh
+                        else -> 0
+                    }
                 )
             }
         }
@@ -780,7 +866,16 @@ class AmapNaviEngine(
             val alert = start?.let { toCameraAlert(it, interval = true, intervalRemain = remainDistance) }
                 ?: end?.let { toCameraAlert(it, interval = true, intervalRemain = remainDistance) }
                 ?: return
-            _state.update { it.copy(camera = alert) }
+            // 必须给流水号：默认 id=0 会让"整趟导航所有区间测速"共用同一个去重键，
+            // 第二段区间测速的播报会被当成"说过了"直接吞掉。
+            // 但同一个区间的回调是**每 tick 一次**（剩余里程在变），所以要沿用旧流水号，
+            // 否则每 tick 都算新点位、每 tick 都播报一次。
+            val prev = camBase
+            val id = if (prev != null && prev.interval && prev.type == alert.type) prev.id else ++camSeq
+            val withId = alert.copy(id = id, clusterCount = 1)
+            camBase = withId
+            camBaseAt = System.currentTimeMillis()
+            _state.update { it.copy(camera = withId) }
         }
 
         /**
@@ -1045,6 +1140,16 @@ class AmapNaviEngine(
          * 取大了会把相邻两个探头并成一个、漏报。
          */
         const val CAMERA_SAME_POINT_M = 40.0
+
+        /**
+         * 相邻两个电子眼**沿路线的间距**小于该值 → 视为同一「串」，只按串播一次。
+         *
+         * 300 米是实测出来的：观音桥 1.3 公里路线上高德连发了 15 个点位，
+         * 相邻间距多在 80~200 米（一排路口监控），逐点播报就成了每 6 秒一句的复读机。
+         * 取 300 米能把"一条街上的探头"并成一串，又不至于把相隔两个路口的两处
+         * （城区 300 米以上很常见）误并。
+         */
+        const val CAMERA_CLUSTER_M = 300
 
         /**
          * 官方播报文本里属于「转向指令」的那一类，形如：

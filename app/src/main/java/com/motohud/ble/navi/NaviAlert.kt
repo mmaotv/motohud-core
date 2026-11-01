@@ -17,6 +17,7 @@ object CameraKind {
     // 与 com.amap.api.navi.enums.CameraType 的数值一致（javap 核实：
     // SPEED=0 SURVEILLANCE=1 TRAFFICLIGHT=2 BREAKRULE=3 BUSWAY=4 EMERGENCY=5
     // BICYCLE=6 INTERVALVELOCITYSTART=8 INTERVALVELOCITYEND=9 FLOWSPEED=10 ETC=11）
+    // 7 是空缺 —— 官方枚举里没有这一号，别自己编含义。
     const val SPEED = 0
     const val SURVEILLANCE = 1
     const val TRAFFIC_LIGHT = 2
@@ -28,6 +29,98 @@ object CameraKind {
     const val INTERVAL_END = 9
     const val FLOW_SPEED = 10
     const val ETC = 11
+
+    // ------------------------------------------------- 细化类型（≥ F_FIRST）
+
+    /**
+     * 这些**不在 SDK 枚举里**，是从官方播报文本里解析出来的（见 [CameraText]）。
+     *
+     * 起点取 100，与 `CameraType` 的 0~11 彻底隔开：任何 `when` 漏了细化类型
+     * 都会落到 `else`，不会被误判成某个真实枚举值的含义。
+     */
+    const val F_FIRST = 100
+
+    const val F_PRESS_LINE = 100        // 压线拍照
+    const val F_SEATBELT = 101          // 不系安全带拍照
+    const val F_PHONE = 102             // 接打电话拍照
+    const val F_ILLEGAL = 103           // 违法 / 违章拍照（官方兜底词）
+    const val F_RED_LIGHT = 104         // 闯红灯拍照
+    const val F_SPEED = 105             // 超速 / 测速拍照
+    const val F_OCCUPY_EMERGENCY = 106  // 占用应急车道
+    const val F_OCCUPY_BUS = 107        // 占用公交道
+    const val F_WRONG_WAY = 108         // 逆行
+    const val F_PARKING = 109           // 违停
+    const val F_GENERIC = 110           // 词表外的类型（只显示"电子眼"）
+
+    fun isFine(type: Int): Boolean = type >= F_FIRST
+
+    // ---------------------------------------------------------------- 分类
+
+    /**
+     * 播报分组。**按「该不该打断骑手」分组，不按 SDK 枚举分组**。
+     *
+     * 为什么不能一个类型一组：真机实测（重庆观音桥 1.3km，2026-10-31）15 条电子眼提示里
+     * 14 条是 `BREAK_RULE`。它们本身没有更细的语义（SDK 只有这 11 类，压线/逆行/
+     * 不礼让行人在高德 App 上有、在这个 SDK 里全落进 `BREAK_RULE`），
+     * 一个点位念一遍就是"每 6 秒一句同样的废话"。
+     * 所以 `BREAK_RULE`/`SURVEILLANCE` 归为**只上屏不念**：信息在屏幕上，
+     * 耳朵留给真正有动作含义的三类。
+     */
+    const val G_SPEED = 0      // 测速 / 区间测速：唯一带限速的组，最该说
+    const val G_SIGNAL = 1     // 闯红灯：跟路口绑定，说一次够
+    const val G_LANE = 2       // 占道类：只有正好走那条道才有意义
+    const val G_VIOLATION = 3  // 通用违章：兜底大类，只上屏不念
+    const val G_NONE = 4       // 车流量检测 / ETC：不是"违法风险"，不上屏也不念
+
+    fun group(type: Int): Int = when (type) {
+        SPEED, INTERVAL_START, INTERVAL_END, F_SPEED -> G_SPEED
+        TRAFFIC_LIGHT, F_RED_LIGHT -> G_SIGNAL
+        BUS_WAY, EMERGENCY, BICYCLE, F_PRESS_LINE, F_OCCUPY_EMERGENCY, F_OCCUPY_BUS,
+        F_WRONG_WAY -> G_LANE
+        // 「不系安全带」「接打电话」「违停」对骑摩托的人没有可执行的动作：
+        // 安全带跟你无关、手机放兜里、违停不是你的诉求 —— 只上屏，别打断播报。
+        BREAK_RULE, SURVEILLANCE, F_SEATBELT, F_PHONE, F_ILLEGAL, F_PARKING, F_GENERIC ->
+            G_VIOLATION
+        else -> G_NONE
+    }
+
+    /**
+     * 播报距离档（米，**由远到近**）。空数组 = 不念。
+     *
+     * 档位值必须落在 [SpeechScript.span] 能念出来的那几个词上
+     * （50/100/200/300/500/800/1 公里）—— 内置语音包是预录片段，
+     * 录一个"150 米"这种档位就要多一条音频，且永远只可能用到一次。
+     *
+     * 测速给两档（远程预警 + 临门确认），另外两组只一档：
+     * 闯红灯/占道的应对动作是"别闯、别占"，说两遍不会让人更守法，只会更吵。
+     */
+    fun tiersOf(type: Int): IntArray = when {
+        // 细化类型来自官方文本，官方一次就给到"三百米内/一公里内"，只念一次就够：
+        // 这类情报的价值在"提前知道有压线"，不在于到跟前再确认一遍。
+        isFine(type) -> intArrayOf(300)
+        group(type) == G_SPEED -> intArrayOf(500, 200)
+        group(type) == G_SIGNAL -> intArrayOf(200)
+        group(type) == G_LANE -> intArrayOf(100)
+        else -> IntArray(0)
+    }
+
+    /**
+     * 串内代表类型的优先级：同一串（见 `CAMERA_CLUSTER_M`）里挑最重要的一个当代表。
+     * 一串"测速 + 三个违章拍照"要说的是测速，不是三个违章。
+     */
+    fun rank(type: Int): Int = when (group(type)) {
+        G_SPEED -> 3
+        G_SIGNAL -> 2
+        G_LANE -> 1
+        G_VIOLATION -> 0
+        else -> -1
+    }
+
+    /** 是否上屏（G_NONE 连界面都不占） */
+    fun worthShowing(type: Int): Boolean = group(type) != G_NONE
+
+    /** 是否值得打断播报：只有测速/闯红灯/占道三类 */
+    fun worthSpeaking(type: Int): Boolean = group(type) <= G_LANE
 
     /**
      * 播报名（字符串资源）。
@@ -48,14 +141,31 @@ object CameraKind {
         INTERVAL_END -> com.motohud.ble.R.string.camera_interval_end
         FLOW_SPEED -> com.motohud.ble.R.string.camera_flow_speed
         ETC -> com.motohud.ble.R.string.camera_etc
+        F_PRESS_LINE -> com.motohud.ble.R.string.camera_press_line
+        F_SEATBELT -> com.motohud.ble.R.string.camera_seatbelt
+        F_PHONE -> com.motohud.ble.R.string.camera_phone
+        F_ILLEGAL -> com.motohud.ble.R.string.camera_illegal
+        F_RED_LIGHT -> com.motohud.ble.R.string.camera_traffic_light
+        F_SPEED -> com.motohud.ble.R.string.camera_speed
+        F_OCCUPY_EMERGENCY -> com.motohud.ble.R.string.camera_emergency
+        F_OCCUPY_BUS -> com.motohud.ble.R.string.camera_bus_way
+        F_WRONG_WAY -> com.motohud.ble.R.string.camera_wrong_way
+        F_PARKING -> com.motohud.ble.R.string.camera_parking
         else -> com.motohud.ble.R.string.camera_generic
     }
 
-    /** 是否值得打断播报（拍照类才提，流量检测/ETC 太吵就不提了） */
-    fun worthSpeaking(type: Int): Boolean = when (type) {
-        SPEED, SURVEILLANCE, TRAFFIC_LIGHT, BREAK_RULE,
-        BUS_WAY, EMERGENCY, BICYCLE, INTERVAL_START, INTERVAL_END -> true
-        else -> false
+    /**
+     * 界面色标（P3）：远看一眼就知道是"要减速"还是"别闯灯"还是"随便看看"。
+     *
+     * 红灯色给测速（最需要立刻反应）、橙黄给信号灯、黄色给占道、灰白给通用违章。
+     * 不用图标：横屏侧栏这一行只有一行字高，塞图标会把文字挤到省略。
+     */
+    @androidx.annotation.ColorRes
+    fun colorRes(type: Int): Int = when (group(type)) {
+        G_SPEED -> com.motohud.ble.R.color.red
+        G_SIGNAL -> com.motohud.ble.R.color.orange
+        G_LANE -> com.motohud.ble.R.color.yellow
+        else -> com.motohud.ble.R.color.text_secondary
     }
 }
 
@@ -70,6 +180,8 @@ object CameraKind {
  * @param speedKmh 该点限速（0 = 未知）。高德把限速随电子眼一起下发，是免费能力。
  * @param interval 是否区间测速
  * @param intervalRemainM 区间测速剩余里程（仅区间测速有意义）
+ * @param clusterCount 这一串（相邻 ≤`CAMERA_CLUSTER_M` 米）里有几个电子眼。
+ *   `1` = 孤零零一个。引擎算好带下来，播报按"串"只说一次、界面显示 ×N。
  */
 data class CameraAlert(
     val type: Int,
@@ -77,19 +189,30 @@ data class CameraAlert(
     val speedKmh: Int = 0,
     val interval: Boolean = false,
     val intervalRemainM: Int = 0,
-    val id: Int = 0
+    val id: Int = 0,
+    val clusterCount: Int = 1
 ) {
     /**
-     * 去重键：**同一个电子眼**在 [BUCKET_M] 米一档里只播一次。
+     * 去重键：**同一个点位**在**同一个距离档**里只播一次。
      *
-     * 分档的用处是让"前方 800 米有电子眼"和"前方 300 米有电子眼"各说一次 ——
-     * 远的那句给人反应时间，近的那句确认就是这个。
+     * 用档位值（200/500…）而不是 `distanceM / 400` 这种机械分桶：
+     * 机械分桶的边界（400/800）和念出来的距离词（300/500/800）对不上，
+     * 会出现"420 米说 500 米、390 米说 300 米"这种前后矛盾。
+     *
+     * @param tier 命中的档位值；`0` 表示"点位出现得太晚，档位已经过去"，
+     *   这时按实际距离兜底念一句（见 GuidanceActivity.pickCameraTier）。
+     * @param exact true = 兜底那句（按实际距离念），与正常跨档要分开记，
+     *   否则"90 米兜底"和"200 米跨档"会撞同一个键、第二句被吞。
      */
-    fun speechKey(): String = "$id|${distanceM / BUCKET_M}"
+    fun speechKey(tier: Int, exact: Boolean = false): String =
+        if (exact) "$id|$tier|e" else "$id|$tier"
 
     companion object {
-        /** 播报分档跨度：800m/400m 各一次，再近就不重复了 */
-        const val BUCKET_M = 400
+        /**
+         * [clusterCount] 的特殊值：官方文本说「有多个」，但没给具体数量。
+         * 界面显示「（多处）」，不编数字。
+         */
+        const val MULTI = -1
     }
 }
 

@@ -328,13 +328,32 @@ class GuidanceActivity : AppCompatActivity() {
      * 以前按「类型 + 限速」+ 30 秒冷却去重，问题有两个：
      *  1. 一条路上连着两个同型号测速头，第二个会被 30 秒冷却整个吞掉 → 漏报；
      *  2. 同一个探头只能念一次，800 米那句听完，到 300 米就没有确认了。
-     * 现在按引擎给的点位流水号（同一点位全程不变）+ 距离档（400 米一档）记，
-     * 同一个探头最多念两次（远一句、近一句），不同探头互不影响。
+     * 现在按引擎给的点位流水号（同一点位全程不变）+ **档位值**（200/500…）记，
+     * 同一个点位最多按 [com.motohud.ble.navi.CameraKind.tiersOf] 给的档数念，
+     * 不同点位互不影响。
      */
     private val cameraSpoken = HashSet<String>()
 
-    /** 上一条电子眼播报的时刻，用于 [CAMERA_MIN_GAP_MS] 最小间隔 */
+    /** 上一条电子眼播报的时刻，用于 [CAMERA_MIN_GAP_MS] 跨串间隔 */
     private var lastCameraSpeakMs = 0L
+
+    /** 上一条电子眼播报的**分组**（[com.motohud.ble.navi.CameraKind.group]） */
+    private var lastCameraGroup = -1
+
+    /** 上一次播报同组电子眼的时刻，用于 [CAMERA_SAME_GROUP_MS] */
+    private var lastCameraGroupMs = 0L
+
+    /**
+     * 内置语音包实例（装模型时为 null）。
+     *
+     * 只为一件事存在：**念之前先问它念不念得全**。内置包是预录片段，
+     * 句子里混进没录过的字（限速数字、新类型名）会被贪心匹配悄悄跳过，
+     * 听感上就是"漏字"。宁可退回固定句式，也别念半句。
+     */
+    private var presetSpeaker: com.motohud.ble.navi.PresetPackSpeaker? = null
+
+    /** 上一条电子眼提示的色标分组，避免每帧都 setTextColor（会触发重绘） */
+    private var lastCameraTone = -1
 
     /** 已经念过的交通事件（按标题去重）：同一条封路信息不该每帧重复播 */
     private val incidentSpoken = HashSet<String>()
@@ -2305,45 +2324,115 @@ class GuidanceActivity : AppCompatActivity() {
     /**
      * 电子眼 / 区间测速播报（导航 SDK 能力）。
      *
-     * 官方播报文本里**不含**电子眼（那是 `updateCameraInfo` 独立回调），所以这块要自己念。
-     * 再加一层去重：同类型 + 同限速的电子眼 30 秒内只念一次 ——
-     * 一条路上连着三个测速头，不必每个都完整念一遍。
+     * ## 为什么不再"每个点位都念"
+     *
+     * 真机实测（观音桥 1.3km）：95 秒里念了 15 条，14 条是「前方 100 米有违章拍照，请注意车速」，
+     * 平均每 6.3 秒一句、正好卡在最小间隔上。用户听到的就是复读机。
+     * 三个原因，逐个治：
+     *  1. **通用违章**（`BREAK_RULE`/`SURVEILLANCE`）本身没有可执行的动作，
+     *     只上屏不进语音（见 [com.motohud.ble.navi.CameraKind.group]）；
+     *  2. **一串探头**（引擎已按 300 米并串）只说一次，不再逐点念；
+     *  3. **距离档按类型给**（测速 500→200、闯红灯 200、占道 100），
+     *     不再让每个点位都从最远档开始念一遍。
      */
     private fun announceCamera(s: NaviEngine.NaviState) {
         val cam = s.camera ?: return
         if (!s.running || s.arrived) return
         if (cam.distanceM <= 0 || cam.distanceM > CAMERA_SPEAK_M) return
         if (!com.motohud.ble.navi.CameraKind.worthSpeaking(cam.type)) return
-        // 两个电子眼挨得近时（真机日志里出现过相隔 1 秒的两句），
-        // 连着念像是卡带；留一个最小间隔，第二句只进界面不进语音。
+        val cue = pickCameraTier(cam)
+        if (cue.tier <= 0) return
+        // 同一个点位、同一档只说一次：远档给反应时间，近档做确认
+        if (!cameraSpoken.add(cam.speechKey(cue.tier, cue.exact))) return
+        if (cameraSpoken.size > 96) cameraSpoken.clear()
+        // 跨串间隔：两串探头挨得太近时，第二串只上屏不念。
+        // 15 秒是"念一句(~3s) + 留 12 秒清净"，比原来的 6 秒节拍器低一半噪音。
+        //
+        // **细化类型不受这条限制**：它们由官方逐条播报、整条路线也就三五条，
+        // 而且每条都是新情报（压线/逆行…）。实测第一版把「三百米内,有多个压线拍照」
+        // 拦在了一条闯红灯之后 7 秒的空档里，等于这条路线唯一一次压线提示被吞掉了。
         val now = System.currentTimeMillis()
-        if (now - lastCameraSpeakMs < CAMERA_MIN_GAP_MS) return
-        // 同一个点位、同一距离档只说一次：远档给反应时间，近档做确认，最多两句
-        if (!cameraSpoken.add(cam.speechKey())) return
-        if (cameraSpoken.size > 64) cameraSpoken.clear()
+        val fine = com.motohud.ble.navi.CameraKind.isFine(cam.type)
+        val group = com.motohud.ble.navi.CameraKind.group(cam.type)
+        if (!fine) {
+            if (now - lastCameraSpeakMs < CAMERA_MIN_GAP_MS) return
+            // 同一组 60 秒内只说一次。实测最典型的噪音就是这个：
+            // 一条商业街上连着四个路口，每组都是「闯红灯拍照」，逐组念四遍
+            // 等于把同一句建议重复四次。换个组（比如突然来测速）才值得再开口。
+            if (group == lastCameraGroup && now - lastCameraGroupMs < CAMERA_SAME_GROUP_MS) return
+        }
         lastCameraSpeakMs = now
-        say(cameraSpeech(cam), cue = com.motohud.ble.navi.SpeechArbiter.APPROACH)
+        lastCameraGroup = group
+        lastCameraGroupMs = now
+        say(cameraSpeech(cam, cue.tier, cue.exact), cue = com.motohud.ble.navi.SpeechArbiter.CAMERA)
+    }
+
+    /** 命中的播报档位 */
+    private data class CameraCue(val tier: Int, val exact: Boolean)
+
+    /**
+     * 选播报档位。
+     *
+     * 规则：由远到近找第一个「正好跨过」的档 —— 距离 ≤ 档位值，且没有离得太远
+     * （≥ 档位值的 60%）。这条下界是必须的：点位首次回调常常已经在 100 米内，
+     * 没下界就会把 90 米说成「200 米」。
+     *
+     * 都不满足但已经很近了（`exact`）= 点位"冒出来"得太晚（高德下发窗口本身很近），
+     * 这时按**实际距离**兜底念一句，别为了凑档位撒谎。
+     */
+    private fun pickCameraTier(cam: com.motohud.ble.navi.CameraAlert): CameraCue {
+        val tiers = com.motohud.ble.navi.CameraKind.tiersOf(cam.type)
+        if (tiers.isEmpty()) return CameraCue(0, false)
+        val d = cam.distanceM
+        for (t in tiers) {
+            if (d <= t && d * 10 >= t * 6) return CameraCue(t, false)
+        }
+        val last = tiers.last()
+        return if (d * 10 <= last * 6) CameraCue(last, true) else CameraCue(0, false)
     }
 
     /**
      * 电子眼的**播报**文本（跟界面文案分开）。
      *
      * 界面可以写"限速 60"给人看，但内置语音包是预录片段，念不出任意数字
-     * —— 只能念「前方 200 米测速摄像头，请注意车速」这种固定句式。
-     * 装了离线模型的链路可以随便说数字，仍用带限速的完整句。
+     * —— 只能念「前方 200 米有测速摄像头，请注意车速」这种固定句式。
+     * 装了离线模型（或语音包里有对应片段）时用带限速的完整句。
+     *
+     * @param tier 命中的档位值（用于距离词，保证说出口的距离是准的）
+     * @param exact true = 点位出现太晚，按 `cam.distanceM` 的实际档位念
      */
-    private fun cameraSpeech(cam: com.motohud.ble.navi.CameraAlert): String {
-        val d = com.motohud.ble.navi.SpeechScript.span(cam.distanceM)
+    private fun cameraSpeech(
+        cam: com.motohud.ble.navi.CameraAlert,
+        tier: Int,
+        exact: Boolean
+    ): String {
+        // 用 span(档位值) 而不是 span(当前距离)：档位值就是 200/500 这种整数，
+        // 念出来与屏幕上的数字一致，也不会出现 187 米被念成「200 米」的错位感。
+        val d = com.motohud.ble.navi.SpeechScript
+            .span(if (exact) cam.distanceM else tier)
         val name = getString(com.motohud.ble.navi.CameraKind.labelRes(cam.type))
-        return when {
-            // 装了离线模型：能念任意数字，把限速一起说出来，这是最有用的一句
-            !presetPack -> cameraText(cam)
-            // 区间测速：出口距离在变，内置包念不了，只说"进入区间测速"
-            cam.interval -> getString(R.string.camera_ahead_interval_preset, d)
-            // 内置包：类型名 + 「有」，句式与界面完全一致（"前方 500 米有测速摄像头，请注意车速"）
-            else -> getString(R.string.camera_ahead_slow, d, name)
+
+        if (cam.interval) {
+            // 区间测速：剩余里程是个变化的值，只有念得全的链路才说
+            val rich = getString(
+                R.string.camera_ahead_interval, d, cam.speedKmh,
+                com.motohud.ble.navi.SpeechScript.span(cam.intervalRemainM)
+            )
+            return if (canSpeakAll(rich)) rich else getString(R.string.camera_ahead_interval_preset, d)
         }
+        if (cam.speedKmh > 0) {
+            val rich = getString(R.string.camera_ahead_limit, d, name, cam.speedKmh)
+            if (canSpeakAll(rich)) return rich
+        }
+        // 兜底固定句：类型名 + 「有」，句式与界面完全一致
+        return getString(R.string.camera_ahead_slow, d, name)
     }
+
+    /**
+     * 这句话能不能**完整**念出来（内置包会跳过没录过的字，那就等于漏字）。
+     * 装了离线模型 → 永远能念，直接放行。
+     */
+    private fun canSpeakAll(text: String): Boolean = presetSpeaker?.canSpeak(text) ?: true
 
     /**
      * 服务区 / 沿途交通事件播报（两者都由导航 SDK 独有地提供）。
@@ -2414,6 +2503,22 @@ class GuidanceActivity : AppCompatActivity() {
     }
 
     /**
+     * 电子眼文字色标（按分类分组，不是按类型）。
+     *
+     * 只在分组变化时写一次 —— 这个函数每帧都跑，`setTextColor` 会触发
+     * `invalidate`，横屏小屏上能看出整行文字在闪。
+     */
+    private fun bindCameraTone(type: Int) {
+        val tone = com.motohud.ble.navi.CameraKind.group(type)
+        if (tone == lastCameraTone) return
+        lastCameraTone = tone
+        val color = androidx.core.content.ContextCompat.getColor(
+            this, com.motohud.ble.navi.CameraKind.colorRes(type)
+        )
+        tvCameraWarn.setTextColor(color)
+    }
+
+    /**
      * 导航 SDK 新增能力的界面渲染：车道线 / 电子眼限速 / 路口放大图 / 重新规划提示。
      *
      * 这四样在接入导航 SDK 之前**一项都做不到**（搜索 SDK 不给这些数据），
@@ -2446,8 +2551,18 @@ class GuidanceActivity : AppCompatActivity() {
                         com.motohud.ble.navi.SpeechScript.span(cam.intervalRemainM)
                     )
                 } else {
-                    cameraText(cam)
+                    // 一串探头并成一句（"违章拍照（3 处）"）：屏幕上是唯一的"数量"出口，
+                    // 语音只按串念一次，不说 N —— "3 处"在内置语音包里没有片段
+                    cameraText(cam) + when {
+                        cam.clusterCount == com.motohud.ble.navi.CameraAlert.MULTI ->
+                            getString(R.string.camera_cluster_multi)
+                        cam.clusterCount > 1 ->
+                            getString(R.string.camera_cluster_suffix, cam.clusterCount)
+                        else -> ""
+                    }
                 }
+                // 色标：红=测速 / 橙=闯红灯 / 黄=占道 / 灰=通用违章（只上屏不念的那类）
+                bindCameraTone(cam.type)
                 // 徽章优先用该电子眼的限速，没有就退回路段限速
                 val limit = cam.speedKmh.takeIf { it > 0 } ?: s.limitSpeedKmh
                 bindLimitBadge(limit)
@@ -2456,6 +2571,7 @@ class GuidanceActivity : AppCompatActivity() {
             showLimit -> {
                 llCameraWarn.visibility = View.VISIBLE
                 tvCameraWarn.text = getString(R.string.navi_limit_only, s.limitSpeedKmh)
+                bindCameraTone(com.motohud.ble.navi.CameraKind.SPEED)
                 bindLimitBadge(s.limitSpeedKmh)
             }
             else -> {
@@ -2760,6 +2876,7 @@ class GuidanceActivity : AppCompatActivity() {
         voice = com.motohud.ble.navi.SpeechRouter.create(this)
             .also { it.setMuted(!NaviPrefs.voice.value) }
         presetPack = voice is com.motohud.ble.navi.PresetPackSpeaker
+        presetSpeaker = voice as? com.motohud.ble.navi.PresetPackSpeaker
         // 用内置语音包时"路名不念"必须讲一次，否则用户以为功能坏了；
         // 但每次进导航都弹就是骚扰，所以只提示一次。
         if (NaviPrefs.voice.value && !TtsModelStore.isInstalled(this) &&
@@ -3225,8 +3342,25 @@ class GuidanceActivity : AppCompatActivity() {
         /** 电子眼进入该距离内才显示在界面上 */
         private const val CAMERA_SHOW_M = 1200
 
-        /** 两条电子眼播报之间的最小间隔：6 秒 ≈ 一句完整的话念完 */
-        private const val CAMERA_MIN_GAP_MS = 6_000L
+        /**
+         * 两条电子眼播报之间的最小间隔（跨串）。
+         *
+         * 原来是 6 秒 —— 实测下来它根本不起"降噪"作用，反而成了节拍器：
+         * 观音桥 1.3km 上 95 秒念了 15 条，平均 6.3 秒一句，说明每句一结束
+         * 下一句立刻接上。15 秒 = 一句(~3s) + 12 秒清净，实测能把一条街上的
+         * 连排探头压成 1~2 句。串内本来就不重复念（引擎并串 + 档位去重），
+         * 这个间隔只负责拦"两串挨得太近"的情况。
+         */
+        private const val CAMERA_MIN_GAP_MS = 15_000L
+
+        /**
+         * 同一**分组**电子眼的再次播报间隔。
+         *
+         * 60 秒 ≈ 45km/h 跑 750 米。相邻两个路口都是「闯红灯拍照」时，
+         * 建议是同一句（别闯灯），重复念没有任何新信息；但换了组
+         * （突然出现测速/压线）就该开口 —— 那是另一件事。
+         */
+        private const val CAMERA_SAME_GROUP_MS = 60_000L
 
         /**
          * 路口放大图最短展示时间。

@@ -44,6 +44,9 @@ class PresetPackSpeaker(context: Context) : Speaker {
 
         /** 贪心匹配时单个片段的最大字符数（最长条目「进入环岛，走第 3 个出口」13 字） */
         private const val MAX_CLIP_CHARS = 16
+
+        /** [canSpeak] 允许跳过的字符：标点与空白（语音包里不录标点） */
+        private const val PUNCT = "，。、；：！？,.;:!?“”\"'（）()《》—…-－·"
     }
 
     private val app = context.applicationContext
@@ -126,6 +129,44 @@ class PresetPackSpeaker(context: Context) : Speaker {
 
     /** 内置包已全部在 assets 里，没有"合成"这一步 */
     override fun prewarm(text: String) = Unit
+
+    /**
+     * 这句话能不能**完整**念出来（只允许跳过标点和空白）。
+     *
+     * 存在的理由：[clipsFor] 遇到没录过的字是**静默跳过**的 —— 这是为了路名
+     * （任意组合，永远录不全）刻意做的取舍。但有些句子**一个字都不能少**：
+     * 「前方 200 米有测速摄像头，限速 100」里的数字和「限速」如果没录进去，
+     * 贪心匹配会把它整段跳过，听感上就是"念了半句话"。
+     *
+     * 所以调用方（GuidanceActivity.cameraSpeech）先问一句，念不全就退回固定句式。
+     * 好处是语音包可以逐步加词：新片段没有时自动降级，不会出现漏字。
+     */
+    fun canSpeak(text: String): Boolean {
+        if (index.containsKey(text)) return true
+        var i = 0
+        val n = text.length
+        while (i < n) {
+            var len = minOf(MAX_CLIP_CHARS, n - i)
+            var hit: String? = null
+            while (len >= 1) {
+                val cand = text.substring(i, i + len)
+                if (index.containsKey(cand) && !isNumberTail(text, i, cand)) {
+                    hit = cand
+                    break
+                }
+                len--
+            }
+            if (hit != null) {
+                i += hit.length
+                continue
+            }
+            // 跳过的必须是标点/空白；真正的字被跳过 = 念不全
+            val ch = text[i]
+            if (!ch.isWhitespace() && ch !in PUNCT) return false
+            i++
+        }
+        return true
+    }
 
     override fun stop() {
         queue.clear()
