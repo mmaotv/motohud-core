@@ -19,12 +19,12 @@ import urllib.parse
 import urllib.request
 
 REPO = "mmaotv/motohud-core"
-TAG = "v0.0.27"
-NAME = "MotoHUD v0.0.27"
-NOTES = "release-notes-v0.0.27.md"
+TAG = "v0.0.28"
+NAME = "MotoHUD v0.0.28"
+NOTES = "release-notes-v0.0.28.md"
 ASSETS = [
-    "release-v0.0.27/motohud-v0.0.27-arm64.apk",
-    "release-v0.0.27/motohud-v0.0.27-armv7.apk",
+    "release-v0.0.28/motohud-v0.0.28-arm64.apk",
+    "release-v0.0.28/motohud-v0.0.28-armv7.apk",
 ]
 
 TOKEN = open(r"D:/APPDEV/github token.txt", encoding="utf-8").read().strip()
