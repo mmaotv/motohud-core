@@ -192,16 +192,15 @@ class PlaceSearchActivity : AppCompatActivity() {
                 searchJob?.cancel()
                 debounce?.cancel()
                 if (text.isBlank()) {
-                    if (!routeScoped) {
-                        adapter.submitList(emptyList())
-                        state.visibility = View.GONE
-                    }
+                    // 清空输入：沿途模式恢复「按类型浏览」，全城模式清空列表
+                    doSearch("")
                     return
                 }
                 debounce = scope.launch {
                     delay(450)
-                    if (routeScoped) runAlongRouteSearch(text.trim())
-                    else runSearch(text.trim(), live = true)
+                    // 自由文本一律走关键词搜索：沿途搜索只支持按类型过滤，
+                    // 没法按名称找「解放碑」这种具体地点（会返回空白）。
+                    doSearch(text.trim())
                 }
             }
         })
@@ -214,7 +213,8 @@ class PlaceSearchActivity : AppCompatActivity() {
                 if (t.isNotBlank()) {
                     searchJob?.cancel()
                     debounce?.cancel()
-                    if (routeScoped) runAlongRouteSearch(t) else runSearch(t, live = false)
+                    // 回车 = 关键词搜索（与边输入边联想同一条路）
+                    runSearch(t, live = false)
                 }
                 true
             } else false
@@ -306,15 +306,9 @@ class PlaceSearchActivity : AppCompatActivity() {
                     catsRow.getChildAt(i).visibility =
                         if (routeScoped) View.VISIBLE else View.GONE
                 }
-                val t = et.text?.toString().orEmpty().trim()
-                if (routeScoped) {
-                    runAlongRouteSearch(t)
-                } else {
-                    selectedType = null
-                    adapter.submitList(emptyList())
-                    state.visibility = View.GONE
-                    if (t.isNotBlank()) runSearch(t, live = false)
-                }
+                if (!routeScoped) selectedType = null
+                // 切换范围后按当前输入框状态重新搜：有文字=关键词搜索，没文字=按类型浏览/清空
+                doSearch(et.text?.toString().orEmpty())
             }
         }
         renderScopeChip(scope)
@@ -343,7 +337,9 @@ class PlaceSearchActivity : AppCompatActivity() {
                     for (i in 1 until catsRow.childCount) {
                         applyChipState(catsRow.getChildAt(i) as TextView, i == idx + 1)
                     }
-                    runAlongRouteSearch(et.text?.toString().orEmpty().trim())
+                    // 选类型时若已有输入文字，交给关键词搜索（沿途搜索按不了名称）；
+                    // 没文字则回到「按该类型沿路线浏览」。
+                    doSearch(et.text?.toString().orEmpty())
                 }
             }
             catsRow.addView(chip)
@@ -420,6 +416,27 @@ class PlaceSearchActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * 统一搜索入口：区分「按名称搜」与「按类型浏览」两条后端。
+     *
+     * - 有自由文本 → [runSearch]（高德 Inputtips / POI 关键词），能找到"解放碑"这种
+     *   具体地点。沿途搜索的 [routePoiSearch] 只支持按类型过滤，传名称进去只会把结果
+     *   按标题 contains 一遍，几乎必然空白 —— 这正是之前手动输地名搜不到的根因。
+     * - 无文本 → 沿途模式展示类型结果，全城模式清空列表。
+     */
+    private fun doSearch(keyword: String) {
+        val kw = keyword.trim()
+        if (kw.isBlank()) {
+            if (routeScoped) runAlongRouteSearch("")
+            else {
+                adapter.submitList(emptyList())
+                state.visibility = View.GONE
+            }
+            return
+        }
+        runSearch(kw, live = true)
     }
 
     /**
