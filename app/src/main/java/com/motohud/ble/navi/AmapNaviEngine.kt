@@ -314,6 +314,18 @@ class AmapNaviEngine(
         scope.cancel()
     }
 
+    /**
+     * 矢量放大图渲染完成的回灌口（导航页渲染完位图后调用）。
+     *
+     * 只在 seq 还是当前这张时才替换：GL 渲染是异步的，如果这中间已经来了下一张，
+     * 写回去就会把新图盖成旧图。
+     */
+    fun acceptVectorCross(bitmap: android.graphics.Bitmap, seq: Int) {
+        _state.update {
+            if (it.cross?.seq != seq) it else it.copy(cross = CrossImage(bitmap, seq))
+        }
+    }
+
     // ---------------------------------------------------------------- 内部：SDK 生命周期
 
     /**
@@ -925,16 +937,13 @@ class AmapNaviEngine(
 
         /** 3D 模式的放大图：SDK 只给原始字节，要自己解码成位图 */
         override fun showModeCross(cross: com.amap.api.navi.model.AMapModelCross?) {
-            val bytes = runCatching { cross?.picBuf1 }.getOrNull() ?: return
-            if (bytes.isEmpty()) return
-            val bitmap = runCatching {
-                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            }.getOrNull() ?: return
-            android.util.Log.i(
-                "NaviCross",
-                "showModeCross seq=${crossSeq + 1} ${bitmap.width}x${bitmap.height}"
-            )
-            _state.update { it.copy(cross = CrossImage(bitmap, ++crossSeq)) }
+            val bytes = runCatching { cross?.picBuf1 }.getOrNull()
+            if (bytes == null || bytes.isEmpty()) return
+            // `picBuf1` 是**矢量数据**（实测头 168,51,0,0，不是 PNG 的 137,80,78,71），
+            // 必须交给 AMapModeCrossOverlay 走 GL 才画得出来 —— 见 VectorCrossRenderer。
+            // 以前在这里 BitmapFactory 解码，必然失败后静默 return，等于矢量图从来没显示过。
+            android.util.Log.i("NaviCross", "showModeCross seq=${crossSeq + 1} vector=${bytes.size}B")
+            _state.update { it.copy(cross = CrossImage(seq = ++crossSeq, vector = bytes)) }
         }
 
         override fun hideModeCross() {

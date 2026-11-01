@@ -212,6 +212,14 @@ class GuidanceActivity : AppCompatActivity() {
     /** 侧栏是否正被路口大图独占（见 setCrossMode） */
     private var crossMode = false
 
+    /**
+     * 矢量放大图渲染器（`AMapModelCross` 给的是矢量数据，不是图片）。
+     * 懒建：要等主地图 `aMap` 就绪。
+     */
+    private var vectorCrossRenderer: com.motohud.ble.navi.VectorCrossRenderer? = null
+    /** 已经送去渲染的矢量图 seq，防止每帧重复提交 */
+    private var vectorRenderedSeq = -1
+
     /** 路口大图卡的原始上内边距 + 状态栏高度（运行时算，见 onCreate 末尾） */
     private var crossPanelBaseTop = 0
     private var statusBarPx = 0
@@ -532,7 +540,9 @@ class GuidanceActivity : AppCompatActivity() {
          * 导航 SDK 的算路是异步的，置位后由引擎在 startNavi 那一刻选 NaviType.EMULATOR。
          */
         if (intent.getBooleanExtra(EXTRA_EMULATOR, false)) {
-            engine.startEmulator(EMULATOR_SPEED_KMH)
+            engine.startEmulator(
+                intent.getIntExtra(EXTRA_SPEED, EMULATOR_SPEED_KMH).coerceIn(5, 200)
+            )
         }
 
         planAndStart()
@@ -1330,6 +1340,7 @@ class GuidanceActivity : AppCompatActivity() {
             // 尺寸必须在导航 SDK 起来**之后**设，否则 native manager 还没 init，
             // 设进去的尺寸直接丢，等于没设。
             applyCrossImageSize()
+            enableExtraCrossSwitches()
             shadowNaviView = v
             android.util.Log.i(TAG_CROSS, "shadow AMapNaviView ready")
         }.onFailure {
@@ -1357,12 +1368,68 @@ class GuidanceActivity : AppCompatActivity() {
             val dm = resources.displayMetrics
             val sw = root?.width?.takeIf { it > 0 } ?: dm.widthPixels
             val sh = root?.height?.takeIf { it > 0 } ?: dm.heightPixels
+            // 保持原比例（屏幕 42% x 78%）。实测放大图**数量少**跟这个尺寸无关
+            // —— 真因是矢量图通路从来没接（见 VectorCrossRenderer），改这里只是白担风险。
             val w = (sw * 0.42f).toInt().coerceAtLeast(240)
             val h = (sh * 0.78f).toInt().coerceAtLeast(240)
             com.autonavi.amap.navicore.AMapNaviCoreManager.setCrossImageSize(w, h)
             android.util.Log.i(TAG_CROSS, "setCrossImageSize($w, $h) from ${sw}x$sh")
         }.onFailure {
             android.util.Log.w(TAG_CROSS, "setCrossImageSize failed: $it")
+        }
+    }
+
+    /**
+     * 放大图**数据面**的开关 —— 这是"高德 App 每个大路口都有、我们偶尔有"的真因。
+     *
+     *  - `AMapNaviCoreManager.setRequestGridCross(boolean)`：让引擎请求/生成放大图数据。
+     *    SDK 内部唯一的调用点是 `com.amap.api.navi.core.h#h(boolean)`，而 `h(boolean)`
+     *    没有任何调用者 —— 默认路径下这个开关一直停在初值，所以
+     *    **`showModeCross`（矢量图）一次都不会回调**。
+     *    实测：同一段机场高速，不开时整趟 0 次 `showModeCross`；开了之后 100 秒内 3 次。
+     *  - `AMapNaviCoreManager.setOpenNextRoadInfo(boolean)`：提前准备下一路口的信息。
+     *
+     * `setRequestGridCross` 是实例方法而 SDK 没暴露单例 getter，只能反射 new 一个壳；
+     * 它的 native 实现与 static 的 `setCrossImageSize` 共用同一把 static `mLock`，
+     * 说明状态在 native 侧是全局的，壳对象用完即弃没有副作用。
+     */
+    private fun enableExtraCrossSwitches() {
+        runCatching {
+            val cls = Class.forName("com.autonavi.amap.navicore.AMapNaviCoreManager")
+            val mgr = cls.getDeclaredConstructor().newInstance()
+            cls.getMethod("setRequestGridCross", Boolean::class.javaPrimitiveType)
+                .invoke(mgr, true)
+            cls.getMethod("setOpenNextRoadInfo", Boolean::class.javaPrimitiveType)
+                .invoke(null, true)
+            android.util.Log.i(TAG_CROSS, "extra cross switches on")
+        }.onFailure {
+            android.util.Log.w(TAG_CROSS, "extra cross switches failed: $it")
+        }
+    }
+
+    /**
+     * 把矢量放大图渲染成位图（异步）。
+     *
+     * 出图宽度取大图的显示宽度 ×2，够右栏卡片用；渲染在 GL 线程完成，这里切回主线程回灌。
+     * 失败（bitmap == null）就什么都不做 —— 宁可少一张图，也不要顶一张空白卡。
+     */
+    private fun renderVectorCross(cross: com.motohud.ble.navi.CrossImage) {
+        val bytes = cross.vector ?: return
+        val renderer = vectorCrossRenderer ?: run {
+            // 用**影子 AMapNaviView 内部的地图**：放大图的矢量渲染资源（`assets/cross`、
+            // 3D 路口贴图）是随 AMapNaviView 的地图引擎一起初始化的，挂到我们自己的
+            // 主地图上渲染会直接拿不到资源（实测出图回调 code=10103、bitmap=null）。
+            val map = shadowNaviView?.map ?: aMap ?: return
+            com.motohud.ble.navi.VectorCrossRenderer(this, map).also { vectorCrossRenderer = it }
+        }
+        // 出图宽度按卡片实际宽度（不再 ×2）：rect 是给 GL 取 viewport 用的，
+        // 超出地图尺寸会被判失败（之前给 1200x744 而地图只有 1612x720，一直 code=10103）。
+        val targetW = minOf(ivCrossImage.width.takeIf { it > 0 } ?: 600, 600)
+        renderer.render(bytes, cross.seq, targetW) { bitmap, seq ->
+            if (bitmap == null) return@render
+            runOnUiThread {
+                (engine as? com.motohud.ble.navi.AmapNaviEngine)?.acceptVectorCross(bitmap, seq)
+            }
         }
     }
 
@@ -2593,6 +2660,12 @@ class GuidanceActivity : AppCompatActivity() {
         // 自己的位图（见 AmapNaviEngine.ownBitmap），这里再去看回收标志只会误判。
         val cross = s.cross
         val nowMs = System.currentTimeMillis()
+        // 矢量放大图：`AMapModelCross.picBuf1` 是二进制矢量数据，解码成图片一定失败，
+        // 要先交给 GL 画出来（见 VectorCrossRenderer）。渲染完由引擎按同一个 seq 回灌。
+        if (cross != null && cross.needsRender && cross.seq != vectorRenderedSeq) {
+            vectorRenderedSeq = cross.seq
+            renderVectorCross(cross)
+        }
         if (cross?.bitmap != null) {
             lastCross = cross
             crossShownAt = nowMs
@@ -3292,6 +3365,9 @@ class GuidanceActivity : AppCompatActivity() {
         app.naviForwarder.detach(TAG_FORWARD)
         runCatching { unregisterReceiver(pipReceiver) }
         betterRouteHandler.removeCallbacks(betterRouteTask)
+        // 必须在 mapView.onDestroy 之前：CrossOverlay 挂在 aMap 上，地图先销毁会抛
+        runCatching { vectorCrossRenderer?.release() }
+        vectorCrossRenderer = null
         runCatching { shadowNaviView?.onDestroy() }
         shadowNaviView = null
         mapView?.onDestroy()
@@ -3330,6 +3406,12 @@ class GuidanceActivity : AppCompatActivity() {
 
         /** 模拟导航车速（km/h），市区路口的播报节奏接近真实骑行 */
         const val EMULATOR_SPEED_KMH = 45
+
+        /**
+         * 覆盖模拟车速，单位 km/h。测高速路线（立交放大图 / 区间测速 / 出口预告）时传 100 左右，
+         * 否则 20+ km 的机场高速按 45 km/h 要跑半小时，而且距离递减不符合真实高速。
+         */
+        const val EXTRA_SPEED = "extra_speed"
         private const val TAG_FORWARD = "guidance"
         private const val ACTION_PIP_STOP = "com.motohud.ble.action.PIP_STOP"
 

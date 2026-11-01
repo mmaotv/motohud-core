@@ -10,6 +10,7 @@
 #   tools/demo_navi.sh                      # 默认：重庆观音桥 1.3km
 #   tools/demo_navi.sh 机场高速              # 预设路线
 #   tools/demo_navi.sh "任意名字" 29.56 106.55 29.72 106.63
+#   SPEED=100 tools/demo_navi.sh 机场高速  # 覆盖模拟车速（默认 45 km/h）
 #
 # 注意：这台测试机**没有 GPS**。不传起终点时会兜底到 NaviEngine.DEFAULT_START（天安门），
 # 结果会算成北京→重庆一千多公里，看着像"定位错了"。所以一定要显式传。
@@ -42,8 +43,9 @@ sleep 2
   --es extra_name "$name" \
   --ed extra_from_lat "$lat1" --ed extra_from_lng "$lng1" \
   --ed extra_lat "$lat2" --ed extra_lng "$lng2" \
+  --ei extra_speed "${SPEED:-45}" \
   --ez extra_emulator true >/dev/null
 
-echo "已启动「$name」模拟导航"
+echo "已启动「$name」模拟导航，车速 ${SPEED:-45} km/h"
 echo "看放大图：  $ADB logcat -s NaviCross:V"
 echo "看播报：    $ADB logcat -s GuidanceVoice:V"

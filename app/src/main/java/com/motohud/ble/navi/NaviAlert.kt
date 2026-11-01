@@ -351,6 +351,11 @@ data class LaneGuide(
 /**
  * 路口放大图。
  *
+ * 有**两种来源**，字段跟着两种走（见 [VectorCrossRenderer] 的说明）：
+ *  - 栅格图：`showCross(AMapNaviCross)`，SDK 已解码好的位图 → [bitmap] 直接可用
+ *  - 矢量图：`showModeCross(AMapModelCross)`，给的是**自定义二进制**（不是 PNG）
+ *    → 只填 [vector]，由导航页交给 `AMapModeCrossOverlay` 渲染成位图后回灌
+ *
  * @param seq 流水号，每次收到新的放大图回调 +1。
  *
  * **不能靠 bitmap 引用判断要不要刷新界面**：SDK 每次回调很可能复用**同一个 Bitmap
@@ -359,8 +364,16 @@ data class LaneGuide(
  * 用户反馈的"只展示第一张，后面再也不展示"就是这个原因。
  * 现在以 seq 为准：seq 变了就重新设一次。
  */
-data class CrossImage(val bitmap: Bitmap?, val seq: Int = 0) {
+data class CrossImage(
+    val bitmap: Bitmap? = null,
+    val seq: Int = 0,
+    /** 矢量数据，非空表示「还没渲染」。渲染完由引擎替换成带 bitmap 的同一个 seq */
+    val vector: ByteArray? = null
+) {
     val valid: Boolean get() = bitmap != null && !bitmap.isRecycled
+
+    /** 需要导航页用 GL 渲染（矢量图还没出位图） */
+    val needsRender: Boolean get() = bitmap == null && vector != null
 }
 
 /** 前方服务区（SDK `onServiceAreaUpdate`） */

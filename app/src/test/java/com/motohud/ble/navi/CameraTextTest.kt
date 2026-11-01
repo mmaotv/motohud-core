@@ -50,6 +50,15 @@ class CameraTextTest {
     }
 
     @Test
+    fun `解析带处字的句式`() {
+        // 真机实测原文「四百米处,有接打电话拍照」——距离后面跟「处」而不是「内」，
+        // 旧正则只认「内」，这类句式会被漏掉，原文转给 TTS 又被内置包跳过（情报丢失）
+        val p = CameraText.parse("四百米处,有接打电话拍照")!!
+        assertEquals(CameraKind.F_PHONE, p.type)
+        assertEquals(400, p.distanceM)
+    }
+
+    @Test
     fun `解析无逗号的前方句式`() {
         val p = CameraText.parse("前方300米有违章拍照")!!
         assertEquals(CameraKind.F_ILLEGAL, p.type)
