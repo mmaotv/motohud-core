@@ -1,13 +1,17 @@
 package com.motohud.ble.ui.navi
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
+import com.motohud.ble.R
 import com.motohud.ble.navi.Arrow
 import com.motohud.ble.navi.LaneGuide
 import kotlin.math.min
@@ -15,15 +19,24 @@ import kotlin.math.min
 /**
  * 车道线指引。
  *
- * 为什么自绘而不是拿 SDK 的图：SDK 的车道图是 `AMapNaviView` 内部资源，
- * 官方没有公开"车道箭头位图"的取用接口（`assets/navi` 下的图名是混淆的、
- * 且按设备密度分桶），外接很难稳定命中。自绘的好处：
- *  - 颜色跟随主题（深色底/亮色底都能用，投屏也一致）；
- *  - 横屏 360dp 高度下能压到 30dp 而不糊；
- *  - 可用车道与不可用车道的**对比**可以自己定（高德就是灰掉不可走的）。
+ * **箭头用高德官方的车道图标（`amap_navi_action*`），不再自绘。**
  *
- * 画法与高德观感一致：每条车道一个圆角格子，格子里并排画 1~3 个箭头，
- * 可走的用强调色实心描边，不可走的整格压暗。
+ * 这些图和解压出来的 `amap_navi_lbs_sou*`（转向卡那套"白箭头+灰环"）不是一回事：
+ * action 系列是**单色填充的纯箭头**（无圆环、无描边，原图 40x40 灰色 #616161），
+ * 正好是高德车道卡片里那套箭头。因为它只有一种颜色、背景全透明，所以能直接
+ * 用 `PorterDuffColorFilter(SRC_IN)` 染色 —— 可走的染亮、不可走的染暗，
+ * 这就是"官方图也能配色"的办法，不用自己再画一遍。
+ *
+ * 对应表（官方 action 编号）：
+ * ```
+ * 0 直行   2 左转   3 右转   4 左前   5 右前   8 左掉头
+ * ```
+ * 右掉头没有单独的图，用 8 水平镜像；公交道官方没有车道箭头，按直行画
+ * （能不能走本来就由整格高亮表达，不靠箭头形状）。
+ *
+ * 一条车道有多种动作时（直行+左转、左转+右转…）**横向并排多个官方箭头**，
+ * 早先自绘的"主干分叉"写法已经删掉 —— 分叉图看着像一根树枝，而高德车道卡
+ * 里就是一个格子里摆几个箭头，照它来。
  */
 class LaneGuideView @JvmOverloads constructor(
     context: Context,
@@ -32,21 +45,22 @@ class LaneGuideView @JvmOverloads constructor(
 
     private var guide: LaneGuide? = null
 
-    private val lanePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
-    private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
 
-    /** 强调色（可走车道） */
-    var accentColor: Int = Color.parseColor("#FFFF9F0A")
+    /** 画官方箭头：FILTER_BITMAP_FLAG 必须开，3 倍图缩到 30dp 才不会出锯齿 */
+    private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    /** 官方 action 图按需解码，一次一张，避免每帧 decode */
+    private val arrowCache = HashMap<Int, Bitmap>()
+
+    /** 可走车道箭头色：官方原图是灰的，染成白色 = 高德那种"亮箭头 + 亮格子" */
+    var accentColor: Int = Color.WHITE
         set(v) { field = v; invalidate() }
 
-    /** 弱化色（不可走车道） */
-    var dimColor: Int = Color.parseColor("#66FFFFFF")
+    /** 不可走车道箭头色：半透明白，远看是"暗着的" */
+    var dimColor: Int = Color.parseColor("#59FFFFFF")
         set(v) { field = v; invalidate() }
 
     /** 格子底色（不可走 / 判定不出可用性时） */
@@ -56,6 +70,44 @@ class LaneGuideView @JvmOverloads constructor(
     /** 可走车道的格子底色：整格提亮，远看先分辨"哪几格是亮的" */
     var laneBgActiveColor: Int = Color.parseColor("#33FFFFFF")
         set(v) { field = v; invalidate() }
+
+    /**
+     * 白天 / 夜间两套配色。
+     *
+     * **白天就是一块交通指示牌**：车道箭头本来就该是"蓝底白箭头"——现实里的
+     * 车道指示牌（以及高德自己）都是这个配色，白天在强光下也最跳。夜间沿用
+     * 深色底的半透明白，才不刺眼。
+     *
+     * 由调用方传 `AmapMapConfig.resolveDark(aMap)`（跟地图主题同源，跟随
+     * "自动/白天/夜间"设置），这样不会出现"地图是白天、车道牌是夜间"的错位。
+     */
+    var nightMode: Boolean = true
+        set(v) {
+            if (field == v) return
+            field = v
+            applyPalette()
+            invalidate()
+        }
+
+    init {
+        applyPalette()
+    }
+
+    private fun applyPalette() {
+        if (nightMode) {
+            accentColor = Color.WHITE
+            dimColor = Color.parseColor("#59FFFFFF")
+            laneBgColor = Color.parseColor("#1AFFFFFF")
+            laneBgActiveColor = Color.parseColor("#33FFFFFF")
+        } else {
+            // 交通标志蓝：可走车道用饱和的亮蓝（#1466CC ≈ GB 5768 指示标志蓝），
+            // 不可走压成暗蓝，保证同一行里"哪几格亮"仍然一眼可辨
+            accentColor = Color.WHITE
+            dimColor = Color.parseColor("#99FFFFFF")
+            laneBgColor = Color.parseColor("#FF1B3F6B")
+            laneBgActiveColor = Color.parseColor("#FF1466CC")
+        }
+    }
 
     fun setGuide(g: LaneGuide?) {
         // 内容相同就不重绘：SDK 每秒都会回调一次 showLaneInfo
@@ -101,139 +153,75 @@ class LaneGuideView @JvmOverloads constructor(
             val usable = g.isUsable(i)
             // 可走的车道整格提亮（高德就是这么做的）：远看先分"哪几格是亮的"，
             // 再看格里的箭头，比只给箭头换颜色更容易在颠簸中一眼扫到。
-            lanePaint.color = if (usable) laneBgActiveColor else laneBgColor
-            canvas.drawRoundRect(rect, radius, radius, lanePaint)
-
-            arrowPaint.color = if (usable) accentColor else dimColor
-            arrowPaint.strokeWidth = (3.0f * density).coerceAtMost(rect.width() / 8f)
+            bgPaint.color = if (usable) laneBgActiveColor else laneBgColor
+            canvas.drawRoundRect(rect, radius, radius, bgPaint)
 
             val arrows = g.arrowsAt(i)
-            if (arrows.isNotEmpty()) drawGlyph(canvas, rect, arrows)
+            if (arrows.isNotEmpty()) {
+                drawArrows(canvas, rect, arrows, if (usable) accentColor else dimColor)
+            }
             x += cellW + gap
         }
     }
 
     /**
-     * 一条车道画**一个**整字形：一根主干，到分叉点后按动作分出去。
+     * 在格子内摆官方箭头。
      *
-     * 早先是"每个动作各画一个独立箭头横向并排"，结果是两个箭头挤在
-     * 26dp 的格子里互相覆盖，糊成一团（真机截图已复现）。
-     * 高德的做法本来就是"主干分叉"：直行+左转 = 一根竖线在顶上分左，
-     * 直行+左转+右转 = 三叉。这样无论几个动作都只有一个主干，永远不会叠。
+     * 单个动作就放大到格子 86%；多个动作横向等分（直行+左转、左转+右转…），
+     * 每个箭头仍保持正方形比例，不做拉伸 —— 官方图一旦被压扁，"左转"会看着像"左前"。
      */
-    private fun drawGlyph(canvas: Canvas, rect: RectF, arrows: IntArray) {
-        val cx = rect.centerX()
-        val bottom = rect.bottom - rect.height() * 0.12f
-        val forkY = rect.top + rect.height() * 0.46f
-        val topY = rect.top + rect.height() * 0.14f
-        val head = rect.height() * 0.20f
-        val dx = rect.width() * 0.26f
+    private fun drawArrows(canvas: Canvas, rect: RectF, arrows: IntArray, color: Int) {
+        val n = arrows.size
+        // 竖向只留 5%：横屏车道行才 44dp 高，官方图本身四周就有留白，
+        // 再给它加内边距会显得箭头缩在格子里（真机对比过高德的箭头是顶满的）
+        val inset = rect.height() * 0.05f
+        val areaW = rect.width() - inset * 2
+        val areaH = rect.height() - inset * 2
+        if (areaW <= 0f || areaH <= 0f) return
 
-        val hasStraight = arrows.contains(Arrow.STRAIGHT)
-        val hasLeft = arrows.contains(Arrow.LEFT)
-        val hasRight = arrows.contains(Arrow.RIGHT)
-        val hasUturnL = arrows.contains(Arrow.UTURN_LEFT)
-        val hasUturnR = arrows.contains(Arrow.UTURN_RIGHT)
-        val hasBus = arrows.contains(Arrow.BUS)
+        val slot = areaW / n
+        // 正方形按短边定尺寸，多箭头时自然收窄，不会互相压住
+        val side = min(slot * 0.94f, areaH)
+        val top = rect.centerY() - side / 2f
 
-        // 主干：所有动作共用（这是不重叠的关键）
-        val stem = Path().apply {
-            moveTo(cx, bottom)
-            lineTo(cx, forkY)
-        }
-        canvas.drawPath(stem, arrowPaint)
-
-        if (hasBus) {
-            drawBus(canvas, rect)
-            return
-        }
-
-        // 直行：主干直接顶到箭头；否则主干只到分叉点
-        if (hasStraight) {
-            canvas.drawLine(cx, forkY, cx, topY, arrowPaint)
-            drawHead(canvas, cx, topY, DIR_UP, head)
-        }
-        // 左转：分叉 → 左上斜出 → 箭头朝左
-        if (hasLeft) {
-            val leftX = cx - dx
-            val branchY = forkY - rect.height() * 0.16f
-            val p = Path().apply {
-                moveTo(cx, forkY)
-                quadTo(cx - dx * 0.35f, branchY, leftX, branchY)
+        for (k in 0 until n) {
+            val bmp = bitmapFor(arrows[k]) ?: continue
+            val cx = rect.left + inset + slot * (k + 0.5f)
+            val dst = RectF(cx - side / 2f, top, cx + side / 2f, top + side)
+            arrowPaint.colorFilter = PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN)
+            if (arrows[k] == Arrow.UTURN_RIGHT) {
+                // 官方只有左掉头（action8），右掉头镜像一份，仍不改图本身
+                canvas.save()
+                canvas.scale(-1f, 1f, dst.centerX(), dst.centerY())
+                canvas.drawBitmap(bmp, null, dst, arrowPaint)
+                canvas.restore()
+            } else {
+                canvas.drawBitmap(bmp, null, dst, arrowPaint)
             }
-            canvas.drawPath(p, arrowPaint)
-            drawHead(canvas, leftX, branchY, DIR_LEFT, head)
-        }
-        // 右转
-        if (hasRight) {
-            val rightX = cx + dx
-            val branchY = forkY - rect.height() * 0.16f
-            val p = Path().apply {
-                moveTo(cx, forkY)
-                quadTo(cx + dx * 0.35f, branchY, rightX, branchY)
-            }
-            canvas.drawPath(p, arrowPaint)
-            drawHead(canvas, rightX, branchY, DIR_RIGHT, head)
-        }
-        // 掉头（左/右）：从分叉点向上兜小半圈再向下回
-        if (hasUturnL || hasUturnR) {
-            val sign = if (hasUturnL) -1f else 1f
-            val tipX = cx + sign * dx * 0.95f
-            val curlY = forkY - rect.height() * 0.20f
-            val p = Path().apply {
-                moveTo(cx, forkY)
-                quadTo(cx + sign * dx * 0.5f, curlY - head * 0.4f, tipX, curlY)
-                lineTo(tipX, curlY + head * 0.9f)
-            }
-            canvas.drawPath(p, arrowPaint)
-            drawHead(canvas, tipX, curlY + head * 1.4f, DIR_DOWN, head)
         }
     }
 
-    /** 公交专用道：画一个方块 + 两道横杠，不做文字（避免又多一处硬编码中文） */
-    private fun drawBus(canvas: Canvas, box: RectF) {
-        val w = box.width() * 0.62f
-        val h = box.height() * 0.5f
-        val r = RectF(box.centerX() - w / 2, box.centerY() - h / 2, box.centerX() + w / 2, box.centerY() + h / 2)
-        canvas.drawRoundRect(r, 2f, 2f, arrowPaint.also { it.style = Paint.Style.STROKE })
-        val p = Paint(arrowPaint)
-        p.style = Paint.Style.FILL
-        canvas.drawRect(r.left + w * 0.14f, r.top + h * 0.22f, r.right - w * 0.14f, r.top + h * 0.42f, p)
-        canvas.drawRect(r.left + w * 0.14f, r.bottom - h * 0.42f, r.right - w * 0.14f, r.bottom - h * 0.22f, p)
-        arrowPaint.style = Paint.Style.STROKE
-    }
-
-    private fun drawHead(canvas: Canvas, x: Float, y: Float, dir: Int, size: Float) {
-        val path = Path()
-        when (dir) {
-            DIR_UP -> {
-                path.moveTo(x - size * 0.5f, y + size * 0.72f)
-                path.lineTo(x, y)
-                path.lineTo(x + size * 0.5f, y + size * 0.72f)
-            }
-            DIR_DOWN -> {
-                path.moveTo(x - size * 0.5f, y - size * 0.72f)
-                path.lineTo(x, y)
-                path.lineTo(x + size * 0.5f, y - size * 0.72f)
-            }
-            DIR_LEFT -> {
-                path.moveTo(x + size * 0.72f, y - size * 0.5f)
-                path.lineTo(x, y)
-                path.lineTo(x + size * 0.72f, y + size * 0.5f)
-            }
-            else -> {
-                path.moveTo(x - size * 0.72f, y - size * 0.5f)
-                path.lineTo(x, y)
-                path.lineTo(x - size * 0.72f, y + size * 0.5f)
-            }
+    private fun bitmapFor(arrow: Int): Bitmap? {
+        val res = when (arrow) {
+            Arrow.LEFT -> R.drawable.amap_navi_action2
+            Arrow.RIGHT -> R.drawable.amap_navi_action3
+            Arrow.UTURN_LEFT, Arrow.UTURN_RIGHT -> R.drawable.amap_navi_action8
+            // 直行 / 公交道：公交道官方没有车道箭头，按直行画，
+            // 能不能走已由整格高亮表达，不靠箭头形状
+            else -> R.drawable.amap_navi_action0
         }
-        canvas.drawPath(path, arrowPaint)
+        arrowCache[res]?.let { if (!it.isRecycled) return it }
+        // inScaled=false：拿 xxhdpi 那张 120px 原图，缩放交给 canvas（等比、带过滤）
+        val opts = BitmapFactory.Options().apply { inScaled = false }
+        val bmp = runCatching { BitmapFactory.decodeResource(resources, res, opts) }.getOrNull()
+            ?: return null
+        arrowCache[res] = bmp
+        return bmp
     }
 
-    private companion object {
-        const val DIR_UP = 0
-        const val DIR_DOWN = 1
-        const val DIR_LEFT = 2
-        const val DIR_RIGHT = 3
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        arrowCache.values.forEach { if (!it.isRecycled) it.recycle() }
+        arrowCache.clear()
     }
 }

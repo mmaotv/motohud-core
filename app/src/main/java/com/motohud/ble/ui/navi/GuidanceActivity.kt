@@ -233,6 +233,9 @@ class GuidanceActivity : AppCompatActivity() {
     private lateinit var planningOverlay: View
     private lateinit var arrivedOverlay: View
     private lateinit var mapActions: View
+    /** 语音 / 投屏 / 定位三枚圆钮的容器：横屏竖排一列挂左上角，竖屏横排贴右上角 */
+    private lateinit var quickActions: LinearLayout
+    private lateinit var btnRecenter: View
     private lateinit var topScrim: View
     private lateinit var btnPip: View
     private lateinit var tvArriveSub: TextView
@@ -593,6 +596,8 @@ class GuidanceActivity : AppCompatActivity() {
         planningOverlay = findViewById(R.id.planning_overlay)
         arrivedOverlay = findViewById(R.id.arrived_overlay)
         mapActions = findViewById(R.id.map_actions)
+        quickActions = findViewById(R.id.quick_actions)
+        btnRecenter = findViewById(R.id.btn_recenter)
         topScrim = findViewById(R.id.top_scrim)
         btnPip = findViewById(R.id.btn_pip)
         tvArriveSub = findViewById(R.id.tv_arrive_sub)
@@ -631,21 +636,20 @@ class GuidanceActivity : AppCompatActivity() {
             }
             insets
         }
-        // 语音 / 投屏悬浮容器：与返回键同一行，但不在顶栏里，inset 得自己算。
-        // 竖屏贴右上角（让开右侧系统栏/手势条）；横屏贴左上角、排在返回键右边
-        // （marginStart = 返回键 44dp + 8dp 间距，再叠左侧系统栏 inset）。
-        ViewCompat.setOnApplyWindowInsetsListener(
-            findViewById<View>(R.id.quick_actions)
-        ) { v, insets ->
+        // 语音 / 投屏 / 定位悬浮容器：竖屏横排贴右上角（让开右侧系统栏/手势条）；
+        // 横屏**竖排一列挂在左上角返回键下面**（marginStart 与返回键对齐，
+        // topMargin 让过键高 44dp + 8dp 间距）。
+        ViewCompat.setOnApplyWindowInsetsListener(quickActions) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            val gap = (44 + 8) * resources.displayMetrics.density
+            val belowBack = ((44 + 8) * resources.displayMetrics.density).toInt()
             (v.layoutParams as FrameLayout.LayoutParams).apply {
-                topMargin = bars.top + baseTop
                 if (gravity and Gravity.END == Gravity.END) {
+                    topMargin = bars.top + baseTop
                     marginStart = 0
                     marginEnd = bars.right + baseStart
                 } else {
-                    marginStart = bars.left + baseStart + gap.toInt()
+                    topMargin = bars.top + baseTop + belowBack
+                    marginStart = bars.left + baseStart
                     marginEnd = 0
                 }
                 v.layoutParams = this
@@ -2592,9 +2596,12 @@ class GuidanceActivity : AppCompatActivity() {
      * 所以单独收在一个函数里，方便一眼看出"这些是 SDK 带来的"。
      */
     private fun renderSdkAlerts(s: NaviEngine.NaviState) {
-        // ---- 车道线：几条车道、该走哪条（自绘箭头，可走的亮、不可走的灰）----
+        // ---- 车道线：几条车道、该走哪条（官方箭头位图，可走的亮、不可走的暗）----
         val lane = s.lane
         if (lane != null && lane.count > 0) {
+            // 配色跟地图主题同源：白天 = 交通标志那样蓝底白箭头，夜间 = 深色底。
+            // 每秒一次求值不心疼（就是日期的三角函数），换来"切主题立刻生效"。
+            laneGuideView.nightMode = com.motohud.ble.amap.AmapMapConfig.resolveDark(aMap)
             laneGuideView.setGuide(lane)
             // 无障碍：把"左/直/右"逐车道念出来，读屏和车机文字兜底都靠它
             laneGuideView.contentDescription = (0 until lane.count)
@@ -3211,24 +3218,28 @@ class GuidanceActivity : AppCompatActivity() {
         } else {
             Gravity.START or Gravity.CENTER_VERTICAL
         }
-        // 语音 / 投屏改成根布局悬浮容器：横屏贴左上角（返回键右边），竖屏贴右上角。
+        // 语音 / 投屏 / 定位三枚圆钮：
+        //   竖屏 —— 横排贴右上角（与原位置一致），定位留在右下角与全览一列；
+        //   横屏 —— **竖排一列挂在左上角**、返回键正下方（用户要求：左右三个钮改竖排，
+        //           定位也从右下角挪过来，整列 [返回 / 语音 / 投屏 / 定位]）。
         // 竖屏不复刻原位置的话目的地卡会被压住，所以 portrait 时给 dest_card 补
         // 一个 rightMargin = 8 + 44 + 6 + 44 = 102dp 把圆钮那块让出来。
-        (findViewById<View>(R.id.quick_actions).layoutParams as FrameLayout.LayoutParams).apply {
+        applyQuickActions(landscape)
+        (quickActions.layoutParams as FrameLayout.LayoutParams).apply {
             gravity = if (landscape) Gravity.TOP or Gravity.START else Gravity.TOP or Gravity.END
             if (landscape) {
-                // 返回键：marginStart 12dp + 44dp 宽，再留 8dp 间距
-                marginStart = dp(12 + 44 + 8)
+                // 与返回键左对齐、挂在它下方（topMargin 由 insets listener 补 52dp）
+                marginStart = dp(12)
                 marginEnd = 0
             } else {
                 marginStart = 0
                 marginEnd = dp(12)
             }
-            findViewById<View>(R.id.quick_actions).layoutParams = this
+            quickActions.layoutParams = this
         }
         // 旋转不重建 Activity，insets 不会自动重发；gravity 换了必须让它重新走一遍
         // listener，否则横屏切竖屏后 marginEnd/marginStart 还是上一方向的值。
-        findViewById<View>(R.id.quick_actions).requestApplyInsets()
+        quickActions.requestApplyInsets()
         (findViewById<View>(R.id.dest_card).layoutParams as ViewGroup.MarginLayoutParams).apply {
             // 竖屏：给右侧悬浮的语音/投屏让位（102dp = 两个 44dp 圆钮 + 间距 + 8dp 空隙）
             marginEnd = if (landscape) 0 else dp(8 + 44 + 6 + 44)
@@ -3316,10 +3327,11 @@ class GuidanceActivity : AppCompatActivity() {
             // 信息卡：右侧竖直条，与顶栏同宽对齐成一条侧栏；地图拿回左侧全部空间
             card.gravity = Gravity.END or Gravity.BOTTOM
             card.width = dp(DP_PANEL_LAND)
-            // 地图操作键：紧挨侧栏左侧放一个「回中」，全览已隐藏
-            acts.gravity = Gravity.END or Gravity.BOTTOM
-            acts.marginEnd = dp(DP_PANEL_LAND + 12)
-            acts.marginStart = 0
+            // 地图操作键横屏已搬到左上角竖列（见 applyQuickActions）：这个容器里
+            // 只剩全览（横屏 GONE），留着不显示，位置给个不碍事的左下角
+            acts.gravity = Gravity.START or Gravity.BOTTOM
+            acts.marginStart = dp(12)
+            acts.marginEnd = 0
             acts.bottomMargin = dp(16)
         } else {
             // 竖屏：恢复底部通栏 + 右侧悬浮操作键
@@ -3340,6 +3352,64 @@ class GuidanceActivity : AppCompatActivity() {
         // 不重算的后果：竖屏启动、转横屏后 native 仍按竖屏缓冲区出图（实测 302x1257），
         // 图会被压成一条竖条，看起来像"放大图又坏了"。
         applyCrossImageSize()
+    }
+
+    /**
+     * 语音 / 投屏 / 定位三枚圆钮的排列与归属。
+     *
+     * 横屏：`quick_actions` 转成**竖排**，「定位」从 `map_actions` 搬进来 ——
+     * 左上角从「返回」往下就是一整列 [返回 / 语音 / 投屏 / 定位]，右侧侧栏再少
+     * 一处悬浮控件，地图左侧边缘只占 56dp。
+     *
+     * 竖屏：完全恢复原样 —— 语音 / 投屏横排贴右上角，定位和全览一列挂右下角。
+     *
+     * 为什么搬 View 而不是复制一个定位按钮：定位键带状态（跟随/自由视角高亮、
+     * 点击回调、画中画隐藏），复制一份会出现"点了没反应"或两份状态不同步。
+     */
+    private fun applyQuickActions(landscape: Boolean) {
+        val d = resources.displayMetrics.density
+        fun px(v: Int) = (v * d).toInt()
+        val gap = px(6)
+        fun lp44() = LinearLayout.LayoutParams(px(44), px(44))
+
+        quickActions.orientation =
+            if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+
+        // 定位键换容器：横屏 → 左上竖列；竖屏 → 右下 map_actions
+        val target: ViewGroup = if (landscape) quickActions else (mapActions as ViewGroup)
+        if ((btnRecenter.parent as? ViewGroup) !== target) {
+            (btnRecenter.parent as? ViewGroup)?.removeView(btnRecenter)
+            target.addView(btnRecenter)
+        }
+
+        // 竖排看 topMargin、横排看 marginStart：语音永远第一个（顶/左），投屏第二个
+        fun place(v: View, order: Int) {
+            val lp = (v.layoutParams as? LinearLayout.LayoutParams) ?: lp44()
+            lp.width = px(44)
+            lp.height = px(44)
+            if (landscape) {
+                lp.topMargin = if (order == 0) 0 else gap
+                lp.marginStart = 0
+            } else {
+                lp.marginStart = if (order == 0) 0 else gap
+                lp.topMargin = 0
+            }
+            v.layoutParams = lp
+        }
+        place(findViewById(R.id.btn_voice), 0)
+        place(findViewById(R.id.btn_cast), 1)
+
+        if (landscape) {
+            place(btnRecenter, 2)
+        } else {
+            // 竖屏放回 map_actions：与全览同宽、10dp 间距（与 XML 原值一致）
+            val lp = (btnRecenter.layoutParams as? LinearLayout.LayoutParams) ?: lp44()
+            lp.width = px(44)
+            lp.height = px(44)
+            lp.marginStart = 0
+            lp.topMargin = px(10)
+            btnRecenter.layoutParams = lp
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
