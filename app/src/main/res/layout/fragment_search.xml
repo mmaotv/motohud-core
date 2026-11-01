@@ -50,7 +50,7 @@
             android:layout_height="wrap_content"
             android:padding="8dp"
             android:text="@string/search_clear_history"
-            android:textColor="@color/purple_500" />
+            android:textColor="?attr/mtAccent" />
     </LinearLayout>
 
     <com.google.android.material.chip.ChipGroup

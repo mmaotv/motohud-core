@@ -36,9 +36,11 @@ import com.motohud.ble.amap.AmapRepo
 import com.motohud.ble.amap.TipItem
 import com.motohud.ble.amap.TipsResult
 import com.motohud.ble.data.NaviPrefs
+import com.motohud.ble.ui.theme.AppTheme
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.motohud.ble.ui.theme.themeColor
 
 /**
  * 地点搜索选点页（起点 / 途经点 / 顺路搜 共用）。
@@ -101,6 +103,12 @@ class PlaceSearchActivity : AppCompatActivity() {
     private lateinit var adapter: TipAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        /*
+         * 日 / 夜主题必须在 super 之前定下来。
+         * `?attr/mtXxx` 是在布局 inflate 那一刻从主题里取值的，晚一步设置
+         * 只能影响之后新建的 View，已经铺好的界面一个字都不会变。
+         */
+        AppTheme.apply(this)
         super.onCreate(savedInstanceState)
         // 高德隐私合规 + Key 必须早于 MapView inflate（否则冷启动地图服务不可用）
         AmapManager.initMap(this)
@@ -291,13 +299,15 @@ class PlaceSearchActivity : AppCompatActivity() {
 
     private fun applyChipState(chip: TextView, selected: Boolean) {
         chip.backgroundTintList = if (selected) {
-            android.content.res.ColorStateList.valueOf(Color.parseColor("#33FF9F0A"))
+            android.content.res.ColorStateList.valueOf(themeColor(R.attr.mtAccentDim, android.graphics.Color.WHITE))
         } else {
             null
         }
         chip.setTextColor(
-            if (selected) Color.parseColor("#FFFF9F0A")
-            else ContextCompat.getColor(this, R.color.text_secondary)
+            themeColor(
+                if (selected) R.attr.mtAccent else R.attr.mtTextSecondary,
+                android.graphics.Color.WHITE
+            )
         )
         chip.typeface = if (selected) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
     }

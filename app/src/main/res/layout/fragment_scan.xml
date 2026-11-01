@@ -27,7 +27,7 @@
             android:layout_weight="1"
             android:fontFamily="@font/inter"
             android:text="@string/status_disconnected"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="16sp"
             android:textStyle="bold" />
     </LinearLayout>
@@ -63,7 +63,7 @@
         android:layout_marginTop="12dp"
         android:fontFamily="@font/inter"
         android:text="@string/scan_hint"
-        android:textColor="@color/text_secondary"
+        android:textColor="?attr/mtTextSecondary"
         android:textSize="13sp" />
 
     <androidx.recyclerview.widget.RecyclerView
@@ -81,7 +81,7 @@
         android:gravity="center"
         android:padding="24dp"
         android:text="@string/scan_empty"
-        android:textColor="@color/text_tertiary"
+        android:textColor="?attr/mtTextTertiary"
         android:textSize="13sp"
         android:visibility="gone" />
 </LinearLayout>

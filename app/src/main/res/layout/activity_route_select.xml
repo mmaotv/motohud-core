@@ -3,7 +3,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_window"
+    android:background="?attr/mtWindow"
     android:orientation="vertical">
 
     <!-- 顶栏 -->
@@ -26,7 +26,7 @@
             android:contentDescription="@string/cancel"
             android:padding="11dp"
             android:src="@drawable/ic_arrow_back"
-            android:tint="@color/text_primary" />
+            android:tint="?attr/mtTextPrimary" />
 
         <TextView
             android:layout_width="0dp"
@@ -35,7 +35,7 @@
             android:layout_weight="1"
             android:fontFamily="@font/inter"
             android:text="@string/route_select_title"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="17sp"
             android:textStyle="bold" />
     </LinearLayout>
@@ -94,7 +94,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:text="@string/route_select_from"
-                android:textColor="@color/text_tertiary"
+                android:textColor="?attr/mtTextTertiary"
                 android:textSize="11sp" />
 
             <TextView
@@ -106,7 +106,7 @@
                 android:fontFamily="@font/inter"
                 android:maxLines="1"
                 android:text="@string/origin_current"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="14sp" />
         </LinearLayout>
 
@@ -114,7 +114,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/origin_change"
-            android:textColor="@color/accent"
+            android:textColor="?attr/mtAccent"
             android:textSize="12sp" />
     </LinearLayout>
 
@@ -154,7 +154,7 @@
             android:layout_height="16dp"
             android:contentDescription="@string/route_waypoint_add"
             android:src="@drawable/ic_add"
-            android:tint="@color/accent" />
+            android:tint="?attr/mtAccent" />
 
         <TextView
             android:layout_width="0dp"
@@ -163,7 +163,7 @@
             android:layout_weight="1"
             android:fontFamily="@font/inter"
             android:text="@string/route_waypoint_add"
-            android:textColor="@color/accent"
+            android:textColor="?attr/mtAccent"
             android:textSize="13sp" />
 
         <TextView
@@ -171,7 +171,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:fontFamily="@font/inter"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -197,7 +197,7 @@
             android:layout_height="16dp"
             android:contentDescription="@string/route_along_search"
             android:src="@drawable/ic_search"
-            android:tint="@color/accent" />
+            android:tint="?attr/mtAccent" />
 
         <TextView
             android:layout_width="0dp"
@@ -206,7 +206,7 @@
             android:layout_weight="1"
             android:fontFamily="@font/inter"
             android:text="@string/route_along_search"
-            android:textColor="@color/accent"
+            android:textColor="?attr/mtAccent"
             android:textSize="13sp" />
     </LinearLayout>
 
@@ -228,7 +228,7 @@
             android:ellipsize="end"
             android:fontFamily="@font/inter"
             android:maxLines="1"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="16sp"
             android:textStyle="bold" />
 
@@ -240,7 +240,7 @@
             android:ellipsize="end"
             android:fontFamily="@font/inter"
             android:maxLines="1"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="12sp" />
 
         <LinearLayout
@@ -256,7 +256,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:text="@string/route_prefs"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="13sp" />
 
             <TextView
@@ -273,7 +273,7 @@
                 android:paddingTop="5dp"
                 android:paddingEnd="10dp"
                 android:paddingBottom="5dp"
-                android:textColor="@color/accent"
+                android:textColor="?attr/mtAccent"
                 android:textSize="12sp" />
         </LinearLayout>
 
@@ -296,7 +296,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:text="@string/route_avoid_zones"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="13sp" />
 
             <TextView
@@ -313,7 +313,7 @@
                 android:paddingTop="5dp"
                 android:paddingEnd="10dp"
                 android:paddingBottom="5dp"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="12sp" />
         </LinearLayout>
     </LinearLayout>
@@ -348,7 +348,7 @@
             android:paddingEnd="8dp"
             android:paddingBottom="4dp"
             android:text="@string/route_select_map_hint"
-            android:textColor="@color/text_secondary"
+            android:textColor="?attr/mtTextSecondary"
             android:textSize="10sp"
             android:visibility="gone" />
     </FrameLayout>
@@ -360,7 +360,7 @@
         android:layout_marginTop="12dp"
         android:layout_marginBottom="8dp"
         android:text="@string/route_select_pick"
-        android:textColor="@color/text_tertiary"
+        android:textColor="?attr/mtTextTertiary"
         android:textSize="12sp" />
 
     <androidx.recyclerview.widget.RecyclerView
@@ -382,7 +382,7 @@
         android:layout_height="36dp"
         android:layout_gravity="center_horizontal"
         android:layout_marginBottom="12dp"
-        android:indeterminateTint="@color/accent"
+        android:indeterminateTint="?attr/mtAccent"
         android:visibility="gone" />
 
     <TextView
@@ -394,7 +394,7 @@
         android:layout_marginBottom="16dp"
         android:gravity="center"
         android:text="@string/route_select_empty"
-        android:textColor="@color/text_tertiary"
+        android:textColor="?attr/mtTextTertiary"
         android:textSize="13sp"
         android:visibility="gone" />
 
@@ -414,7 +414,7 @@
         android:paddingEnd="12dp"
         android:paddingBottom="10dp"
         android:text="@string/route_select_other_map"
-        android:textColor="@color/text_secondary"
+        android:textColor="?attr/mtTextSecondary"
         android:textSize="13sp" />
 
     <Button

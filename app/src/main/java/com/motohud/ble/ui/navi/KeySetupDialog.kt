@@ -22,6 +22,7 @@ import com.motohud.ble.amap.AmapRepo
 import com.motohud.ble.amap.TipsResult
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
+import com.motohud.ble.ui.theme.themeColor
 
 /**
  * 高德地图 Key 配置对话框。
@@ -45,13 +46,13 @@ class KeySetupDialog : DialogFragment() {
         root.addView(TextView(ctx).apply {
             text = currentStatusText()
             textSize = 12f
-            setTextColor(resources.getColor(R.color.text_secondary, null))
+            setTextColor(requireContext().themeColor(R.attr.mtTextSecondary, android.graphics.Color.WHITE))
         })
 
         root.addView(TextView(ctx).apply {
             text = getString(R.string.amap_apply_tip)
             textSize = 12f
-            setTextColor(resources.getColor(R.color.text_tertiary, null))
+            setTextColor(requireContext().themeColor(R.attr.mtTextTertiary, android.graphics.Color.WHITE))
             setPadding(0, dp(10), 0, dp(8))
         })
 
@@ -61,7 +62,7 @@ class KeySetupDialog : DialogFragment() {
             text = "${getString(R.string.amap_pkg_label)}：$pkg\n" +
                 "${getString(R.string.amap_sha1_label)}：$sha1"
             textSize = 12f
-            setTextColor(resources.getColor(R.color.text_primary, null))
+            setTextColor(requireContext().themeColor(R.attr.mtTextPrimary, android.graphics.Color.WHITE))
             setTextIsSelectable(true)
             setPadding(dp(12), dp(10), dp(12), dp(10))
             setBackgroundResource(R.drawable.bg_metric)
@@ -81,7 +82,7 @@ class KeySetupDialog : DialogFragment() {
         actions.addView(TextView(ctx).apply {
             text = getString(R.string.amap_copy_info)
             textSize = 12f
-            setTextColor(resources.getColor(R.color.accent, null))
+            setTextColor(requireContext().themeColor(R.attr.mtAccent, android.graphics.Color.WHITE))
             setPadding(0, dp(6), dp(16), dp(6))
             setOnClickListener {
                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -92,7 +93,7 @@ class KeySetupDialog : DialogFragment() {
         actions.addView(TextView(ctx).apply {
             text = getString(R.string.amap_test)
             textSize = 12f
-            setTextColor(resources.getColor(R.color.accent, null))
+            setTextColor(requireContext().themeColor(R.attr.mtAccent, android.graphics.Color.WHITE))
             setPadding(dp(8), dp(6), dp(16), dp(6))
             setOnClickListener {
                 val key = et.text?.toString()?.trim().orEmpty()
@@ -119,7 +120,7 @@ class KeySetupDialog : DialogFragment() {
         actions.addView(TextView(ctx).apply {
             text = getString(R.string.amap_open_console)
             textSize = 12f
-            setTextColor(resources.getColor(R.color.accent, null))
+            setTextColor(requireContext().themeColor(R.attr.mtAccent, android.graphics.Color.WHITE))
             setPadding(dp(8), dp(6), 0, dp(6))
             setOnClickListener {
                 runCatching {

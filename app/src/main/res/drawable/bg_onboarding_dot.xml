@@ -2,7 +2,7 @@
 <!-- 引导页指示点（未选中） -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
-    <solid android:color="@color/fill_strong" />
+    <solid android:color="?attr/mtFillStrong" />
     <size
         android:width="7dp"
         android:height="7dp" />

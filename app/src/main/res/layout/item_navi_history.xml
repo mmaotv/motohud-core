@@ -43,7 +43,7 @@
                 android:ellipsize="end"
                 android:fontFamily="@font/inter"
                 android:maxLines="1"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
@@ -53,7 +53,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="10dp"
                 android:fontFamily="@font/inter"
-                android:textColor="@color/accent"
+                android:textColor="?attr/mtAccent"
                 android:textSize="15sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -71,7 +71,7 @@
                 android:layout_height="13dp"
                 android:contentDescription="@string/navi_history_from"
                 android:src="@drawable/ic_route"
-                android:tint="@color/text_tertiary" />
+                android:tint="?attr/mtTextTertiary" />
 
             <TextView
                 android:id="@+id/nh_from"
@@ -81,7 +81,7 @@
                 android:layout_weight="1"
                 android:ellipsize="end"
                 android:maxLines="1"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="12sp" />
         </LinearLayout>
 
@@ -97,7 +97,7 @@
                 android:id="@+id/nh_time"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="@color/text_tertiary"
+                android:textColor="?attr/mtTextTertiary"
                 android:textSize="12sp" />
 
             <TextView
@@ -106,7 +106,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="10dp"
                 android:layout_weight="1"
-                android:textColor="@color/text_tertiary"
+                android:textColor="?attr/mtTextTertiary"
                 android:textSize="12sp" />
         </LinearLayout>
 
@@ -121,7 +121,7 @@
             android:paddingTop="7dp"
             android:paddingEnd="10dp"
             android:paddingBottom="7dp"
-            android:textColor="@color/text_secondary"
+            android:textColor="?attr/mtTextSecondary"
             android:textSize="11sp"
             android:visibility="gone" />
     </LinearLayout>

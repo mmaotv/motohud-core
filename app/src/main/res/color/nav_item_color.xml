@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 底部导航项颜色（选中橙 / 未选灰） -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:color="@color/nav_item_checked" android:state_checked="true" />
-    <item android:color="@color/nav_item_unchecked" />
+    <item android:color="?attr/mtNavChecked" android:state_checked="true" />
+    <item android:color="?attr/mtNavUnchecked" />
 </selector>

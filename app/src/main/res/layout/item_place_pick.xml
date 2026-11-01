@@ -16,13 +16,13 @@
         android:layout_weight="1"
         android:ellipsize="end"
         android:maxLines="1"
-        android:textColor="@color/text_primary"
+        android:textColor="?attr/mtTextPrimary"
         android:textSize="14sp" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="@string/origin_place_hint"
-        android:textColor="@color/text_tertiary"
+        android:textColor="?attr/mtTextTertiary"
         android:textSize="11sp" />
 </LinearLayout>

@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_window">
+    android:background="?attr/mtWindow">
 
     <!-- 背景地图：途经点 / 顺路搜时画出当前路线，用户能直观看到选的点落在路线的哪个位置 -->
     <com.amap.api.maps.MapView
@@ -22,7 +22,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:background="#CC0E0E12"
+        android:background="?attr/mtCard"
         android:paddingStart="12dp"
         android:paddingTop="10dp"
         android:paddingEnd="12dp"
@@ -39,7 +39,7 @@
             android:contentDescription="@string/cancel"
             android:padding="2dp"
             android:src="@drawable/ic_arrow_back"
-            app:tint="@color/text_primary" />
+            app:tint="?attr/mtTextPrimary" />
 
         <LinearLayout
             android:id="@+id/ps_bar"
@@ -67,8 +67,8 @@
                 android:imeOptions="actionSearch"
                 android:inputType="text"
                 android:maxLines="1"
-                android:textColor="@color/text_primary"
-                android:textColorHint="@color/text_tertiary"
+                android:textColor="?attr/mtTextPrimary"
+                android:textColorHint="?attr/mtTextTertiary"
                 android:textSize="15sp" />
 
             <ImageView
@@ -88,7 +88,7 @@
         android:layout_height="wrap_content"
         android:visibility="gone"
         android:scrollbars="none"
-        android:background="#CC0E0E12"
+        android:background="?attr/mtCard"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/ps_top">
@@ -114,7 +114,7 @@
         android:background="@drawable/bg_card"
         android:fontFamily="@font/inter"
         android:padding="12dp"
-        android:textColor="@color/text_secondary"
+        android:textColor="?attr/mtTextSecondary"
         android:textSize="12sp"
         android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"

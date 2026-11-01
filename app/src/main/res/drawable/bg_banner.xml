@@ -2,6 +2,6 @@
 <!-- 连接状态条 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="@color/bar_surface" />
+    <solid android:color="?attr/mtBarSurface" />
     <corners android:radius="0dp" />
 </shape>

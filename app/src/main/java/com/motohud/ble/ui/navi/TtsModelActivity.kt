@@ -23,10 +23,12 @@ import com.motohud.ble.navi.SpeechPriority
 import com.motohud.ble.navi.tts.SherpaSpeaker
 import com.motohud.ble.navi.tts.TtsModelStore
 import com.motohud.ble.navi.tts.TtsStyle
+import com.motohud.ble.ui.theme.AppTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import com.motohud.ble.ui.theme.themeColor
 
 /**
  * 离线语音引擎管理页。
@@ -71,6 +73,12 @@ class TtsModelActivity : AppCompatActivity() {
     private var busy = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        /*
+         * 日 / 夜主题必须在 super 之前定下来。
+         * `?attr/mtXxx` 是在布局 inflate 那一刻从主题里取值的，晚一步设置
+         * 只能影响之后新建的 View，已经铺好的界面一个字都不会变。
+         */
+        AppTheme.apply(this)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_tts_model)
 
@@ -179,9 +187,9 @@ class TtsModelActivity : AppCompatActivity() {
             val chip = TextView(this).apply {
                 text = style.name
                 setTextColor(
-                    ContextCompat.getColor(
-                        this@TtsModelActivity,
-                        if (style.id == current) R.color.text_primary else R.color.text_secondary
+                    this@TtsModelActivity.themeColor(
+                        if (style.id == current) R.attr.mtTextPrimary else R.attr.mtTextSecondary,
+                        android.graphics.Color.WHITE
                     )
                 )
                 textSize = 13f

@@ -60,60 +60,64 @@
     -->
 
     <!-- 夜间（= 现状，全局基础主题用这套） -->
-    <color name="nv_night_text_primary">#FFFFFFFF</color>
-    <color name="nv_night_text_secondary">#99EBEBF5</color>
-    <color name="nv_night_text_tertiary">#4DEBEBF5</color>
-    <color name="nv_night_accent">#FFFF9F0A</color>
-    <color name="nv_night_warn">#FFFF9F0A</color>
-    <color name="nv_night_danger">#FFFF453A</color>
-    <color name="nv_night_caution">#FFFFD60A</color>
-    <color name="nv_night_divider">#1FFFFFFF</color>
-    <color name="nv_night_panel">#F0141416</color>
-    <color name="nv_night_panel_stroke">#33FFFFFF</color>
-    <color name="nv_night_circle">#E6141416</color>
-    <color name="nv_night_circle_stroke">#40FFFFFF</color>
-    <color name="nv_night_cross_panel">#FF0B0B0D</color>
-    <color name="nv_night_bottom_card">#F21C1C1E</color>
-    <color name="nv_night_card">#E6202022</color>
-    <color name="nv_night_card_stroke">#1AFFFFFF</color>
-    <color name="nv_night_badge">#33FF9F0A</color>
-    <color name="nv_night_badge_stroke">#66FF9F0A</color>
-    <color name="nv_night_grabber">#40FFFFFF</color>
-    <color name="nv_night_scrim_from">#CC000000</color>
-    <color name="nv_night_scrim_to">#00000000</color>
-    <color name="nv_night_shade">#B3000000</color>
-    <color name="nv_night_lane_bg">#1AFFFFFF</color>
-    <color name="nv_night_lane_bg_active">#33FFFFFF</color>
-    <color name="nv_night_lane_arrow">#FFFFFFFF</color>
-    <color name="nv_night_lane_arrow_dim">#59FFFFFF</color>
+    <color name="pal_night_text_primary">#FFFFFFFF</color>
+    <color name="pal_night_text_secondary">#99EBEBF5</color>
+    <color name="pal_night_text_tertiary">#4DEBEBF5</color>
+    <color name="pal_night_accent">#FFFF9F0A</color>
+    <color name="pal_night_warn">#FFFF9F0A</color>
+    <color name="pal_night_danger">#FFFF453A</color>
+    <color name="pal_night_caution">#FFFFD60A</color>
+    <color name="pal_night_divider">#1FFFFFFF</color>
+    <color name="pal_night_panel">#F0141416</color>
+    <color name="pal_night_panel_stroke">#33FFFFFF</color>
+    <color name="pal_night_circle">#E6141416</color>
+    <color name="pal_night_circle_stroke">#40FFFFFF</color>
+    <color name="pal_night_cross_panel">#FF0B0B0D</color>
+    <color name="pal_night_bottom_card">#F21C1C1E</color>
+    <color name="pal_night_card">#E6202022</color>
+    <color name="pal_night_card_stroke">#1AFFFFFF</color>
+    <color name="pal_night_badge">#33FF9F0A</color>
+    <color name="pal_night_badge_stroke">#66FF9F0A</color>
+    <color name="pal_night_grabber">#40FFFFFF</color>
+    <color name="pal_night_scrim_from">#CC000000</color>
+    <color name="pal_night_scrim_to">#00000000</color>
+    <color name="pal_night_shade">#B3000000</color>
+    <color name="pal_night_lane_bg">#1AFFFFFF</color>
+    <color name="pal_night_lane_bg_active">#33FFFFFF</color>
+    <color name="pal_night_lane_arrow">#FFFFFFFF</color>
+    <color name="pal_night_lane_arrow_dim">#59FFFFFF</color>
 
     <!-- 白天 -->
-    <color name="nv_day_text_primary">#FF16181C</color>
-    <color name="nv_day_text_secondary">#99000000</color>
-    <color name="nv_day_text_tertiary">#4D000000</color>
-    <color name="nv_day_accent">#FFE07000</color>
-    <color name="nv_day_warn">#FFD95300</color>
-    <color name="nv_day_danger">#FFD70015</color>
-    <color name="nv_day_caution">#FF9E6B00</color>
-    <color name="nv_day_divider">#1F000000</color>
-    <color name="nv_day_panel">#F7FFFFFF</color>
-    <color name="nv_day_panel_stroke">#14000000</color>
-    <color name="nv_day_circle">#FFFFFFFF</color>
-    <color name="nv_day_circle_stroke">#29000000</color>
-    <color name="nv_day_cross_panel">#FFFFFFFF</color>
-    <color name="nv_day_bottom_card">#F7FFFFFF</color>
-    <color name="nv_day_card">#F7FFFFFF</color>
-    <color name="nv_day_card_stroke">#1A000000</color>
-    <color name="nv_day_badge">#1AE07000</color>
-    <color name="nv_day_badge_stroke">#40E07000</color>
-    <color name="nv_day_grabber">#33000000</color>
-    <color name="nv_day_scrim_from">#99FFFFFF</color>
-    <color name="nv_day_scrim_to">#00FFFFFF</color>
-    <color name="nv_day_shade">#B3FFFFFF</color>
-    <color name="nv_day_lane_bg">#FF1B3F6B</color>
-    <color name="nv_day_lane_bg_active">#FF1466CC</color>
-    <color name="nv_day_lane_arrow">#FFFFFFFF</color>
-    <color name="nv_day_lane_arrow_dim">#99FFFFFF</color>
+    <color name="pal_day_text_primary">#FF16181C</color>
+    <color name="pal_day_text_secondary">#99000000</color>
+    <color name="pal_day_text_tertiary">#4D000000</color>
+    <color name="pal_day_accent">#FFE07000</color>
+    <color name="pal_day_warn">#FFD95300</color>
+    <color name="pal_day_danger">#FFD70015</color>
+    <color name="pal_day_caution">#FF9E6B00</color>
+    <color name="pal_day_divider">#1F000000</color>
+    <color name="pal_day_panel">#F7FFFFFF</color>
+    <color name="pal_day_panel_stroke">#14000000</color>
+    <color name="pal_day_circle">#FFFFFFFF</color>
+    <color name="pal_day_circle_stroke">#29000000</color>
+    <color name="pal_day_cross_panel">#FFFFFFFF</color>
+    <color name="pal_day_bottom_card">#F7FFFFFF</color>
+    <color name="pal_day_card">#F7FFFFFF</color>
+    <color name="pal_day_card_stroke">#1A000000</color>
+    <color name="pal_day_badge">#1AE07000</color>
+    <color name="pal_day_badge_stroke">#40E07000</color>
+    <color name="pal_day_grabber">#33000000</color>
+    <color name="pal_day_scrim_from">#FFF2F3F5</color>
+    <color name="pal_day_scrim_to">#00FFFFFF</color>
+    <color name="pal_day_shade">#B3FFFFFF</color>
+    <color name="pal_day_lane_bg">#FF1B3F6B</color>
+    <color name="pal_day_lane_bg_active">#FF1466CC</color>
+    <color name="pal_day_lane_arrow">#FFFFFFFF</color>
+    <color name="pal_day_lane_arrow_dim">#99FFFFFF</color>
+
+    <!-- 压在深色照片上的文字：不跟主题，永远浅色（照片是深色素材） -->
+    <color name="on_photo_primary">#FFFFFFFF</color>
+    <color name="on_photo_secondary">#B3EBEBF5</color>
 
     <!-- 交通标志蓝：转向图标底衬 / 车道牌同源 -->
     <color name="sign_blue">#FF1466CC</color>
@@ -127,6 +131,71 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="ic_launcher_background">#FF1D1D1F</color>
+
+    <!--
+      ==================== 全局页面配色（其它界面用） ====================
+
+      上面那批 `pal_night_*` / `pal_day_*` 原本是导航页专属，现在提升为**全 App
+      调色板**：所有页面的配色属性（`mt*`，见 attrs.xml）都指向这里。
+
+      这里补的是「非导航页」才用得到的角色：窗口底色、实心表面、填充块、
+      输入框描边、弹窗、底部导航选中态、轨迹线。命名沿用白天/夜间两套，
+      值全部与导航页同一套体系（强调色、文字三级、危险色完全共用）。
+    -->
+
+    <!-- 夜间（= 现状） -->
+    <color name="pal_night_window">#FF000000</color>
+    <color name="pal_night_surface">#FF1C1C1E</color>
+    <color name="pal_night_surface_high">#F21C1C1E</color>
+    <color name="pal_night_fill">#2E787880</color>
+    <color name="pal_night_fill_strong">#52787880</color>
+    <color name="pal_night_hairline">#1AFFFFFF</color>
+    <color name="pal_night_accent_dim">#4DFF9F0A</color>
+    <color name="pal_night_text_on_accent">#FF1D1D1F</color>
+    <color name="pal_night_green">#FF30D158</color>
+    <color name="pal_night_green_dim">#4D30D158</color>
+    <color name="pal_night_red_dim">#4DFF453A</color>
+    <color name="pal_night_dialog_surface">#FF1F1F22</color>
+    <color name="pal_night_dialog_stroke">#33FFFFFF</color>
+    <color name="pal_night_bar_surface">#FF1C1C1E</color>
+    <color name="pal_night_track_done">#FF8A8A8E</color>
+    <color name="pal_night_track_ahead">#FFFF9F0A</color>
+    <color name="pal_night_nav_checked">#FFFF9F0A</color>
+    <color name="pal_night_nav_unchecked">#99EBEBF5</color>
+    <!-- 输入框 / 搜索栏底色：比卡片再深一档，才有"凹槽"感 -->
+    <color name="pal_night_field">#F22C2C2E</color>
+    <!-- 车库页 hero 展示区渐变（摩托车整车图背后那块） -->
+    <color name="pal_night_hero_from">#FF2A2A2E</color>
+    <color name="pal_night_hero_to">#FF08080A</color>
+
+    <!--
+      白天。
+
+      window 刻意用**浅灰 #F2F3F5** 而不是纯白：卡片本身是白的，页面底也是白
+      就分不出层次了（iOS 系统设置页就是灰底白卡）。纯白只留给卡片、弹窗、
+      顶栏这些"浮起来"的表面。
+    -->
+    <color name="pal_day_window">#FFF2F3F5</color>
+    <color name="pal_day_surface">#FFFFFFFF</color>
+    <color name="pal_day_surface_high">#FFFFFFFF</color>
+    <color name="pal_day_fill">#14000000</color>
+    <color name="pal_day_fill_strong">#29000000</color>
+    <color name="pal_day_hairline">#1F000000</color>
+    <color name="pal_day_accent_dim">#1AE07000</color>
+    <color name="pal_day_text_on_accent">#FFFFFFFF</color>
+    <color name="pal_day_green">#FF1B8F3A</color>
+    <color name="pal_day_green_dim">#1A1B8F3A</color>
+    <color name="pal_day_red_dim">#1AD70015</color>
+    <color name="pal_day_dialog_surface">#FFFFFFFF</color>
+    <color name="pal_day_dialog_stroke">#29000000</color>
+    <color name="pal_day_bar_surface">#FFFFFFFF</color>
+    <color name="pal_day_track_done">#FF8A8A8E</color>
+    <color name="pal_day_track_ahead">#FFE07000</color>
+    <color name="pal_day_nav_checked">#FFE07000</color>
+    <color name="pal_day_nav_unchecked">#99000000</color>
+    <color name="pal_day_field">#FFFFFFFF</color>
+    <color name="pal_day_hero_from">#FFFFFFFF</color>
+    <color name="pal_day_hero_to">#FFE9EBEF</color>
 
     <!-- HUD 投屏导航配色（深色底，高对比） -->
     <color name="hud_background">#FF000000</color>

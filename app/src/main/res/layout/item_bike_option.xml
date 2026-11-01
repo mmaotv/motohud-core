@@ -34,7 +34,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:fontFamily="@font/inter"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -43,7 +43,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -54,5 +54,5 @@
         android:contentDescription="@string/garage_picker_title"
         android:src="@drawable/ic_check_circle"
         android:visibility="invisible"
-        app:tint="@color/accent" />
+        app:tint="?attr/mtAccent" />
 </LinearLayout>

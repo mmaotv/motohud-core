@@ -35,6 +35,7 @@ import com.motohud.ble.data.NaviHistoryEntity
 import com.motohud.ble.data.NaviTrack
 import com.motohud.ble.navi.CoordConverter
 import com.motohud.ble.navi.TrackSmooth
+import com.motohud.ble.ui.theme.AppTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,6 +44,7 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.motohud.ble.ui.theme.themeColor
 
 /**
  * 导航历史详情 —— 行驶轨迹回放。
@@ -77,6 +79,12 @@ class NaviHistoryDetailActivity : AppCompatActivity() {
     private lateinit var tvNoTrack: View
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        /*
+         * 日 / 夜主题必须在 super 之前定下来。
+         * `?attr/mtXxx` 是在布局 inflate 那一刻从主题里取值的，晚一步设置
+         * 只能影响之后新建的 View，已经铺好的界面一个字都不会变。
+         */
+        AppTheme.apply(this)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_navi_history_detail)
 
@@ -205,7 +213,7 @@ class NaviHistoryDetailActivity : AppCompatActivity() {
                 PolylineOptions()
                     .addAll(latLngs)
                     .width(11f)
-                    .color(ContextCompat.getColor(this, R.color.track_ahead))
+                    .color(themeColor(R.attr.mtTrackAhead, android.graphics.Color.WHITE))
                     .setDottedLine(false)
                     .zIndex(2f)
             )

@@ -12,7 +12,7 @@
         android:layout_height="wrap_content"
         android:layout_marginStart="20dp"
         android:text="@string/garage_picker_title"
-        android:textColor="@color/text_primary"
+        android:textColor="?attr/mtTextPrimary"
         android:textSize="17sp"
         android:textStyle="bold" />
 

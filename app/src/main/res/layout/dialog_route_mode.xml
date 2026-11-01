@@ -29,7 +29,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:text="@string/navi_mode_motorcycle"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
@@ -39,7 +39,7 @@
                 android:layout_marginTop="3dp"
                 android:fontFamily="@font/inter"
                 android:text="@string/navi_mode_motorcycle_desc"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="12sp" />
         </LinearLayout>
 
@@ -73,7 +73,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:text="@string/navi_mode_car"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
@@ -83,7 +83,7 @@
                 android:layout_marginTop="3dp"
                 android:fontFamily="@font/inter"
                 android:text="@string/navi_mode_car_desc"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="12sp" />
         </LinearLayout>
 
@@ -118,7 +118,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:text="@string/navi_motorcycle_avoid_highway"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="13sp" />
 
             <TextView
@@ -127,7 +127,7 @@
                 android:layout_marginTop="2dp"
                 android:fontFamily="@font/inter"
                 android:text="@string/navi_motorcycle_avoid_highway_desc"
-                android:textColor="@color/text_tertiary"
+                android:textColor="?attr/mtTextTertiary"
                 android:textSize="11sp" />
         </LinearLayout>
 
@@ -144,6 +144,6 @@
         android:layout_marginTop="10dp"
         android:fontFamily="@font/inter"
         android:text="@string/navi_motorcycle_legal"
-        android:textColor="@color/text_tertiary"
+        android:textColor="?attr/mtTextTertiary"
         android:textSize="11sp" />
 </LinearLayout>

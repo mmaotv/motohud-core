@@ -2,6 +2,6 @@
 <!-- 主按钮：橙色 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="@color/accent" />
+    <solid android:color="?attr/mtAccent" />
     <corners android:radius="14dp" />
 </shape>

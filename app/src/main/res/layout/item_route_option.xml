@@ -27,7 +27,7 @@
             android:layout_height="wrap_content"
             android:fontFamily="@font/inter"
             android:maxLines="1"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="24sp"
             android:textStyle="bold" />
 
@@ -38,7 +38,7 @@
             android:layout_marginTop="2dp"
             android:fontFamily="@font/inter"
             android:maxLines="1"
-            android:textColor="@color/text_secondary"
+            android:textColor="?attr/mtTextSecondary"
             android:textSize="12sp" />
     </LinearLayout>
 
@@ -60,7 +60,7 @@
             android:paddingTop="2dp"
             android:paddingEnd="7dp"
             android:paddingBottom="2dp"
-            android:textColor="@color/accent"
+            android:textColor="?attr/mtAccent"
             android:textSize="10sp"
             android:textStyle="bold" />
 
@@ -73,7 +73,7 @@
             android:fontFamily="@font/inter"
             android:gravity="end"
             android:maxLines="2"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="12sp" />
     </LinearLayout>
 </LinearLayout>

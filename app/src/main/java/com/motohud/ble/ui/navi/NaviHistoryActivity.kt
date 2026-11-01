@@ -19,11 +19,13 @@ import com.motohud.ble.R
 import com.motohud.ble.data.NaviHistory
 import com.motohud.ble.data.NaviHistoryEntity
 import com.motohud.ble.ui.common.MotoDialog
+import com.motohud.ble.ui.theme.AppTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
+import com.motohud.ble.ui.theme.themeColor
 
 /**
  * 导航历史。
@@ -48,6 +50,12 @@ class NaviHistoryActivity : AppCompatActivity() {
     private var all: List<NaviHistoryEntity> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        /*
+         * 日 / 夜主题必须在 super 之前定下来。
+         * `?attr/mtXxx` 是在布局 inflate 那一刻从主题里取值的，晚一步设置
+         * 只能影响之后新建的 View，已经铺好的界面一个字都不会变。
+         */
+        AppTheme.apply(this)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_navi_history)
         app = application as MotoHudApp
@@ -106,9 +114,9 @@ class NaviHistoryActivity : AppCompatActivity() {
                 text = getString(r.labelRes)
                 textSize = 13f
                 setTextColor(
-                    androidx.core.content.ContextCompat.getColor(
-                        this@NaviHistoryActivity,
-                        if (index == 0) R.color.accent else R.color.text_secondary
+                    this@NaviHistoryActivity.themeColor(
+                        if (index == 0) R.attr.mtAccent else R.attr.mtTextSecondary,
+                        android.graphics.Color.WHITE
                     )
                 )
                 setPadding(dp(14), dp(8), dp(14), dp(8))
@@ -132,9 +140,9 @@ class NaviHistoryActivity : AppCompatActivity() {
         for (i in 0 until row.childCount) {
             val tv = row.getChildAt(i) as? TextView ?: continue
             tv.setTextColor(
-                androidx.core.content.ContextCompat.getColor(
-                    this,
-                    if (i == selected) R.color.accent else R.color.text_secondary
+                themeColor(
+                    if (i == selected) R.attr.mtAccent else R.attr.mtTextSecondary,
+                    android.graphics.Color.WHITE
                 )
             )
         }

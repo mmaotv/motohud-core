@@ -8,5 +8,5 @@
     <solid android:color="#FFFFFFFF" />
     <stroke
         android:width="3dp"
-        android:color="@color/red" />
+        android:color="?attr/mtRed" />
 </shape>

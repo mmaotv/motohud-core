@@ -55,7 +55,7 @@ HEAD = '''<?xml version="1.0" encoding="utf-8"?>
             android:layout_height="wrap_content"
             android:fontFamily="@font/inter"
             android:text="@string/settings_title"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="20sp"
             android:textStyle="bold" />
 '''
@@ -64,7 +64,7 @@ DIV = '''
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
-                    android:background="@color/divider" />
+                    android:background="?attr/mtDivider" />
 '''
 
 
@@ -78,7 +78,7 @@ def section(title):
             android:letterSpacing="0.04"
             android:paddingStart="6dp"
             android:text="@string/%s"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="12sp"
             android:textStyle="bold" />
 ''' % title
@@ -125,7 +125,7 @@ def row_switch(id_, title, desc, first=False):
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="@string/%s"
-                            android:textColor="@color/text_primary"
+                            android:textColor="?attr/mtTextPrimary"
                             android:textSize="14sp" />
 
                         <TextView
@@ -133,7 +133,7 @@ def row_switch(id_, title, desc, first=False):
                             android:layout_height="wrap_content"
                             android:layout_marginTop="1dp"
                             android:text="@string/%s"
-                            android:textColor="@color/text_tertiary"
+                            android:textColor="?attr/mtTextTertiary"
                             android:textSize="11sp" />
                     </LinearLayout>
 
@@ -161,7 +161,7 @@ def row_jump(id_, title, desc=None, value_id=None, first=False):
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="@string/%s"
-                            android:textColor="@color/text_primary"
+                            android:textColor="?attr/mtTextPrimary"
                             android:textSize="14sp" />
 
                         <TextView
@@ -169,7 +169,7 @@ def row_jump(id_, title, desc=None, value_id=None, first=False):
                             android:layout_height="wrap_content"
                             android:layout_marginTop="1dp"
                             android:text="@string/%s"
-                            android:textColor="@color/text_tertiary"
+                            android:textColor="?attr/mtTextTertiary"
                             android:textSize="11sp" />
                     </LinearLayout>
 ''' % (title, desc)
@@ -181,7 +181,7 @@ def row_jump(id_, title, desc=None, value_id=None, first=False):
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="@string/%s"
-                        android:textColor="@color/text_primary"
+                        android:textColor="?attr/mtTextPrimary"
                         android:textSize="14sp" />
 ''' % title
         h = 48
@@ -191,7 +191,7 @@ def row_jump(id_, title, desc=None, value_id=None, first=False):
                         android:id="@+id/%s"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textColor="@color/text_tertiary"
+                        android:textColor="?attr/mtTextTertiary"
                         android:textSize="12sp" />
 ''' % value_id
     else:

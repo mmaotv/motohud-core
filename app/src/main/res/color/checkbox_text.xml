@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 弹窗内勾选项的文字色：禁用时必须明显变暗。
-     布局里原来直接写 @color/text_primary，会覆盖 Material 的禁用态配色，
+     布局里原来直接写 ?attr/mtTextPrimary，会覆盖 Material 的禁用态配色，
      结果"智能推荐勾上后其余项仍显示全亮"，用户以为能点、点了没反应。 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:color="@color/text_tertiary" android:state_enabled="false" />
-    <item android:color="@color/text_primary" />
+    <item android:color="?attr/mtTextTertiary" android:state_enabled="false" />
+    <item android:color="?attr/mtTextPrimary" />
 </selector>

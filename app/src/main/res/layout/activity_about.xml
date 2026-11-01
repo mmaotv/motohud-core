@@ -2,7 +2,7 @@
 <androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_window"
+    android:background="?attr/mtWindow"
     android:clipToPadding="false"
     android:paddingBottom="24dp"
     android:scrollbars="none">
@@ -32,7 +32,7 @@
                 android:contentDescription="@string/cancel"
                 android:padding="11dp"
                 android:src="@drawable/ic_arrow_back"
-                android:tint="@color/text_primary" />
+                android:tint="?attr/mtTextPrimary" />
 
             <TextView
                 android:layout_width="0dp"
@@ -40,7 +40,7 @@
                 android:layout_marginStart="10dp"
                 android:layout_weight="1"
                 android:text="@string/about_title"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="20sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -72,7 +72,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="@string/app_name"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="17sp"
                     android:textStyle="bold" />
 
@@ -81,7 +81,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/mtTextSecondary"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -95,7 +95,7 @@
                 android:paddingEnd="12dp"
                 android:paddingBottom="7dp"
                 android:text="@string/about_check_update"
-                android:textColor="@color/accent"
+                android:textColor="?attr/mtAccent"
                 android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -115,7 +115,7 @@
                 android:id="@+id/tv_update_title"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="15sp"
                 android:textStyle="bold" />
 
@@ -127,7 +127,7 @@
                 android:lineSpacingExtra="3dp"
                 android:maxLines="14"
                 android:ellipsize="end"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="12sp" />
 
             <ProgressBar
@@ -136,7 +136,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:indeterminateTint="@color/accent"
+                android:indeterminateTint="?attr/mtAccent"
                 android:max="100"
                 android:visibility="gone" />
 
@@ -156,7 +156,7 @@
             android:layout_marginTop="20dp"
             android:layout_marginBottom="8dp"
             android:text="@string/about_device_info"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="15sp"
             android:textStyle="bold" />
 
@@ -177,7 +177,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="@string/about_device_conn"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/mtTextSecondary"
                     android:textSize="13sp" />
 
                 <TextView
@@ -185,7 +185,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/about_disconnected"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="13sp"
                     android:textStyle="bold" />
             </LinearLayout>
@@ -195,7 +195,7 @@
                 android:layout_height="1dp"
                 android:layout_marginTop="10dp"
                 android:layout_marginBottom="10dp"
-                android:background="@color/card_stroke" />
+                android:background="?attr/mtCardStroke" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -207,7 +207,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="@string/about_device_name"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/mtTextSecondary"
                     android:textSize="13sp" />
 
                 <TextView
@@ -215,7 +215,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/about_value_unknown"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -230,7 +230,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="@string/about_device_protocol"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/mtTextSecondary"
                     android:textSize="13sp" />
 
                 <TextView
@@ -238,7 +238,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/about_value_unknown"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -253,7 +253,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="@string/about_device_battery"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/mtTextSecondary"
                     android:textSize="13sp" />
 
                 <TextView
@@ -261,7 +261,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/about_value_unknown"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -276,7 +276,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="@string/garage_metric_water"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/mtTextSecondary"
                     android:textSize="13sp" />
 
                 <TextView
@@ -284,7 +284,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/about_value_unknown"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -299,7 +299,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="@string/garage_metric_oil"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/mtTextSecondary"
                     android:textSize="13sp" />
 
                 <TextView
@@ -307,7 +307,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/about_value_unknown"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -322,7 +322,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="@string/garage_metric_mileage"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/mtTextSecondary"
                     android:textSize="13sp" />
 
                 <TextView
@@ -330,7 +330,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/about_value_unknown"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="13sp" />
             </LinearLayout>
         </LinearLayout>
@@ -344,7 +344,7 @@
             android:gravity="center"
             android:padding="12dp"
             android:text="@string/about_repo"
-            android:textColor="@color/accent"
+            android:textColor="?attr/mtAccent"
             android:textSize="13sp" />
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

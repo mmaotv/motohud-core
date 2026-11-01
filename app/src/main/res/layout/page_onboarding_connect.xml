@@ -3,7 +3,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_window"
+    android:background="?attr/mtWindow"
     android:orientation="vertical"
     android:padding="32dp">
 
@@ -36,7 +36,7 @@
                 android:fontFamily="@font/inter"
                 android:gravity="center"
                 android:text="1"
-                android:textColor="@color/text_on_accent"
+                android:textColor="?attr/mtTextOnAccent"
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
@@ -59,7 +59,7 @@
                     android:layout_marginTop="2dp"
                     android:fontFamily="@font/inter"
                     android:text="@string/onboarding_connect_step1_body"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/mtTextSecondary"
                     android:textSize="13sp" />
             </LinearLayout>
         </LinearLayout>
@@ -79,7 +79,7 @@
                 android:fontFamily="@font/inter"
                 android:gravity="center"
                 android:text="2"
-                android:textColor="@color/text_on_accent"
+                android:textColor="?attr/mtTextOnAccent"
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
@@ -102,7 +102,7 @@
                     android:layout_marginTop="2dp"
                     android:fontFamily="@font/inter"
                     android:text="@string/onboarding_connect_step2_body"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/mtTextSecondary"
                     android:textSize="13sp" />
             </LinearLayout>
         </LinearLayout>
@@ -122,7 +122,7 @@
                 android:fontFamily="@font/inter"
                 android:gravity="center"
                 android:text="3"
-                android:textColor="@color/text_on_accent"
+                android:textColor="?attr/mtTextOnAccent"
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
@@ -145,7 +145,7 @@
                     android:layout_marginTop="2dp"
                     android:fontFamily="@font/inter"
                     android:text="@string/onboarding_connect_step3_body"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/mtTextSecondary"
                     android:textSize="13sp" />
             </LinearLayout>
         </LinearLayout>

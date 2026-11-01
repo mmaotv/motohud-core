@@ -29,7 +29,7 @@
         android:layout_height="wrap_content"
         android:fontFamily="@font/inter"
         android:text="@string/origin_pick_title"
-        android:textColor="@color/text_primary"
+        android:textColor="?attr/mtTextPrimary"
         android:textSize="18sp"
         android:textStyle="bold" />
 
@@ -48,7 +48,7 @@
             android:layout_height="22dp"
             android:contentDescription="@string/origin_current"
             android:src="@drawable/ic_my_location"
-            android:tint="@color/accent" />
+            android:tint="?attr/mtAccent" />
 
         <TextView
             android:id="@+id/origin_current_label"
@@ -57,7 +57,7 @@
             android:layout_marginStart="12dp"
             android:layout_weight="1"
             android:text="@string/origin_current"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="14sp" />
 
         <TextView
@@ -67,7 +67,7 @@
             android:ellipsize="end"
             android:maxLines="1"
             android:text="@string/origin_current_sub"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -84,7 +84,7 @@
             android:layout_height="22dp"
             android:contentDescription="@string/origin_map_pick"
             android:src="@drawable/ic_nav_navigation"
-            android:tint="@color/accent" />
+            android:tint="?attr/mtAccent" />
 
         <TextView
             android:layout_width="0dp"
@@ -92,7 +92,7 @@
             android:layout_marginStart="12dp"
             android:layout_weight="1"
             android:text="@string/origin_map_pick"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="14sp" />
 
         <TextView
@@ -100,7 +100,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/origin_map_pick_sub"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -118,7 +118,7 @@
             android:layout_height="22dp"
             android:contentDescription="@string/origin_search"
             android:src="@drawable/ic_search"
-            android:tint="@color/accent" />
+            android:tint="?attr/mtAccent" />
 
         <TextView
             android:layout_width="0dp"
@@ -126,14 +126,14 @@
             android:layout_marginStart="12dp"
             android:layout_weight="1"
             android:text="@string/origin_search"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="14sp" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/origin_search_sub"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -147,7 +147,7 @@
         android:layout_marginTop="12dp"
         android:fontFamily="@font/inter"
         android:text="@string/origin_saved"
-        android:textColor="@color/text_secondary"
+        android:textColor="?attr/mtTextSecondary"
         android:textSize="12sp"
         android:visibility="gone" />
 

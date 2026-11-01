@@ -70,7 +70,7 @@
                     android:layout_marginStart="6dp"
                     android:fontFamily="@font/inter"
                     android:text="@string/status_disconnected"
-                    android:textColor="@color/text_primary"
+                    android:textColor="@color/on_photo_primary"
                     android:textSize="11sp" />
             </LinearLayout>
 
@@ -91,7 +91,7 @@
                     android:id="@+id/iv_search"
                     android:layout_width="38dp"
                     android:layout_height="38dp"
-                    android:background="@drawable/bg_navi_circle"
+                    android:background="@drawable/bg_hero_circle"
                     android:contentDescription="@string/nav_search"
                     android:padding="10dp"
                     android:src="@drawable/ic_nav_search" />
@@ -101,7 +101,7 @@
                     android:layout_width="38dp"
                     android:layout_height="38dp"
                     android:layout_marginStart="8dp"
-                    android:background="@drawable/bg_navi_circle"
+                    android:background="@drawable/bg_hero_circle"
                     android:contentDescription="@string/settings_title"
                     android:padding="10dp"
                     android:src="@drawable/ic_settings" />
@@ -135,7 +135,7 @@
                     android:layout_marginTop="2dp"
                     android:fontFamily="@font/inter"
                     android:text="@string/garage_model_placeholder"
-                    android:textColor="@color/text_primary"
+                    android:textColor="@color/on_photo_primary"
                     android:textSize="26sp"
                     android:textStyle="bold" />
 
@@ -145,7 +145,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:fontFamily="@font/inter"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="@color/on_photo_secondary"
                     android:textSize="12sp" />
             </LinearLayout>
 
@@ -162,7 +162,7 @@
                 android:paddingStart="12dp"
                 android:paddingEnd="12dp"
                 android:text="@string/garage_change"
-                android:textColor="@color/text_primary"
+                android:textColor="@color/on_photo_primary"
                 android:textSize="11sp" />
         </FrameLayout>
 
@@ -204,7 +204,7 @@
                     android:fontFamily="@font/inter"
                     android:maxLines="1"
                     android:text="@string/device_card_not_connected"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="15sp"
                     android:textStyle="bold" />
 
@@ -213,12 +213,12 @@
                     android:layout_width="wrap_content"
                     android:layout_height="30dp"
                     android:layout_marginStart="8dp"
-                    android:background="@drawable/bg_status_pill"
+                    android:background="@drawable/bg_pill_action"
                     android:gravity="center"
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
                     android:text="@string/device_card_connect"
-                    android:textColor="@color/accent"
+                    android:textColor="?attr/mtAccent"
                     android:textSize="12sp"
                     android:textStyle="bold" />
             </LinearLayout>
@@ -230,7 +230,7 @@
                 android:layout_marginTop="6dp"
                 android:fontFamily="@font/inter"
                 android:text="@string/device_card_hint"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="12sp" />
 
             <!--
@@ -247,7 +247,7 @@
                 android:paddingTop="6dp"
                 android:paddingBottom="6dp"
                 android:text="@string/device_card_change"
-                android:textColor="@color/accent"
+                android:textColor="?attr/mtAccent"
                 android:textSize="12sp" />
         </LinearLayout>
 
@@ -353,7 +353,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="@string/garage_section_specs"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="15sp"
                     android:textStyle="bold" />
 
@@ -361,7 +361,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/garage_specs_note"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/mtTextTertiary"
                     android:textSize="10sp" />
             </LinearLayout>
 
@@ -386,7 +386,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
             android:text="@string/garage_disclaimer"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="10sp" />
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

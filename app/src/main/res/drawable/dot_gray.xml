@@ -2,7 +2,7 @@
 <!-- 状态点：灰 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
-    <solid android:color="@color/fill_strong" />
+    <solid android:color="?attr/mtFillStrong" />
     <size
         android:width="8dp"
         android:height="8dp" />

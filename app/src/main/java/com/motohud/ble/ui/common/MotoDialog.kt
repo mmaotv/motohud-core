@@ -7,6 +7,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.shape.MaterialShapeDrawable
 import com.google.android.material.shape.ShapeAppearanceModel
 import com.motohud.ble.R
+import com.motohud.ble.ui.theme.themeColor
 
 /**
  * 全应用统一的弹窗外观。
@@ -48,12 +49,24 @@ object MotoDialog {
         val model = ShapeAppearanceModel.builder()
             .setAllCornerSizes(CORNER_DP * density)
             .build()
+        /*
+         * 颜色走主题属性而不是 @color：弹窗要跟着页面的日/夜主题变。
+         * 早先写死 @color/dialog_surface，白天页面上仍然弹出深色板 ——
+         * 而且 builder.setBackground 会无条件覆盖主题里的 colorSurface，
+         * 所以只改主题不够，必须在这里取 attr。
+         */
         return MaterialShapeDrawable(model).apply {
             fillColor = ColorStateList.valueOf(
-                ContextCompat.getColor(context, R.color.dialog_surface)
+                context.themeColor(
+                    R.attr.mtDialogSurface,
+                    ContextCompat.getColor(context, R.color.dialog_surface)
+                )
             )
             strokeColor = ColorStateList.valueOf(
-                ContextCompat.getColor(context, R.color.dialog_stroke)
+                context.themeColor(
+                    R.attr.mtDialogStroke,
+                    ContextCompat.getColor(context, R.color.dialog_stroke)
+                )
             )
             strokeWidth = STROKE_DP * density
         }

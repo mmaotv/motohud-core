@@ -23,7 +23,7 @@
             android:fontFamily="@font/inter"
             android:lineSpacingMultiplier="1.4"
             android:text="@string/exam_no_data"
-            android:textColor="@color/text_secondary"
+            android:textColor="?attr/mtTextSecondary"
             android:textSize="13sp" />
 
         <TextView
@@ -48,7 +48,7 @@
             android:gravity="center"
             android:padding="24dp"
             android:text="@string/exam_no_fault"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="13sp" />
     </LinearLayout>
 

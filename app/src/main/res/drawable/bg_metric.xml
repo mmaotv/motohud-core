@@ -2,6 +2,6 @@
 <!-- 关键数据小块 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="#14FFFFFF" />
+    <solid android:color="?attr/mtHairline" />
     <corners android:radius="14dp" />
 </shape>

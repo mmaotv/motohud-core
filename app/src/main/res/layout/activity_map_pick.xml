@@ -43,7 +43,7 @@
             android:contentDescription="@string/cancel"
             android:padding="11dp"
             android:src="@drawable/ic_arrow_back"
-            app:tint="@color/text_primary" />
+            app:tint="?attr/mtTextPrimary" />
 
         <TextView
             android:layout_width="0dp"
@@ -52,7 +52,7 @@
             android:layout_weight="1"
             android:fontFamily="@font/inter"
             android:text="@string/origin_map_pick"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="17sp"
             android:textStyle="bold" />
     </LinearLayout>
@@ -69,7 +69,7 @@
         android:paddingEnd="12dp"
         android:paddingBottom="7dp"
         android:text="@string/origin_map_pick_sub"
-        android:textColor="@color/text_secondary"
+        android:textColor="?attr/mtTextSecondary"
         android:textSize="11sp"
         app:layout_constraintBottom_toTopOf="@id/pick_confirm"
         app:layout_constraintEnd_toEndOf="parent"
@@ -86,7 +86,7 @@
         android:paddingTop="5dp"
         android:paddingEnd="12dp"
         android:paddingBottom="5dp"
-        android:textColor="@color/accent"
+        android:textColor="?attr/mtAccent"
         android:textSize="12sp"
         app:layout_constraintBottom_toTopOf="@id/pick_hint"
         app:layout_constraintEnd_toEndOf="parent"

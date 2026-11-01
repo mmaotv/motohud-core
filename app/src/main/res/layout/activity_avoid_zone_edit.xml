@@ -3,7 +3,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_window">
+    android:background="?attr/mtWindow">
 
     <com.amap.api.maps.MapView
         android:id="@+id/aze_map"
@@ -18,7 +18,7 @@
         android:layout_gravity="center"
         android:contentDescription="@string/avoid_zone_pick_center"
         android:src="@drawable/ic_my_location"
-        android:tint="@color/accent" />
+        android:tint="?attr/mtAccent" />
 
     <ImageView
         android:id="@+id/aze_btn_back"
@@ -31,7 +31,7 @@
         android:contentDescription="@string/cancel"
         android:padding="11dp"
         android:src="@drawable/ic_arrow_back"
-        android:tint="@color/text_primary" />
+        android:tint="?attr/mtTextPrimary" />
 
     <!-- 底部编辑卡 -->
     <LinearLayout
@@ -51,7 +51,7 @@
             android:layout_height="wrap_content"
             android:fontFamily="@font/inter"
             android:text="@string/avoid_zone_name_label"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="11sp" />
 
         <EditText
@@ -66,15 +66,15 @@
             android:inputType="text"
             android:maxLength="20"
             android:maxLines="1"
-            android:textColor="@color/text_primary"
-            android:textColorHint="@color/text_tertiary"
+            android:textColor="?attr/mtTextPrimary"
+            android:textColorHint="?attr/mtTextTertiary"
             android:textSize="16sp" />
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:layout_marginTop="10dp"
-            android:background="@color/divider" />
+            android:background="?attr/mtDivider" />
 
         <!-- 宽 / 高 分开调：禁摩范围常常是长条（沿江路、高架、主干道），
              正方形不是框不满就是把旁边能走的路也禁了 -->
@@ -90,7 +90,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:text="@string/avoid_zone_width"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="13sp" />
 
             <SeekBar
@@ -108,7 +108,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:gravity="end"
-                android:textColor="@color/accent"
+                android:textColor="?attr/mtAccent"
                 android:textSize="13sp" />
         </LinearLayout>
 
@@ -124,7 +124,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:text="@string/avoid_zone_height"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="13sp" />
 
             <SeekBar
@@ -142,7 +142,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:gravity="end"
-                android:textColor="@color/accent"
+                android:textColor="?attr/mtAccent"
                 android:textSize="13sp" />
         </LinearLayout>
 
@@ -152,7 +152,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
             android:text="@string/avoid_zone_too_large"
-            android:textColor="@color/red"
+            android:textColor="?attr/mtRed"
             android:textSize="11sp"
             android:visibility="gone" />
 

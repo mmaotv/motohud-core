@@ -8,6 +8,7 @@ import androidx.fragment.app.Fragment
 import com.motohud.ble.R
 import com.motohud.ble.databinding.ActivityHostBinding
 import com.motohud.ble.ui.search.SearchFragment
+import com.motohud.ble.ui.theme.AppTheme
 
 /**
  * 二级页面容器。
@@ -32,6 +33,12 @@ class HostActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        /*
+         * 日 / 夜主题必须在 super 之前定下来。
+         * `?attr/mtXxx` 是在布局 inflate 那一刻从主题里取值的，晚一步设置
+         * 只能影响之后新建的 View，已经铺好的界面一个字都不会变。
+         */
+        AppTheme.apply(this)
         super.onCreate(savedInstanceState)
         val binding = ActivityHostBinding.inflate(layoutInflater)
         setContentView(binding.root)

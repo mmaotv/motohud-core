@@ -484,7 +484,13 @@
 
     <!-- ================= 屏幕与地图设置 ================= -->
     <string name="settings_map_section">屏幕与地图</string>
-    <string name="settings_map_theme_title">地图配色</string>
+    <!-- 顶栏日 / 夜开关（顶部状态条右侧的太阳 / 月亮图标） -->
+    <string name="theme_toggle_to_night">切换到夜间</string>
+    <string name="theme_toggle_to_day">切换到白天</string>
+    <string name="theme_toggled_night">已切换到夜间</string>
+    <string name="theme_toggled_day">已切换到白天</string>
+    <string name="theme_auto_restored">已恢复自动（按当地日出日落切换）</string>
+    <string name="settings_map_theme_title">界面主题</string>
     <string name="settings_map_theme_value">%1$s</string>
     <string name="settings_map_theme_auto">自动</string>
     <string name="settings_map_theme_day">日间</string>

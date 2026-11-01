@@ -24,6 +24,7 @@ import com.motohud.ble.ui.about.AboutActivity
 import com.motohud.ble.ui.common.MotoDialog
 import com.motohud.ble.ui.navi.RoutePrefsDialog
 import com.motohud.ble.ui.scan.ScanActivity
+import com.motohud.ble.ui.theme.AppTheme
 
 /**
  * 设置面板 —— 全应用「可调项」的唯一入口。
@@ -268,6 +269,15 @@ class SettingsSheetDialog : BottomSheetDialogFragment() {
                 NaviPrefs.setMapTheme(modes[which])
                 renderMapTheme()
                 d.dismiss()
+                /*
+                 * 整页配色是在布局 inflate 那一刻按主题定死的，改完设置不会自动
+                 * 重画 —— 必须重建页面才能看到新配色。
+                 *
+                 * 放到下一帧：等这个选择框真正收起再重建，否则会有一瞬间
+                 * "新窗口 + 旧弹窗"叠在一起，看起来像闪屏。
+                 */
+                val host = activity ?: return@setSingleChoiceItems
+                b.root.post { AppTheme.recreateIfThemeChanged(host) }
             }
             .setNegativeButton(R.string.cancel, null)
             .show()

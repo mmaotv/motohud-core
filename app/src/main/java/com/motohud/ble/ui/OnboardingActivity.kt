@@ -13,6 +13,7 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.motohud.ble.R
 import com.motohud.ble.amap.AmapManager
+import com.motohud.ble.ui.theme.AppTheme
 
 /**
  * 新手引导（首次启动展示，参考主流应用引导流程）：
@@ -40,6 +41,12 @@ class OnboardingActivity : AppCompatActivity() {
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        /*
+         * 日 / 夜主题必须在 super 之前定下来。
+         * `?attr/mtXxx` 是在布局 inflate 那一刻从主题里取值的，晚一步设置
+         * 只能影响之后新建的 View，已经铺好的界面一个字都不会变。
+         */
+        AppTheme.apply(this)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_onboarding)
 

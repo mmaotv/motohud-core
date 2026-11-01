@@ -26,7 +26,7 @@
                 android:layout_marginTop="8dp"
                 android:fontFamily="@font/inter"
                 android:text="@string/command_device_unknown"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="13sp" />
 
             <TextView
@@ -42,7 +42,7 @@
                 android:layout_marginTop="8dp"
                 android:fontFamily="@font/inter"
                 android:text="@string/command_icon"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="13sp" />
 
             <Spinner
@@ -56,7 +56,7 @@
                 android:layout_marginTop="12dp"
                 android:fontFamily="@font/inter"
                 android:text="@string/command_path_remain"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="13sp" />
 
             <SeekBar
@@ -65,8 +65,8 @@
                 android:layout_height="wrap_content"
                 android:max="100"
                 android:progress="50"
-                android:progressTint="@color/accent"
-                android:thumbTint="@color/accent" />
+                android:progressTint="?attr/mtAccent"
+                android:thumbTint="?attr/mtAccent" />
 
             <TextView
                 android:id="@+id/tv_path_remain"
@@ -74,7 +74,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:text="500 m"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="13sp" />
 
             <TextView
@@ -83,7 +83,7 @@
                 android:layout_marginTop="12dp"
                 android:fontFamily="@font/inter"
                 android:text="@string/command_step_remain"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="13sp" />
 
             <SeekBar
@@ -92,8 +92,8 @@
                 android:layout_height="wrap_content"
                 android:max="100"
                 android:progress="20"
-                android:progressTint="@color/accent"
-                android:thumbTint="@color/accent" />
+                android:progressTint="?attr/mtAccent"
+                android:thumbTint="?attr/mtAccent" />
 
             <TextView
                 android:id="@+id/tv_step_remain"
@@ -101,7 +101,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:text="200 m"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="13sp" />
 
             <LinearLayout
@@ -157,8 +157,8 @@
                 android:hint="@string/command_custom_hint"
                 android:inputType="text"
                 android:padding="12dp"
-                android:textColor="@color/text_primary"
-                android:textColorHint="@color/text_tertiary"
+                android:textColor="?attr/mtTextPrimary"
+                android:textColorHint="?attr/mtTextTertiary"
                 android:textSize="14sp" />
 
             <LinearLayout

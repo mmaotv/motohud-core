@@ -16,6 +16,7 @@ import com.motohud.ble.MotoHudApp
 import com.motohud.ble.R
 import com.motohud.ble.data.SavedPlaceEntity
 import kotlinx.coroutines.launch
+import com.motohud.ble.ui.theme.themeColor
 
 /**
  * 常用地址管理对话框（列表：点击导航 / 编辑 / 删除）。
@@ -66,7 +67,7 @@ class PlaceManageDialog : DialogFragment() {
         val emptyView = android.widget.TextView(ctx).apply {
             text = ctx.getString(R.string.navi_places_none)
             gravity = android.view.Gravity.CENTER
-            setTextColor(androidx.core.content.ContextCompat.getColor(ctx, R.color.text_tertiary))
+            setTextColor(ctx.themeColor(R.attr.mtTextTertiary, android.graphics.Color.WHITE))
             textSize = 13f
             val pad = (28 * density).toInt()
             setPadding(pad, pad, pad, pad)

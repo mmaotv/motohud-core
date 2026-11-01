@@ -16,7 +16,7 @@
     android:id="@+id/guidance_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_window">
+    android:background="?attr/mtWindow">
 
     <!--
       路口放大图触发器（影子导航视图）

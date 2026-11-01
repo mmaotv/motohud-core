@@ -12,7 +12,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_window"
+    android:background="?attr/mtWindow"
     android:orientation="vertical">
 
     <LinearLayout
@@ -34,7 +34,7 @@
             android:contentDescription="@string/cancel"
             android:padding="11dp"
             android:src="@drawable/ic_arrow_back"
-            app:tint="@color/text_primary" />
+            app:tint="?attr/mtTextPrimary" />
 
         <TextView
             android:layout_width="0dp"
@@ -43,7 +43,7 @@
             android:layout_weight="1"
             android:fontFamily="@font/inter"
             android:text="@string/offline_map_title"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="17sp"
             android:textStyle="bold" />
 
@@ -52,7 +52,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:fontFamily="@font/inter"
-            android:textColor="@color/text_secondary"
+            android:textColor="?attr/mtTextSecondary"
             android:textSize="12sp"
             android:visibility="gone" />
     </LinearLayout>
@@ -72,7 +72,7 @@
         android:paddingTop="10dp"
         android:paddingEnd="14dp"
         android:paddingBottom="10dp"
-        android:textColor="@color/text_secondary"
+        android:textColor="?attr/mtTextSecondary"
         android:textSize="12sp"
         android:visibility="gone" />
 
@@ -82,7 +82,7 @@
         android:layout_width="match_parent"
         android:layout_height="2dp"
         android:indeterminate="true"
-        android:indeterminateTint="@color/accent" />
+        android:indeterminateTint="?attr/mtAccent" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/offline_list"
@@ -104,6 +104,6 @@
         android:paddingEnd="18dp"
         android:paddingBottom="14dp"
         android:text="@string/offline_map_footer"
-        android:textColor="@color/text_secondary"
+        android:textColor="?attr/mtTextSecondary"
         android:textSize="11sp" />
 </LinearLayout>

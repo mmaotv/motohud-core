@@ -3,7 +3,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_window"
+    android:background="?attr/mtWindow"
     android:orientation="vertical">
 
     <LinearLayout
@@ -25,7 +25,7 @@
             android:contentDescription="@string/cancel"
             android:padding="11dp"
             android:src="@drawable/ic_arrow_back"
-            android:tint="@color/text_primary" />
+            android:tint="?attr/mtTextPrimary" />
 
         <TextView
             android:layout_width="0dp"
@@ -34,7 +34,7 @@
             android:layout_weight="1"
             android:fontFamily="@font/inter"
             android:text="@string/settings_voice_engine"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="17sp"
             android:textStyle="bold" />
     </LinearLayout>
@@ -57,7 +57,7 @@
                 android:layout_height="wrap_content"
                 android:lineSpacingExtra="4dp"
                 android:text="@string/tts_intro"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="13sp" />
 
             <!-- 状态卡 -->
@@ -74,7 +74,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/inter"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="15sp"
                     android:textStyle="bold" />
 
@@ -84,7 +84,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
                     android:lineSpacingExtra="3dp"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/mtTextTertiary"
                     android:textSize="12sp" />
 
                 <ProgressBar
@@ -95,7 +95,7 @@
                     android:layout_marginTop="12dp"
                     android:indeterminate="false"
                     android:max="100"
-                    android:progressTint="@color/accent"
+                    android:progressTint="?attr/mtAccent"
                     android:visibility="gone" />
 
                 <TextView
@@ -104,7 +104,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:fontFamily="@font/inter"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/mtTextTertiary"
                     android:textSize="11sp"
                     android:visibility="gone" />
             </LinearLayout>
@@ -125,7 +125,7 @@
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/inter"
                     android:text="@string/tts_voice_title"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="14sp"
                     android:textStyle="bold" />
 
@@ -134,7 +134,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:text="@string/tts_voice_hint"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/mtTextTertiary"
                     android:textSize="11sp" />
 
                 <HorizontalScrollView
@@ -162,7 +162,7 @@
                         android:layout_weight="1"
                         android:fontFamily="@font/inter"
                         android:text="@string/tts_speed_title"
-                        android:textColor="@color/text_primary"
+                        android:textColor="?attr/mtTextPrimary"
                         android:textSize="14sp"
                         android:textStyle="bold" />
 
@@ -171,7 +171,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:fontFamily="@font/inter"
-                        android:textColor="@color/accent"
+                        android:textColor="?attr/mtAccent"
                         android:textSize="13sp"
                         android:textStyle="bold" />
                 </LinearLayout>
@@ -182,8 +182,8 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:max="7"
-                    android:progressTint="@color/accent"
-                    android:thumbTint="@color/accent" />
+                    android:progressTint="?attr/mtAccent"
+                    android:thumbTint="?attr/mtAccent" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -197,7 +197,7 @@
                         android:layout_weight="1"
                         android:fontFamily="@font/inter"
                         android:text="@string/tts_volume_title"
-                        android:textColor="@color/text_primary"
+                        android:textColor="?attr/mtTextPrimary"
                         android:textSize="14sp"
                         android:textStyle="bold" />
 
@@ -206,7 +206,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:fontFamily="@font/inter"
-                        android:textColor="@color/accent"
+                        android:textColor="?attr/mtAccent"
                         android:textSize="13sp"
                         android:textStyle="bold" />
                 </LinearLayout>
@@ -217,8 +217,8 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:max="4"
-                    android:progressTint="@color/accent"
-                    android:thumbTint="@color/accent" />
+                    android:progressTint="?attr/mtAccent"
+                    android:thumbTint="?attr/mtAccent" />
             </LinearLayout>
 
             <!-- 离线语音库：把常用播报语提前合成好存在手机里 -->
@@ -237,7 +237,7 @@
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/inter"
                     android:text="@string/tts_lib_title"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/mtTextPrimary"
                     android:textSize="14sp"
                     android:textStyle="bold" />
 
@@ -246,7 +246,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:text="@string/tts_lib_hint"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/mtTextTertiary"
                     android:textSize="11sp" />
 
                 <TextView
@@ -255,7 +255,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:fontFamily="@font/inter"
-                    android:textColor="@color/accent"
+                    android:textColor="?attr/mtAccent"
                     android:textSize="12sp"
                     android:textStyle="bold" />
 
@@ -267,7 +267,7 @@
                     android:layout_marginTop="10dp"
                     android:indeterminate="false"
                     android:max="100"
-                    android:progressTint="@color/accent"
+                    android:progressTint="?attr/mtAccent"
                     android:visibility="gone" />
 
                 <TextView
@@ -278,7 +278,7 @@
                     android:background="@drawable/bg_chip"
                     android:gravity="center"
                     android:text="@string/tts_lib_build"
-                    android:textColor="@color/accent"
+                    android:textColor="?attr/mtAccent"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -288,7 +288,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
                 android:text="@string/tts_model_info"
-                android:textColor="@color/text_tertiary"
+                android:textColor="?attr/mtTextTertiary"
                 android:textSize="11sp"
                 android:lineSpacingExtra="3dp" />
         </LinearLayout>
@@ -311,7 +311,7 @@
             android:background="@drawable/bg_chip"
             android:gravity="center"
             android:text="@string/tts_test"
-            android:textColor="@color/accent"
+            android:textColor="?attr/mtAccent"
             android:textSize="13sp"
             android:visibility="gone" />
 
@@ -322,7 +322,7 @@
             android:background="@drawable/bg_chip"
             android:gravity="center"
             android:text="@string/tts_delete"
-            android:textColor="@color/text_secondary"
+            android:textColor="?attr/mtTextSecondary"
             android:textSize="13sp"
             android:visibility="gone" />
 

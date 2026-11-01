@@ -20,7 +20,7 @@
         android:background="@drawable/bg_chip"
         android:gravity="center"
         android:fontFamily="@font/inter"
-        android:textColor="@color/accent"
+        android:textColor="?attr/mtAccent"
         android:textSize="11sp" />
 
     <LinearLayout
@@ -35,7 +35,7 @@
             android:layout_height="wrap_content"
             android:fontFamily="@font/inter"
             android:text="@string/route_waypoint"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="10sp" />
 
         <TextView
@@ -46,7 +46,7 @@
             android:ellipsize="end"
             android:fontFamily="@font/inter"
             android:maxLines="1"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="14sp" />
     </LinearLayout>
 
@@ -58,5 +58,5 @@
         android:contentDescription="@string/route_waypoint_remove"
         android:padding="9dp"
         android:src="@drawable/ic_close"
-        android:tint="@color/text_tertiary" />
+        android:tint="?attr/mtTextTertiary" />
 </LinearLayout>

@@ -73,9 +73,22 @@ object AmapMapConfig {
             NaviPrefs.THEME_DAY -> false
             NaviPrefs.THEME_NIGHT -> true
             else -> {
-                val target = runCatching { aMap?.cameraPosition?.target }.getOrNull()
-                if (target != null && target.latitude != 0.0) {
-                    DayNight.isNight(target.latitude, target.longitude)
+                /*
+                 * 刻意**不看** `aMap.cameraPosition`。
+                 *
+                 * 这个函数是在 `mapView.onCreate` 之后立刻调的，那时地图还没
+                 * `moveCamera` 到上次视野，cameraPosition 是 SDK 的默认中心
+                 * （北京）。而页面配色（AppTheme）读的是缓存中心（重庆），
+                 * 两边日落差半小时 —— 真机现象：17:20 首页是浅色、地图是深色，
+                 * 同一屏两套配色，比"没做日夜"更难看。
+                 *
+                 * 统一用「上次地图中心」，让地图和界面永远只有一个答案。
+                 * 代价：自动档不会因为用户把地图拖到别的城市而立刻换色 ——
+                 * 一次进页面只判一次，本来就是原来的行为。
+                 */
+                val memo = NaviPrefs.mapCamera()
+                if (memo != null) {
+                    DayNight.isNight(memo.lat, memo.lng)
                 } else {
                     DayNight.isNight(DEFAULT_LAT, DEFAULT_LNG)
                 }

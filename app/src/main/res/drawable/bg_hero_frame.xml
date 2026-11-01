@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 车型大图容器：深色渐变底 + 24dp 圆角（clipToOutline 生效） -->
+<!--
+  车型大图容器：深色渐变底 + 24dp 圆角（clipToOutline 生效）。
+
+  **不跟日 / 夜主题变。** 这块是照片的衬底，照片本身在任何主题下都是深色素材；
+  白天把它换成浅色渐变，照片下缘会糊成一片白雾，车型名的白色文字直接消失。
+  同理 bg_status_pill / bg_hero_circle 这几个"压在照片上"的部件也保持深色。
+-->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <gradient

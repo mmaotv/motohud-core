@@ -4,7 +4,7 @@
     android:id="@+id/navi_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_window">
+    android:background="?attr/mtWindow">
 
     <!-- 高德地图 -->
     <com.amap.api.maps.MapView
@@ -53,8 +53,8 @@
                 android:imeOptions="actionSearch"
                 android:inputType="text"
                 android:maxLines="1"
-                android:textColor="@color/text_primary"
-                android:textColorHint="@color/text_tertiary"
+                android:textColor="?attr/mtTextPrimary"
+                android:textColorHint="?attr/mtTextTertiary"
                 android:textSize="15sp" />
 
             <ImageView
@@ -85,7 +85,7 @@
             android:paddingTop="10dp"
             android:paddingEnd="14dp"
             android:paddingBottom="10dp"
-            android:textColor="@color/accent"
+            android:textColor="?attr/mtAccent"
             android:textSize="12sp"
             android:visibility="gone" />
 
@@ -103,7 +103,7 @@
             android:paddingTop="12dp"
             android:paddingEnd="14dp"
             android:paddingBottom="12dp"
-            android:textColor="@color/text_secondary"
+            android:textColor="?attr/mtTextSecondary"
             android:textSize="12sp"
             android:visibility="gone" />
 
@@ -150,7 +150,7 @@
                     android:layout_weight="1"
                     android:fontFamily="@font/inter"
                     android:text="@string/search_history"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/mtTextSecondary"
                     android:textSize="12sp" />
 
                 <TextView
@@ -163,7 +163,7 @@
                     android:paddingEnd="12dp"
                     android:paddingBottom="6dp"
                     android:text="@string/search_history_clear"
-                    android:textColor="@color/accent"
+                    android:textColor="?attr/mtAccent"
                     android:textSize="12sp" />
             </LinearLayout>
 
@@ -234,7 +234,7 @@
                 android:layout_height="18dp"
                 android:contentDescription="@string/navi_refresh_location"
                 android:src="@drawable/ic_my_location"
-                android:tint="@color/accent" />
+                android:tint="?attr/mtAccent" />
 
             <TextView
                 android:id="@+id/tv_current_location"
@@ -246,7 +246,7 @@
                 android:fontFamily="@font/inter"
                 android:maxLines="1"
                 android:text="@string/navi_location_unknown"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="13sp" />
 
             <TextView
@@ -256,7 +256,7 @@
                 android:fontFamily="@font/inter"
                 android:padding="6dp"
                 android:text="@string/navi_refresh_location"
-                android:textColor="@color/accent"
+                android:textColor="?attr/mtAccent"
                 android:textSize="13sp" />
         </LinearLayout>
 
@@ -347,7 +347,7 @@
                 android:layout_weight="1"
                 android:fontFamily="@font/inter"
                 android:text="@string/amap_key_hint_navi"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="12sp" />
 
             <TextView
@@ -357,7 +357,7 @@
                 android:fontFamily="@font/inter"
                 android:padding="6dp"
                 android:text="@string/amap_key_setup"
-                android:textColor="@color/accent"
+                android:textColor="?attr/mtAccent"
                 android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -371,7 +371,7 @@
             android:fontFamily="@font/inter"
             android:gravity="center_vertical"
             android:text="@string/navi_ble_hint"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="12sp"
             android:visibility="gone" />
     </LinearLayout>
@@ -411,7 +411,7 @@
                 android:ellipsize="end"
                 android:fontFamily="@font/inter"
                 android:maxLines="1"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="18sp"
                 android:textStyle="bold" />
 
@@ -423,7 +423,7 @@
                 android:contentDescription="@string/cancel"
                 android:padding="8dp"
                 android:src="@drawable/ic_close"
-                app:tint="@color/text_tertiary" />
+                app:tint="?attr/mtTextTertiary" />
         </LinearLayout>
 
         <TextView
@@ -435,7 +435,7 @@
             android:fontFamily="@font/inter"
             android:lineSpacingExtra="2dp"
             android:maxLines="2"
-            android:textColor="@color/text_secondary"
+            android:textColor="?attr/mtTextSecondary"
             android:textSize="12sp" />
 
         <LinearLayout
@@ -450,7 +450,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
-                android:textColor="@color/accent"
+                android:textColor="?attr/mtAccent"
                 android:textSize="15sp"
                 android:textStyle="bold" />
 
@@ -463,7 +463,7 @@
                 android:fontFamily="@font/inter"
                 android:maxLines="1"
                 android:text="@string/place_card_straight"
-                android:textColor="@color/text_tertiary"
+                android:textColor="?attr/mtTextTertiary"
                 android:textSize="11sp" />
         </LinearLayout>
 

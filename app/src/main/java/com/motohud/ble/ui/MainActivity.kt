@@ -33,6 +33,7 @@ import com.motohud.ble.service.NotificationForwardService
 import com.motohud.ble.ui.common.MotoDialog
 import com.motohud.ble.ui.navi.KeySetupDialog
 import com.motohud.ble.ui.scan.ScanActivity
+import com.motohud.ble.ui.theme.AppTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,6 +61,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bannerDot: ImageView
     private lateinit var bannerText: TextView
     private lateinit var bannerAction: TextView
+    private lateinit var btnTheme: View
+    private lateinit var ivTheme: ImageView
 
     private val app get() = application as MotoHudApp
 
@@ -71,6 +74,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        /*
+         * 日 / 夜主题必须在 super 之前定下来。
+         * `?attr/mtXxx` 是在布局 inflate 那一刻从主题里取值的，晚一步设置
+         * 只能影响之后新建的 View，已经铺好的界面一个字都不会变。
+         */
+        AppTheme.apply(this)
         super.onCreate(savedInstanceState)
 
         // 首次启动：先走新手引导（含隐私政策同意），完成后再进入主界面
@@ -123,6 +132,7 @@ class MainActivity : AppCompatActivity() {
 
         applyEdgeToEdge()
         setupConnectionBanner()
+        setupThemeToggle()
         requestBlePermissions()
         // 冷启动自动连接：延迟 300ms 让首帧 UI 先画出来，用户不会看到"白屏等连接"
         banner.postDelayed({ maybeAutoConnect() }, 300L)
@@ -214,6 +224,63 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 顶部连接状态条：连接状态 → 文案 / 圆点 / 动作 */
+    /**
+     * 顶栏的日 / 夜开关。
+     *
+     * ## 为什么要这个
+     *
+     * 主题原来只在设置面板里（要滚两屏），骑手在路边戴着手套根本点不到；
+     * 而"白天看不清 / 夜里晃眼"恰恰是骑行途中随时会遇到的。这条状态条在
+     * 「爱车 / 导航」两个 tab 上都常驻，40dp 触摸区，单手可及。
+     *
+     * ## 交互
+     *
+     * · **单击**：白天 ⇄ 夜间。当前是"自动"档时，按**眼前实际的样子**取反
+     *   （看着是白天就切到夜间），落到固定档 —— 不做"自动 → 白天 → 夜间 →
+     *   自动"的三态循环，因为用户想要的是一个开关，不是再猜一次当前档位。
+     * · **长按**：恢复自动（按当地日出日落），弹一句提示说明改回来了。
+     *
+     * 图标显示的是**点一下会变成什么**：当前白天就显示月亮。
+     * 单击/长按都直接 `recreate()` —— 配色是 inflate 时定死的，不重建看不到变化。
+     */
+    private fun setupThemeToggle() {
+        btnTheme = findViewById(R.id.btn_theme)
+        ivTheme = findViewById(R.id.iv_theme)
+        renderThemeIcon()
+
+        btnTheme.setOnClickListener {
+            val night = AppTheme.currentIsDark(this)
+            com.motohud.ble.data.NaviPrefs.setMapTheme(
+                if (night) com.motohud.ble.data.NaviPrefs.THEME_DAY
+                else com.motohud.ble.data.NaviPrefs.THEME_NIGHT
+            )
+            Toast.makeText(
+                this,
+                if (night) R.string.theme_toggled_day else R.string.theme_toggled_night,
+                Toast.LENGTH_SHORT
+            ).show()
+            recreate()
+        }
+
+        btnTheme.setOnLongClickListener {
+            com.motohud.ble.data.NaviPrefs.setMapTheme(com.motohud.ble.data.NaviPrefs.THEME_AUTO)
+            Toast.makeText(this, R.string.theme_auto_restored, Toast.LENGTH_SHORT).show()
+            recreate()
+            true
+        }
+    }
+
+    /** 图标与无障碍描述都跟着当前外观走（显示"点一下会变成什么"） */
+    private fun renderThemeIcon() {
+        val night = AppTheme.currentIsDark(this)
+        ivTheme.setImageResource(
+            if (night) R.drawable.ic_theme_day else R.drawable.ic_theme_night
+        )
+        btnTheme.contentDescription = getString(
+            if (night) R.string.theme_toggle_to_day else R.string.theme_toggle_to_night
+        )
+    }
+
     private fun setupConnectionBanner() {
         val ble = app.bleManager
         lifecycleScope.launch {

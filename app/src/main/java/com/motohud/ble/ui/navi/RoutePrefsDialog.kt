@@ -9,6 +9,7 @@ import com.google.android.material.checkbox.MaterialCheckBox
 import com.motohud.ble.ui.common.MotoDialog
 import com.motohud.ble.R
 import com.motohud.ble.data.NaviPrefs
+import com.motohud.ble.ui.theme.themeColor
 
 /**
  * 路线偏好对话框。
@@ -100,9 +101,9 @@ class RoutePrefsDialog : DialogFragment() {
     /** 对话框内的勾选颜色跟随主题（Material3 默认已用 colorPrimary，这里补一下深色可读性） */
     override fun onStart() {
         super.onStart()
-        val accent = ContextCompat.getColor(requireContext(), R.color.accent)
-        val idle = ContextCompat.getColor(requireContext(), R.color.text_tertiary)
-        val disabled = ContextCompat.getColor(requireContext(), R.color.fill_strong)
+        val accent = requireContext().themeColor(R.attr.mtAccent, android.graphics.Color.WHITE)
+        val idle = requireContext().themeColor(R.attr.mtTextTertiary, android.graphics.Color.WHITE)
+        val disabled = requireContext().themeColor(R.attr.mtFillStrong, android.graphics.Color.WHITE)
         // 注意顺序：禁用态必须排在最前，否则 state_checked 会先命中，
         // 出现"已禁用但方框还是橙色勾"的假象。
         val states = ColorStateList(

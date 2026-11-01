@@ -15,6 +15,8 @@ import com.motohud.ble.data.bike.BikeBrand
 import com.motohud.ble.data.bike.BikeCatalog
 import com.motohud.ble.data.bike.BikePrefs
 import com.motohud.ble.databinding.DialogBikePickerBinding
+import com.motohud.ble.ui.theme.themeColor
+import com.motohud.ble.ui.theme.AppTheme
 
 /**
  * 车型选择弹窗：顶部品牌筹码 + 下方车型列表（带缩略图）。
@@ -29,7 +31,8 @@ class BikePickerDialog : DialogFragment() {
     private var filter: BikeBrand? = null
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
-        val dialog = Dialog(requireContext(), R.style.Theme_MotoDialog)
+        // Dialog 主题不继承 Activity，白天要显式选一份（见 AppTheme.dialogTheme）
+        val dialog = Dialog(requireContext(), AppTheme.dialogTheme())
         binding = DialogBikePickerBinding.inflate(layoutInflater)
         dialog.setContentView(binding.root)
         dialog.window?.setBackgroundDrawableResource(R.drawable.bg_dialog_solid)
@@ -65,9 +68,9 @@ class BikePickerDialog : DialogFragment() {
                 gravity = Gravity.CENTER
                 setPadding(dp(14), dp(7), dp(14), dp(7))
                 setTextColor(
-                    ContextCompat.getColor(
-                        requireContext(),
-                        if (selected) R.color.text_on_accent else R.color.text_secondary
+                    requireContext().themeColor(
+                        if (selected) R.attr.mtTextOnAccent else R.attr.mtTextSecondary,
+                        android.graphics.Color.WHITE
                     )
                 )
                 setBackgroundResource(

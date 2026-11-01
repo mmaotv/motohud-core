@@ -10,14 +10,14 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_window"
+    android:background="?attr/mtWindow"
     android:orientation="vertical">
 
     <LinearLayout
         android:id="@+id/scan_top_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/bg_window"
+        android:background="?attr/mtWindow"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="12dp"
@@ -35,7 +35,7 @@
             android:contentDescription="@string/cancel"
             android:padding="11dp"
             android:src="@drawable/ic_arrow_back"
-            app:tint="@color/text_primary" />
+            app:tint="?attr/mtTextPrimary" />
 
         <LinearLayout
             android:layout_width="0dp"
@@ -49,7 +49,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="@font/inter"
                 android:text="@string/scan_page_title"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="18sp"
                 android:textStyle="bold" />
 
@@ -60,7 +60,7 @@
                 android:layout_marginTop="2dp"
                 android:fontFamily="@font/inter"
                 android:text="@string/scan_page_hint"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="12sp" />
         </LinearLayout>
     </LinearLayout>
@@ -82,7 +82,7 @@
         android:paddingEnd="16dp"
         android:paddingBottom="18dp"
         android:text="@string/scan_forget_device"
-        android:textColor="@color/text_tertiary"
+        android:textColor="?attr/mtTextTertiary"
         android:textSize="12sp"
         android:visibility="gone" />
 </LinearLayout>

@@ -11,6 +11,7 @@ import com.motohud.ble.R
 import com.motohud.ble.data.NaviTrack
 import androidx.core.content.ContextCompat
 import kotlin.math.max
+import com.motohud.ble.ui.theme.themeColor
 
 /**
  * 轨迹缩略图（列表用）。
@@ -33,18 +34,18 @@ class TrackThumbView @JvmOverloads constructor(
         strokeWidth = dp(2.2f)
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
-        color = ContextCompat.getColor(context, R.color.track_ahead)
+        color = context.themeColor(R.attr.mtTrackAhead, android.graphics.Color.WHITE)
     }
 
     private val emptyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = dp(1.6f)
         strokeCap = Paint.Cap.ROUND
-        color = ContextCompat.getColor(context, R.color.text_tertiary)
+        color = context.themeColor(R.attr.mtTextTertiary, android.graphics.Color.WHITE)
     }
 
     private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = ContextCompat.getColor(context, R.color.fill)
+        color = context.themeColor(R.attr.mtFill, android.graphics.Color.WHITE)
     }
 
     private val path = Path()

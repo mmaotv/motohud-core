@@ -19,7 +19,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/route_prefs_smart_desc"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="12sp" />
 
         <com.google.android.material.checkbox.MaterialCheckBox
@@ -36,14 +36,14 @@
             android:layout_height="1dp"
             android:layout_marginTop="4dp"
             android:layout_marginBottom="6dp"
-            android:background="@color/card_stroke" />
+            android:background="?attr/mtCardStroke" />
 
         <TextView
             android:id="@+id/tv_multi_desc"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/route_prefs_multi_desc"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="12sp" />
 
         <com.google.android.material.checkbox.MaterialCheckBox
@@ -105,7 +105,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:text="@string/route_prefs_motor_note"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/mtTextTertiary"
             android:textSize="11sp" />
     </LinearLayout>
 </ScrollView>

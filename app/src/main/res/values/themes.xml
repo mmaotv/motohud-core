@@ -38,89 +38,196 @@
           基础主题里全部落成夜间值，所以任何没套白天主题的页面行为完全不变。
           逐项说明见 values/attrs.xml。
         -->
-        <item name="nvTextPrimary">@color/nv_night_text_primary</item>
-        <item name="nvTextSecondary">@color/nv_night_text_secondary</item>
-        <item name="nvTextTertiary">@color/nv_night_text_tertiary</item>
-        <item name="nvAccent">@color/nv_night_accent</item>
-        <item name="nvWarn">@color/nv_night_warn</item>
-        <item name="nvDanger">@color/nv_night_danger</item>
-        <item name="nvCaution">@color/nv_night_caution</item>
-        <item name="nvDivider">@color/nv_night_divider</item>
-        <item name="nvPanelColor">@color/nv_night_panel</item>
-        <item name="nvPanelStroke">@color/nv_night_panel_stroke</item>
-        <item name="nvCircleColor">@color/nv_night_circle</item>
-        <item name="nvCircleStroke">@color/nv_night_circle_stroke</item>
-        <item name="nvCrossPanelColor">@color/nv_night_cross_panel</item>
-        <item name="nvBottomCardColor">@color/nv_night_bottom_card</item>
-        <item name="nvCardColor">@color/nv_night_card</item>
-        <item name="nvCardStroke">@color/nv_night_card_stroke</item>
-        <item name="nvBadgeColor">@color/nv_night_badge</item>
-        <item name="nvBadgeStroke">@color/nv_night_badge_stroke</item>
-        <item name="nvGrabberColor">@color/nv_night_grabber</item>
-        <item name="nvScrimFrom">@color/nv_night_scrim_from</item>
-        <item name="nvScrimTo">@color/nv_night_scrim_to</item>
-        <item name="nvShadeColor">@color/nv_night_shade</item>
+        <item name="nvTextPrimary">@color/pal_night_text_primary</item>
+        <item name="nvTextSecondary">@color/pal_night_text_secondary</item>
+        <item name="nvTextTertiary">@color/pal_night_text_tertiary</item>
+        <item name="nvAccent">@color/pal_night_accent</item>
+        <item name="nvWarn">@color/pal_night_warn</item>
+        <item name="nvDanger">@color/pal_night_danger</item>
+        <item name="nvCaution">@color/pal_night_caution</item>
+        <item name="nvDivider">@color/pal_night_divider</item>
+        <item name="nvPanelColor">@color/pal_night_panel</item>
+        <item name="nvPanelStroke">@color/pal_night_panel_stroke</item>
+        <item name="nvCircleColor">@color/pal_night_circle</item>
+        <item name="nvCircleStroke">@color/pal_night_circle_stroke</item>
+        <item name="nvCrossPanelColor">@color/pal_night_cross_panel</item>
+        <item name="nvBottomCardColor">@color/pal_night_bottom_card</item>
+        <item name="nvCardColor">@color/pal_night_card</item>
+        <item name="nvCardStroke">@color/pal_night_card_stroke</item>
+        <item name="nvBadgeColor">@color/pal_night_badge</item>
+        <item name="nvBadgeStroke">@color/pal_night_badge_stroke</item>
+        <item name="nvGrabberColor">@color/pal_night_grabber</item>
+        <item name="nvScrimFrom">@color/pal_night_scrim_from</item>
+        <item name="nvScrimTo">@color/pal_night_scrim_to</item>
+        <item name="nvShadeColor">@color/pal_night_shade</item>
         <!-- 夜间不加底衬：官方 sou 图是白箭头，深色面板上本来就对。
              用透明 drawable 而不是 @null —— 见 bg_turn_badge_none.xml 里的说明 -->
         <item name="nvTurnBadgeBg">@drawable/bg_turn_badge_none</item>
-        <item name="nvLaneBg">@color/nv_night_lane_bg</item>
-        <item name="nvLaneBgActive">@color/nv_night_lane_bg_active</item>
-        <item name="nvLaneArrow">@color/nv_night_lane_arrow</item>
-        <item name="nvLaneArrowDim">@color/nv_night_lane_arrow_dim</item>
+        <item name="nvLaneBg">@color/pal_night_lane_bg</item>
+        <item name="nvLaneBgActive">@color/pal_night_lane_bg_active</item>
+        <item name="nvLaneArrow">@color/pal_night_lane_arrow</item>
+        <item name="nvLaneArrowDim">@color/pal_night_lane_arrow_dim</item>
+
+        <!--
+          ==================== 全 App 通用配色（夜间 = 现状） ====================
+
+          这批 `mt*` 是给「非导航页」用的（设置、车况、历史、搜索……）。
+          值全部等于改造前写死的那些颜色，所以基础主题下视觉零变化。
+        -->
+        <item name="mtWindow">@color/pal_night_window</item>
+        <item name="mtSurface">@color/pal_night_surface</item>
+        <item name="mtSurfaceHigh">@color/pal_night_surface_high</item>
+        <item name="mtBarSurface">@color/pal_night_bar_surface</item>
+        <item name="mtCard">@color/pal_night_card</item>
+        <item name="mtCardStroke">@color/pal_night_card_stroke</item>
+        <item name="mtFill">@color/pal_night_fill</item>
+        <item name="mtFillStrong">@color/pal_night_fill_strong</item>
+        <item name="mtHairline">@color/pal_night_hairline</item>
+        <item name="mtTextPrimary">@color/pal_night_text_primary</item>
+        <item name="mtTextSecondary">@color/pal_night_text_secondary</item>
+        <item name="mtTextTertiary">@color/pal_night_text_tertiary</item>
+        <item name="mtDivider">@color/pal_night_divider</item>
+        <item name="mtAccent">@color/pal_night_accent</item>
+        <item name="mtAccentDim">@color/pal_night_accent_dim</item>
+        <item name="mtTextOnAccent">@color/pal_night_text_on_accent</item>
+        <item name="mtGreen">@color/pal_night_green</item>
+        <item name="mtGreenDim">@color/pal_night_green_dim</item>
+        <item name="mtRed">@color/pal_night_danger</item>
+        <item name="mtRedDim">@color/pal_night_red_dim</item>
+        <item name="mtOrange">@color/pal_night_warn</item>
+        <item name="mtYellow">@color/pal_night_caution</item>
+        <item name="mtField">@color/pal_night_field</item>
+        <item name="mtHeroFrom">@color/pal_night_hero_from</item>
+        <item name="mtHeroTo">@color/pal_night_hero_to</item>
+        <item name="mtDialogSurface">@color/pal_night_dialog_surface</item>
+        <item name="mtDialogStroke">@color/pal_night_dialog_stroke</item>
+        <item name="mtTrackDone">@color/pal_night_track_done</item>
+        <item name="mtTrackAhead">@color/pal_night_track_ahead</item>
+        <item name="mtNavChecked">@color/pal_night_nav_checked</item>
+        <item name="mtNavUnchecked">@color/pal_night_nav_unchecked</item>
     </style>
 
     <!--
-      ==================== 导航页 · 白天主题 ====================
+      ==================== 白天主题（全 App 通用） ====================
 
-      只覆盖 nv* 那一层，其余全部继承 `Theme.MotoHeadUnit`（字体、转场、弹窗、
-      Material 组件外观）。用法：在 `setContentView` **之前**
-      `setTheme(R.style.Theme_MotoHeadUnit_NaviDay)`。
+      **parent 是 Material3.Light，不是继承 Theme.MotoHeadUnit。**
+      父类若仍是 `Material3.Dark`，Switch / CheckBox / Slider / Chip 这些
+      Material 组件会用"深色变体"的默认色（轨道、滑块、禁用态前景），
+      在浅色卡片上看起来像是坏的；要想靠覆盖修正，得把
+      colorSurfaceContainerLowest..Highest、colorOutlineVariant 等十来个
+      内部 token 全部重写一遍，且随 Material 版本还会变。直接换 Light 父类，
+      组件自己就对了，我们只负责把品牌色和自定义属性补上。
 
-      另外把几个 Material 语义色一起调深，否则导航页里的 Button（停止导航 /
-      投屏 / 更优路线）在浅色面板上仍是浅色文字，看起来像禁用态。
+      用法：在 `setContentView` **之前**
+        `setTheme(R.style.Theme_MotoHeadUnit_Day)`
+
+      见 `ui/theme/AppTheme.kt` —— 全 App 的页面入口统一调它。
     -->
-    <style name="Theme.MotoHeadUnit.NaviDay">
-        <item name="nvTextPrimary">@color/nv_day_text_primary</item>
-        <item name="nvTextSecondary">@color/nv_day_text_secondary</item>
-        <item name="nvTextTertiary">@color/nv_day_text_tertiary</item>
-        <item name="nvAccent">@color/nv_day_accent</item>
-        <item name="nvWarn">@color/nv_day_warn</item>
-        <item name="nvDanger">@color/nv_day_danger</item>
-        <item name="nvCaution">@color/nv_day_caution</item>
-        <item name="nvDivider">@color/nv_day_divider</item>
-        <item name="nvPanelColor">@color/nv_day_panel</item>
-        <item name="nvPanelStroke">@color/nv_day_panel_stroke</item>
-        <item name="nvCircleColor">@color/nv_day_circle</item>
-        <item name="nvCircleStroke">@color/nv_day_circle_stroke</item>
-        <item name="nvCrossPanelColor">@color/nv_day_cross_panel</item>
-        <item name="nvBottomCardColor">@color/nv_day_bottom_card</item>
-        <item name="nvCardColor">@color/nv_day_card</item>
-        <item name="nvCardStroke">@color/nv_day_card_stroke</item>
-        <item name="nvBadgeColor">@color/nv_day_badge</item>
-        <item name="nvBadgeStroke">@color/nv_day_badge_stroke</item>
-        <item name="nvGrabberColor">@color/nv_day_grabber</item>
-        <item name="nvScrimFrom">@color/nv_day_scrim_from</item>
-        <item name="nvScrimTo">@color/nv_day_scrim_to</item>
-        <item name="nvShadeColor">@color/nv_day_shade</item>
-        <!-- 白天必须给白箭头垫蓝底，否则官方白箭头在白面板上直接消失 -->
-        <item name="nvTurnBadgeBg">@drawable/bg_turn_badge</item>
-        <item name="nvLaneBg">@color/nv_day_lane_bg</item>
-        <item name="nvLaneBgActive">@color/nv_day_lane_bg_active</item>
-        <item name="nvLaneArrow">@color/nv_day_lane_arrow</item>
-        <item name="nvLaneArrowDim">@color/nv_day_lane_arrow_dim</item>
-
-        <!-- 状态栏图标转深色（白渐变 scrim 上白图标看不见） -->
+    <style name="Theme.MotoHeadUnit.Day" parent="Theme.Material3.Light.NoActionBar">
+        <!-- ====== 窗口 ====== -->
+        <item name="android:windowBackground">@color/pal_day_window</item>
+        <item name="android:colorBackground">@color/pal_day_window</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/pal_day_bar_surface</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
-        <item name="android:windowBackground">@color/nv_day_panel</item>
-        <item name="android:colorBackground">@color/nv_day_panel</item>
-        <item name="colorOnSurface">@color/nv_day_text_primary</item>
-        <item name="colorOnSurfaceVariant">@color/nv_day_text_secondary</item>
-        <item name="colorSurface">@color/nv_day_panel</item>
-        <item name="colorOutline">@color/nv_day_panel_stroke</item>
-        <item name="android:textColorPrimary">@color/nv_day_text_primary</item>
-        <item name="android:textColorSecondary">@color/nv_day_text_secondary</item>
+        <item name="android:fontFamily">@font/inter</item>
+        <item name="fontFamily">@font/inter</item>
+        <item name="android:windowAnimationStyle">@style/Animation.MotoActivity</item>
+
+        <!-- ====== Material 语义色 ====== -->
+        <item name="colorPrimary">@color/pal_day_accent</item>
+        <item name="colorOnPrimary">@color/pal_day_text_on_accent</item>
+        <item name="colorSecondary">@color/pal_day_accent</item>
+        <item name="colorOnSecondary">@color/pal_day_text_on_accent</item>
+        <item name="colorSurface">@color/pal_day_surface</item>
+        <item name="colorOnSurface">@color/pal_day_text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/pal_day_text_secondary</item>
+        <item name="colorOutline">@color/pal_day_card_stroke</item>
+        <item name="colorError">@color/pal_day_danger</item>
+        <item name="android:textColorPrimary">@color/pal_day_text_primary</item>
+        <item name="android:textColorSecondary">@color/pal_day_text_secondary</item>
+        <item name="android:textColorHint">@color/pal_day_text_tertiary</item>
+        <item name="android:editTextColor">@color/pal_day_text_primary</item>
+        <item name="android:textColorHighlight">@color/pal_day_accent_dim</item>
+        <item name="android:colorBackgroundFloating">@color/pal_day_surface</item>
+        <!--
+          弹窗 overlay 与夜间**共用同一个**，不另建 .Day 版本：
+          overlay 里的颜色全部是 `?attr/mtXxx` 引用，求值时从当前主题取，
+          白天自然拿到白底黑字。少一份需要同步维护的重复配置。
+        -->
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.Moto.Dialog</item>
+
+        <!-- ====== 导航页 nv* ====== -->
+        <item name="nvTextPrimary">@color/pal_day_text_primary</item>
+        <item name="nvTextSecondary">@color/pal_day_text_secondary</item>
+        <item name="nvTextTertiary">@color/pal_day_text_tertiary</item>
+        <item name="nvAccent">@color/pal_day_accent</item>
+        <item name="nvWarn">@color/pal_day_warn</item>
+        <item name="nvDanger">@color/pal_day_danger</item>
+        <item name="nvCaution">@color/pal_day_caution</item>
+        <item name="nvDivider">@color/pal_day_divider</item>
+        <item name="nvPanelColor">@color/pal_day_panel</item>
+        <item name="nvPanelStroke">@color/pal_day_panel_stroke</item>
+        <item name="nvCircleColor">@color/pal_day_circle</item>
+        <item name="nvCircleStroke">@color/pal_day_circle_stroke</item>
+        <item name="nvCrossPanelColor">@color/pal_day_cross_panel</item>
+        <item name="nvBottomCardColor">@color/pal_day_bottom_card</item>
+        <item name="nvCardColor">@color/pal_day_card</item>
+        <item name="nvCardStroke">@color/pal_day_card_stroke</item>
+        <item name="nvBadgeColor">@color/pal_day_badge</item>
+        <item name="nvBadgeStroke">@color/pal_day_badge_stroke</item>
+        <item name="nvGrabberColor">@color/pal_day_grabber</item>
+        <item name="nvScrimFrom">@color/pal_day_scrim_from</item>
+        <item name="nvScrimTo">@color/pal_day_scrim_to</item>
+        <item name="nvShadeColor">@color/pal_day_shade</item>
+        <!-- 白天必须给白箭头垫蓝底，否则官方白箭头在白面板上直接消失 -->
+        <item name="nvTurnBadgeBg">@drawable/bg_turn_badge</item>
+        <item name="nvLaneBg">@color/pal_day_lane_bg</item>
+        <item name="nvLaneBgActive">@color/pal_day_lane_bg_active</item>
+        <item name="nvLaneArrow">@color/pal_day_lane_arrow</item>
+        <item name="nvLaneArrowDim">@color/pal_day_lane_arrow_dim</item>
+
+        <!-- ====== 全局页面 mt* ====== -->
+        <item name="mtWindow">@color/pal_day_window</item>
+        <item name="mtSurface">@color/pal_day_surface</item>
+        <item name="mtSurfaceHigh">@color/pal_day_surface_high</item>
+        <item name="mtBarSurface">@color/pal_day_bar_surface</item>
+        <item name="mtCard">@color/pal_day_card</item>
+        <item name="mtCardStroke">@color/pal_day_card_stroke</item>
+        <item name="mtFill">@color/pal_day_fill</item>
+        <item name="mtFillStrong">@color/pal_day_fill_strong</item>
+        <item name="mtHairline">@color/pal_day_hairline</item>
+        <item name="mtTextPrimary">@color/pal_day_text_primary</item>
+        <item name="mtTextSecondary">@color/pal_day_text_secondary</item>
+        <item name="mtTextTertiary">@color/pal_day_text_tertiary</item>
+        <item name="mtDivider">@color/pal_day_divider</item>
+        <item name="mtAccent">@color/pal_day_accent</item>
+        <item name="mtAccentDim">@color/pal_day_accent_dim</item>
+        <item name="mtTextOnAccent">@color/pal_day_text_on_accent</item>
+        <item name="mtGreen">@color/pal_day_green</item>
+        <item name="mtGreenDim">@color/pal_day_green_dim</item>
+        <item name="mtRed">@color/pal_day_danger</item>
+        <item name="mtRedDim">@color/pal_day_red_dim</item>
+        <item name="mtOrange">@color/pal_day_warn</item>
+        <item name="mtYellow">@color/pal_day_caution</item>
+        <item name="mtField">@color/pal_day_field</item>
+        <item name="mtHeroFrom">@color/pal_day_hero_from</item>
+        <item name="mtHeroTo">@color/pal_day_hero_to</item>
+        <item name="mtDialogSurface">@color/pal_day_dialog_surface</item>
+        <item name="mtDialogStroke">@color/pal_day_dialog_stroke</item>
+        <item name="mtTrackDone">@color/pal_day_track_done</item>
+        <item name="mtTrackAhead">@color/pal_day_track_ahead</item>
+        <item name="mtNavChecked">@color/pal_day_nav_checked</item>
+        <item name="mtNavUnchecked">@color/pal_day_nav_unchecked</item>
     </style>
+
+    <!--
+      旧名字，保留兼容。
+      0.0.27 时这个白天主题只服务导航页（叫 NaviDay）；现在提升为全 App 通用
+      的 `Theme.MotoHeadUnit.Day`。留一个空壳别名，避免旧入口引用报错。
+    -->
+    <style name="Theme.MotoHeadUnit.NaviDay" parent="Theme.MotoHeadUnit.Day" />
 
     <!-- ===================== 弹窗 ===================== -->
 
@@ -137,11 +244,11 @@
           一旦弹窗浮在地图/图片上，背景就会透出来（设置弹窗能看见摩托车）。
           主题层统一兜底，任何没走 MotoDialog.builder 的弹窗也不会再透。
         -->
-        <item name="colorSurface">@color/dialog_surface</item>
-        <item name="colorOnSurface">@color/text_primary</item>
-        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
-        <item name="colorOutline">@color/card_stroke</item>
-        <item name="colorPrimary">@color/accent</item>
+        <item name="colorSurface">?attr/mtDialogSurface</item>
+        <item name="colorOnSurface">?attr/mtTextPrimary</item>
+        <item name="colorOnSurfaceVariant">?attr/mtTextSecondary</item>
+        <item name="colorOutline">?attr/mtCardStroke</item>
+        <item name="colorPrimary">?attr/mtAccent</item>
         <item name="shapeAppearanceOverlay">@style/ShapeAppearance.Moto.Dialog</item>
         <item name="materialAlertDialogTitleTextStyle">@style/TextAppearance.Moto.Dialog.Title</item>
         <item name="materialAlertDialogBodyTextStyle">@style/TextAppearance.Moto.Dialog.Body</item>
@@ -174,7 +281,7 @@
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_gravity">start|center_vertical</item>
         <item name="android:fontFamily">@font/inter</item>
-        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColor">?attr/mtTextPrimary</item>
         <item name="android:textSize">18sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:letterSpacing">0</item>
@@ -184,7 +291,7 @@
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:fontFamily">@font/inter</item>
-        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textColor">?attr/mtTextSecondary</item>
         <item name="android:textSize">14sp</item>
         <item name="android:lineSpacingExtra">3dp</item>
     </style>
@@ -195,7 +302,7 @@
         <item name="android:textStyle">bold</item>
         <item name="android:letterSpacing">0</item>
         <item name="android:minHeight">44dp</item>
-        <item name="android:textColor">@color/accent</item>
+        <item name="android:textColor">?attr/mtAccent</item>
     </style>
 
     <!-- Activity 转场（干脆的入场滑屏） -->
@@ -216,6 +323,26 @@
         <item name="android:backgroundDimAmount">0.55</item>
     </style>
 
+    <!--
+      自定义 Dialog（`Dialog(ctx, R.style.Theme_MotoDialog)`）的白天版本。
+
+      为什么要单独一份：Dialog 的主题是**独立**的，不会继承所在 Activity 的
+      主题，所以白天页面上弹出来的 Dialog 里，`?attr/mtTextPrimary` 仍然会解析成
+      夜间值（白字压在深色板上）。不能在代码里"顺手 setTheme 一下 Activity 的
+      主题"——Dialog 需要 windowIsFloating / windowAnimationStyle 这些窗口属性，
+      Activity 主题没有。
+
+      选哪一份见 `AppTheme.dialogTheme()`。
+    -->
+    <style name="Theme.MotoDialog.Day" parent="Theme.MotoHeadUnit.Day">
+        <item name="android:windowAnimationStyle">@style/Animation.MotoDialog</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowMinWidthMajor">82%</item>
+        <item name="android:windowMinWidthMinor">88%</item>
+        <item name="android:backgroundDimAmount">0.25</item>
+    </style>
+
     <style name="Animation.MotoDialog" parent="@android:style/Animation.Dialog">
         <item name="android:windowEnterAnimation">@anim/dialog_in</item>
         <item name="android:windowExitAnimation">@anim/dialog_out</item>
@@ -224,7 +351,7 @@
     <!-- 文本样式 -->
     <style name="TextAppearance.Moto.Display" parent="TextAppearance.Material3.HeadlineLarge">
         <item name="android:fontFamily">@font/inter</item>
-        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColor">?attr/mtTextPrimary</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textSize">28sp</item>
         <item name="android:letterSpacing">-0.02</item>
@@ -232,7 +359,7 @@
 
     <style name="TextAppearance.Moto.Title" parent="TextAppearance.Material3.TitleLarge">
         <item name="android:fontFamily">@font/inter</item>
-        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColor">?attr/mtTextPrimary</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textSize">18sp</item>
         <item name="android:letterSpacing">-0.01</item>
@@ -240,26 +367,26 @@
 
     <style name="TextAppearance.Moto.Section" parent="TextAppearance.Material3.TitleMedium">
         <item name="android:fontFamily">@font/inter</item>
-        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColor">?attr/mtTextPrimary</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textSize">15sp</item>
     </style>
 
     <style name="TextAppearance.Moto.Body" parent="TextAppearance.Material3.BodyMedium">
         <item name="android:fontFamily">@font/inter</item>
-        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColor">?attr/mtTextPrimary</item>
         <item name="android:textSize">14sp</item>
     </style>
 
     <style name="TextAppearance.Moto.Callout" parent="TextAppearance.Material3.BodyMedium">
         <item name="android:fontFamily">@font/inter</item>
-        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textColor">?attr/mtTextSecondary</item>
         <item name="android:textSize">13sp</item>
     </style>
 
     <style name="TextAppearance.Moto.Caption" parent="TextAppearance.Material3.BodySmall">
         <item name="android:fontFamily">@font/inter</item>
-        <item name="android:textColor">@color/text_tertiary</item>
+        <item name="android:textColor">?attr/mtTextTertiary</item>
         <item name="android:textSize">11sp</item>
     </style>
 
@@ -274,7 +401,7 @@
     <!-- 主按钮（橙色） -->
     <style name="Widget.Moto.Button.Accent" parent="Widget.Material3.Button">
         <item name="android:background">@drawable/bg_btn_accent</item>
-        <item name="android:textColor">@color/text_on_accent</item>
+        <item name="android:textColor">?attr/mtTextOnAccent</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textSize">15sp</item>
         <item name="android:letterSpacing">0</item>
@@ -282,7 +409,7 @@
         <item name="android:minHeight">48dp</item>
         <item name="android:stateListAnimator">@null</item>
         <item name="android:elevation">0dp</item>
-        <item name="rippleColor">@color/accent_dim</item>
+        <item name="rippleColor">?attr/mtAccentDim</item>
         <item name="backgroundTint">@null</item>
         <!--
           这里原本有一条 android:layout_marginTop=8dp。
@@ -295,19 +422,19 @@
     <!-- 幽灵按钮（描边） -->
     <style name="Widget.Moto.Button.Ghost" parent="Widget.Material3.Button.OutlinedButton">
         <item name="android:background">@drawable/bg_btn_ghost</item>
-        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColor">?attr/mtTextPrimary</item>
         <item name="android:textSize">14sp</item>
         <item name="android:fontFamily">@font/inter</item>
         <item name="android:minHeight">44dp</item>
         <item name="android:stateListAnimator">@null</item>
         <item name="android:elevation">0dp</item>
-        <item name="strokeColor">@color/fill_strong</item>
+        <item name="strokeColor">?attr/mtFillStrong</item>
     </style>
 
     <!-- 危险按钮 -->
     <style name="Widget.Moto.Button.Danger" parent="Widget.Material3.Button">
         <item name="android:background">@drawable/bg_btn_danger</item>
-        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColor">?attr/mtTextPrimary</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textSize">15sp</item>
         <item name="android:fontFamily">@font/inter</item>
@@ -336,7 +463,7 @@
         <item name="android:paddingEnd">4dp</item>
         <item name="android:paddingTop">14dp</item>
         <item name="android:paddingBottom">8dp</item>
-        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColor">?attr/mtTextPrimary</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textSize">15sp</item>
         <item name="android:fontFamily">@font/inter</item>
@@ -358,7 +485,7 @@
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:textSize">12sp</item>
-        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textColor">?attr/mtTextSecondary</item>
         <item name="android:fontFamily">@font/inter</item>
     </style>
 
@@ -368,7 +495,7 @@
         <item name="android:textSize">20sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:layout_marginTop">4dp</item>
-        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColor">?attr/mtTextPrimary</item>
         <item name="android:fontFamily">@font/inter</item>
     </style>
 </resources>

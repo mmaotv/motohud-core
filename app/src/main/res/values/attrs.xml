@@ -80,4 +80,71 @@
     <attr name="nvLaneArrow" format="reference|color" />
     <attr name="nvLaneArrowDim" format="reference|color" />
 
+    <!--
+      ==================== 全局页面语义色（mt*） ====================
+
+      上面那批 `nv*` 是导航页专属语义（转向卡、车道牌、路口大图……），
+      这里这批是**所有页面通用的角色**。两批指向同一个调色板（colors.xml 里的
+      `pal_night_*` / `pal_day_*`），所以强调色、文字三级、危险色天然一致，
+      不会出现"导航页的橙和设置页的橙不是同一个橙"。
+
+      布局和样式里一律写 `?attr/mtXxx`，不写 `@color/xxx` —— 后者是编译期定死的
+      色值，主题换了它不会跟着变。这是整个日夜主题能成立的前提。
+    -->
+
+    <!-- 页面底色（最底层，卡片浮在它上面） -->
+    <attr name="mtWindow" format="reference|color" />
+
+    <!-- 表面：实心卡片 / 顶栏 / 底部栏 -->
+    <attr name="mtSurface" format="reference|color" />
+    <attr name="mtSurfaceHigh" format="reference|color" />
+    <attr name="mtBarSurface" format="reference|color" />
+
+    <!-- 玻璃卡片（半透明底 + 发丝描边） -->
+    <attr name="mtCard" format="reference|color" />
+    <attr name="mtCardStroke" format="reference|color" />
+
+    <!-- 填充块：输入框、胶囊、次级按钮 -->
+    <attr name="mtFill" format="reference|color" />
+    <attr name="mtFillStrong" format="reference|color" />
+    <attr name="mtHairline" format="reference|color" />
+
+    <!-- 文字三级 + 分区线 -->
+    <attr name="mtTextPrimary" format="reference|color" />
+    <attr name="mtTextSecondary" format="reference|color" />
+    <attr name="mtTextTertiary" format="reference|color" />
+    <attr name="mtDivider" format="reference|color" />
+
+    <!-- 主强调（按钮、选中态、关键数字）+ 强调色上的文字 -->
+    <attr name="mtAccent" format="reference|color" />
+    <attr name="mtAccentDim" format="reference|color" />
+    <attr name="mtTextOnAccent" format="reference|color" />
+
+    <!-- 语义色：绿（正常/成功）、红（危险/断开）、橙（提醒）、黄（注意） -->
+    <attr name="mtGreen" format="reference|color" />
+    <attr name="mtGreenDim" format="reference|color" />
+    <attr name="mtRed" format="reference|color" />
+    <attr name="mtRedDim" format="reference|color" />
+    <attr name="mtOrange" format="reference|color" />
+    <attr name="mtYellow" format="reference|color" />
+
+    <!-- 输入框 / 搜索栏底色：比卡片再深一档，形成"凹槽" -->
+    <attr name="mtField" format="reference|color" />
+
+    <!-- 车库页 hero 展示区渐变：夜里深灰压暗整车图，白天近白托亮 -->
+    <attr name="mtHeroFrom" format="reference|color" />
+    <attr name="mtHeroTo" format="reference|color" />
+
+    <!-- 弹窗（必须完全不透明：半透明会透出背后的地图/列表） -->
+    <attr name="mtDialogSurface" format="reference|color" />
+    <attr name="mtDialogStroke" format="reference|color" />
+
+    <!-- 轨迹线：已走 / 未走 -->
+    <attr name="mtTrackDone" format="reference|color" />
+    <attr name="mtTrackAhead" format="reference|color" />
+
+    <!-- 底部导航选中 / 未选中 -->
+    <attr name="mtNavChecked" format="reference|color" />
+    <attr name="mtNavUnchecked" format="reference|color" />
+
 </resources>

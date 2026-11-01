@@ -17,6 +17,7 @@ import com.motohud.ble.R
 import com.motohud.ble.data.AppDatabase
 import com.motohud.ble.data.AvoidZoneEntity
 import com.motohud.ble.data.AvoidZoneStore
+import com.motohud.ble.ui.theme.AppTheme
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -45,6 +46,12 @@ class AvoidZoneActivity : AppCompatActivity() {
     ) { refresh() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        /*
+         * 日 / 夜主题必须在 super 之前定下来。
+         * `?attr/mtXxx` 是在布局 inflate 那一刻从主题里取值的，晚一步设置
+         * 只能影响之后新建的 View，已经铺好的界面一个字都不会变。
+         */
+        AppTheme.apply(this)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_avoid_zone)
 

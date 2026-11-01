@@ -22,7 +22,7 @@
             android:layout_marginEnd="6dp"
             android:src="@drawable/ic_arrow_back"
             android:visibility="gone"
-            app:tint="@color/text_secondary" />
+            app:tint="?attr/mtTextSecondary" />
 
         <LinearLayout
             android:layout_width="0dp"
@@ -39,7 +39,7 @@
                 android:ellipsize="end"
                 android:fontFamily="@font/inter"
                 android:maxLines="1"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/mtTextPrimary"
                 android:textSize="15sp" />
 
             <TextView
@@ -50,7 +50,7 @@
                 android:ellipsize="end"
                 android:fontFamily="@font/inter"
                 android:maxLines="1"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/mtTextSecondary"
                 android:textSize="12sp" />
         </LinearLayout>
 
@@ -65,7 +65,7 @@
             android:paddingTop="8dp"
             android:paddingEnd="10dp"
             android:paddingBottom="8dp"
-            android:textColor="@color/accent"
+            android:textColor="?attr/mtAccent"
             android:textSize="13sp" />
     </LinearLayout>
 
@@ -76,6 +76,6 @@
         android:layout_height="2dp"
         android:layout_marginBottom="6dp"
         android:max="100"
-        android:progressTint="@color/accent"
+        android:progressTint="?attr/mtAccent"
         android:visibility="gone" />
 </LinearLayout>

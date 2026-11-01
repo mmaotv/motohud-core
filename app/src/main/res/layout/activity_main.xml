@@ -37,7 +37,7 @@
             android:fontFamily="@font/inter"
             android:maxLines="1"
             android:text="@string/status_disconnected"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/mtTextPrimary"
             android:textSize="13sp" />
 
         <TextView
@@ -47,9 +47,38 @@
             android:fontFamily="@font/inter"
             android:padding="8dp"
             android:text="@string/empty_action"
-            android:textColor="@color/accent"
+            android:textColor="?attr/mtAccent"
             android:textSize="13sp"
             android:textStyle="bold" />
+
+        <!--
+          日 / 夜开关。
+
+          为什么放这儿：主题原来只在设置面板里（要滚两屏才看得到），骑手在路边
+          戴着手套根本点不到。这条状态条在「爱车 / 导航」两个 tab 上都常驻，
+          40dp 触摸区，单手可及。
+
+          图标显示的是「点一下会变成什么」—— 当前是白天就显示月亮。
+          单击切换白天/夜间，长按恢复自动（按当地日出日落），见 MainActivity。
+        -->
+        <FrameLayout
+            android:id="@+id/btn_theme"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:contentDescription="@string/theme_toggle_to_night"
+            android:focusable="true">
+
+            <ImageView
+                android:id="@+id/iv_theme"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_theme_night"
+                app:tint="?attr/mtTextSecondary" />
+        </FrameLayout>
     </LinearLayout>
 
     <androidx.viewpager2.widget.ViewPager2
@@ -65,7 +94,7 @@
         android:id="@+id/bottom_nav"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/bar_surface"
+        android:background="?attr/mtBarSurface"
         app:elevation="0dp"
         app:itemIconTint="@color/nav_item_color"
         app:itemTextColor="@color/nav_item_color"

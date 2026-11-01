@@ -2,6 +2,6 @@
 <!-- 筹码（选中） -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="@color/accent" />
+    <solid android:color="?attr/mtAccent" />
     <corners android:radius="18dp" />
 </shape>

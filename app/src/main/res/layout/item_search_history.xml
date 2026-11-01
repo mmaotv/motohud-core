@@ -14,7 +14,7 @@
         android:layout_height="18dp"
         android:contentDescription="@string/search_history"
         android:src="@drawable/ic_nav_garage"
-        android:tint="@color/text_tertiary" />
+        android:tint="?attr/mtTextTertiary" />
 
     <TextView
         android:id="@+id/tv_history_name"
@@ -24,7 +24,7 @@
         android:layout_weight="1"
         android:ellipsize="end"
         android:maxLines="1"
-        android:textColor="@color/text_primary"
+        android:textColor="?attr/mtTextPrimary"
         android:textSize="14sp" />
 
     <ImageView
@@ -35,5 +35,5 @@
         android:contentDescription="@string/search_history_delete"
         android:padding="10dp"
         android:src="@drawable/ic_close"
-        android:tint="@color/text_tertiary" />
+        android:tint="?attr/mtTextTertiary" />
 </LinearLayout>

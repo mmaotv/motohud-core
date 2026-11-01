@@ -26,6 +26,7 @@ import com.motohud.ble.amap.AmapManager
 import com.motohud.ble.data.AppDatabase
 import com.motohud.ble.data.AvoidZoneEntity
 import com.motohud.ble.data.AvoidZoneStore
+import com.motohud.ble.ui.theme.AppTheme
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -72,6 +73,12 @@ class AvoidZoneEditActivity : AppCompatActivity() {
     private var editingId = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        /*
+         * 日 / 夜主题必须在 super 之前定下来。
+         * `?attr/mtXxx` 是在布局 inflate 那一刻从主题里取值的，晚一步设置
+         * 只能影响之后新建的 View，已经铺好的界面一个字都不会变。
+         */
+        AppTheme.apply(this)
         super.onCreate(savedInstanceState)
         // 顺序不能改：MapView 在布局里，必须先完成隐私合规
         val mapReady = AmapManager.hasKey(this) &&

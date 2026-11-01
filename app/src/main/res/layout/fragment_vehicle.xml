@@ -13,15 +13,15 @@
         android:id="@+id/vehicle_tabs"
         android:layout_width="match_parent"
         android:layout_height="48dp"
-        android:background="@color/bg_window"
+        android:background="?attr/mtWindow"
         app:tabGravity="fill"
-        app:tabIndicatorColor="@color/accent"
+        app:tabIndicatorColor="?attr/mtAccent"
         app:tabIndicatorFullWidth="false"
         app:tabIndicatorHeight="3dp"
         app:tabMode="fixed"
         app:tabRippleColor="@null"
-        app:tabSelectedTextColor="@color/text_primary"
-        app:tabTextColor="@color/text_tertiary" />
+        app:tabSelectedTextColor="?attr/mtTextPrimary"
+        app:tabTextColor="?attr/mtTextTertiary" />
 
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/vehicle_pager"

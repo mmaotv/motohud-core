@@ -81,6 +81,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+import com.motohud.ble.ui.theme.themeColor
 
 /**
  * 手机导航页（专业导航软件体验）。
@@ -493,13 +494,11 @@ class GuidanceActivity : AppCompatActivity() {
          * 日出日落差不出几分钟。拿不到终点时 resolveDark 自己退回时间判断。
          */
         NaviPrefs.init(this)
-        darkTheme = AmapMapConfig.resolveDark(
+        darkTheme = com.motohud.ble.ui.theme.AppTheme.isDark(
             intent.getDoubleExtra(EXTRA_LAT, 0.0),
             intent.getDoubleExtra(EXTRA_LNG, 0.0)
         )
-        setTheme(
-            if (darkTheme) R.style.Theme_MotoHeadUnit else R.style.Theme_MotoHeadUnit_NaviDay
-        )
+        setTheme(com.motohud.ble.ui.theme.AppTheme.styleOf(darkTheme))
 
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_guidance)
@@ -654,7 +653,7 @@ class GuidanceActivity : AppCompatActivity() {
     /**
      * 解析一个主题属性成实际颜色。
      *
-     * 属性值可能指向颜色资源（`@color/nv_day_danger`），也可能是内联色值，
+     * 属性值可能指向颜色资源（`@color/pal_day_danger`），也可能是内联色值，
      * 两条路都要能走 —— 所以先看 `resourceId`，没有再取 `data`。
      */
     private fun themeColor(attr: Int): Int {
@@ -1622,7 +1621,7 @@ class GuidanceActivity : AppCompatActivity() {
                 PolylineOptions().apply {
                     addAll(points)
                     width(18f)
-                    color(ContextCompat.getColor(this@GuidanceActivity, R.color.track_ahead))
+                    color(themeColor(R.attr.mtTrackAhead, android.graphics.Color.WHITE))
                     setDottedLine(false)
                     // V11 新增：折线抽稀。一条长途路线动辄几千个点，全量提交给渲染引擎
                     // 在中低端机上会拖慢每帧绘制；抽稀后顶点数大幅下降。
@@ -1635,7 +1634,7 @@ class GuidanceActivity : AppCompatActivity() {
                 PolylineOptions()
                     .add(points.first(), points.first())
                     .width(11f)
-                    .color(ContextCompat.getColor(this, R.color.track_done))
+                    .color(themeColor(R.attr.mtTrackDone, android.graphics.Color.WHITE))
                     .setDottedLine(false)
                     .zIndex(2f)
             )

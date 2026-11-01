@@ -1,9 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 顶部渐变：让状态栏与顶栏在地图/卫星图上始终可读（夜间黑、白天白） -->
+<!--
+  顶部渐变：让状态栏与顶栏在地图 / 卫星图上始终可读。
+
+  **前 45% 是实色**（centerY=0.45），后面才渐隐到透明。
+  纯线性渐变（0% → 100%）的问题：标题在 60dp 处只有约 67% 不透明度，
+  白天压不住饱和的地图绿地 —— 真机表现为"标题栏被地染成绿色"，
+  再叠加 scrim 也没用（叠完是淡绿）。留一段实色区最直接。
+-->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <gradient
         android:angle="270"
+        android:centerColor="?attr/nvScrimFrom"
+        android:centerY="0.45"
         android:endColor="?attr/nvScrimTo"
         android:startColor="?attr/nvScrimFrom" />
 </shape>
