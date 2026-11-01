@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 圆形 FAB -->
+<!--
+  导航主页右下角的定位圆钮。
+
+  这个按钮浮在**地图**上，所以跟日 / 夜主题走：
+  夜间是半透深底 + 发丝描边，白天是白底 + 淡描边（压在白地图上靠 elevation 分边界）。
+  注意别和 `bg_hero_circle` 混用 —— 那个是压在摩托车照片上的，固定深色。
+-->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
-    <solid android:color="#E6202022" />
+    <solid android:color="?attr/mtSurfaceHigh" />
     <stroke
         android:width="1dp"
         android:color="?attr/mtCardStroke" />

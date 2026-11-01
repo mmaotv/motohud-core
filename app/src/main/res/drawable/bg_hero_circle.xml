@@ -2,14 +2,15 @@
 <!--
   车库页 hero 右上角两个圆钮（搜索 / 设置）。
 
-  和 bg_navi_circle 的区别：那个跟日 / 夜主题走（导航页浮在地图上），
-  这个**永远深色** —— 它压在摩托车照片上，照片是深色素材，白天换成白圆钮
-  基本等于按钮消失（真机截图上就剩两个白点）。
+  它压在摩托车照片上，但**跟着日 / 夜主题走**：
+  夜间是半透深底 + 白图标，白天是白底 + 深图标。
+  照片本身始终是深色素材，白圆钮在深色照片上足够醒目；
+  反过来若固定深底，白天整个按钮会变成一块"黑疙瘩"，与浅色界面割裂。
 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
-    <solid android:color="#CC141416" />
+    <solid android:color="?attr/mtSurfaceHigh" />
     <stroke
         android:width="1dp"
-        android:color="#40FFFFFF" />
+        android:color="?attr/mtCardStroke" />
 </shape>
