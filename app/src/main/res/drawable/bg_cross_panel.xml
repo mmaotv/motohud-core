@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  路口放大图的整块底板：**完全不透明**（#FF），用来把右侧侧栏整个盖住。
+  路口放大图的整块底板：**完全不透明**，用来把右侧侧栏整个盖住。
 
-  为什么不能用 bg_navi_panel：那块是 #F0 半透明（94%），底下的转向卡、
-  车道箭头会透出一层影子，看起来像"两张图叠在一起"，比不盖更乱。
+  为什么不能用 bg_navi_panel：那块是 94% 半透明，底下的转向卡、车道箭头会
+  透出一层影子，看起来像"两张图叠在一起"，比不盖更乱。
   驾驶场景下这块只该有一样东西——路口大图。
 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="#FF0B0B0D" />
+    <solid android:color="?attr/nvCrossPanelColor" />
     <corners android:radius="18dp" />
 </shape>

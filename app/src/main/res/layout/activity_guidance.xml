@@ -108,7 +108,7 @@
                         android:fontFamily="@font/inter"
                         android:maxLines="1"
                         android:text="@string/hud_dest"
-                        android:textColor="@color/text_primary"
+                        android:textColor="?attr/nvTextPrimary"
                         android:textSize="14sp"
                         android:textStyle="bold" />
 
@@ -124,7 +124,7 @@
                         android:paddingEnd="7dp"
                         android:paddingBottom="2dp"
                         android:text="@string/navi_mode_motorcycle"
-                        android:textColor="@color/accent"
+                        android:textColor="?attr/nvAccent"
                         android:textSize="10sp"
                         android:textStyle="bold" />
                 </LinearLayout>
@@ -137,7 +137,7 @@
                     android:ellipsize="end"
                     android:fontFamily="@font/inter"
                     android:maxLines="1"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/nvTextSecondary"
                     android:textSize="11sp" />
             </LinearLayout>
 
@@ -162,7 +162,7 @@
                 android:padding="11dp"
                 android:src="@drawable/ic_route"
                 android:visibility="gone"
-                app:tint="@color/text_primary" />
+                app:tint="?attr/nvTextPrimary" />
         </LinearLayout>
 
         <!-- 转向横幅（放在顶栏内，自动跟随状态栏高度） -->
@@ -194,6 +194,7 @@
                 android:id="@+id/iv_turn_icon"
                 android:layout_width="88dp"
                 android:layout_height="88dp"
+                android:background="?attr/nvTurnBadgeBg"
                 android:contentDescription="@string/hud_turn_icon"
                 android:scaleType="fitCenter"
                 android:src="@drawable/amap_navi_lbs_sou9" />
@@ -212,7 +213,7 @@
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/inter"
                     android:maxLines="1"
-                    android:textColor="@color/accent"
+                    android:textColor="?attr/nvAccent"
                     android:textSize="30sp"
                     android:textStyle="bold"
                     app:autoSizeMaxTextSize="30sp"
@@ -227,7 +228,7 @@
                     android:ellipsize="end"
                     android:fontFamily="@font/inter"
                     android:maxLines="2"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/nvTextPrimary"
                     android:textSize="17sp"
                     android:textStyle="bold" />
 
@@ -239,7 +240,7 @@
                     android:ellipsize="end"
                     android:fontFamily="@font/inter"
                     android:maxLines="1"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/nvTextSecondary"
                     android:textSize="12sp" />
 
                 <!-- 下一步预告（高德/百度都有，是"专业感"最直接的来源） -->
@@ -251,7 +252,7 @@
                     android:ellipsize="end"
                     android:fontFamily="@font/inter"
                     android:maxLines="1"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/nvTextTertiary"
                     android:textSize="11sp"
                     android:visibility="gone" />
             </LinearLayout>
@@ -301,7 +302,7 @@
                 android:fontFamily="@font/inter"
                 android:gravity="center"
                 android:includeFontPadding="false"
-                android:textColor="@color/red"
+                android:textColor="?attr/nvDanger"
                 android:textSize="14sp"
                 android:textStyle="bold"
                 android:visibility="gone" />
@@ -312,7 +313,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:fontFamily="@font/inter"
-                android:textColor="@color/orange"
+                android:textColor="?attr/nvWarn"
                 android:textSize="12sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -336,7 +337,7 @@
             android:paddingTop="6dp"
             android:paddingEnd="12dp"
             android:paddingBottom="6dp"
-            android:textColor="@color/accent"
+            android:textColor="?attr/nvAccent"
             android:textSize="12sp"
             android:visibility="gone" />
 
@@ -354,7 +355,7 @@
             android:paddingEnd="12dp"
             android:paddingBottom="6dp"
             android:text="@string/navi_signal_weak"
-            android:textColor="@color/orange"
+            android:textColor="?attr/nvWarn"
             android:textSize="12sp"
             android:visibility="gone" />
 
@@ -381,7 +382,7 @@
                 android:fontFamily="@font/inter"
                 android:maxLines="1"
                 android:ellipsize="end"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/nvTextPrimary"
                 android:textSize="13sp" />
 
             <Button
@@ -419,7 +420,7 @@
         android:contentDescription="@string/cancel"
         android:padding="11dp"
         android:src="@drawable/ic_arrow_back"
-        app:tint="@color/text_primary" />
+        app:tint="?attr/nvTextPrimary" />
 
     <!--
       语音 / 投屏：独立悬浮容器，不再挂在顶栏第一行里。
@@ -451,7 +452,7 @@
             android:contentDescription="@string/navi_voice"
             android:padding="11dp"
             android:src="@drawable/ic_volume_on"
-            app:tint="@color/text_primary" />
+            app:tint="?attr/nvTextPrimary" />
 
         <ImageView
             android:id="@+id/btn_cast"
@@ -462,7 +463,7 @@
             android:contentDescription="@string/navi_cast"
             android:padding="11dp"
             android:src="@drawable/ic_cast"
-            app:tint="@color/accent" />
+            app:tint="?attr/nvAccent" />
     </LinearLayout>
 
     <!-- 浮动：全览 / 回中 -->
@@ -483,7 +484,7 @@
             android:contentDescription="@string/navi_overview"
             android:padding="11dp"
             android:src="@drawable/ic_route"
-            app:tint="@color/text_primary" />
+            app:tint="?attr/nvTextPrimary" />
 
         <ImageView
             android:id="@+id/btn_recenter"
@@ -494,7 +495,7 @@
             android:contentDescription="@string/navi_recenter"
             android:padding="11dp"
             android:src="@drawable/ic_my_location"
-            app:tint="@color/accent" />
+            app:tint="?attr/nvAccent" />
     </LinearLayout>
 
     <!-- 底部信息卡 -->
@@ -544,7 +545,7 @@
                     android:fontFamily="@font/inter"
                     android:gravity="center"
                     android:maxLines="1"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/nvTextPrimary"
                     android:textSize="20sp"
                     android:textStyle="bold"
                     app:autoSizeMaxTextSize="20sp"
@@ -556,7 +557,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:text="@string/guidance_eta"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/nvTextTertiary"
                     android:textSize="11sp" />
             </LinearLayout>
 
@@ -574,7 +575,7 @@
                     android:fontFamily="@font/inter"
                     android:gravity="center"
                     android:maxLines="1"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/nvTextPrimary"
                     android:textSize="20sp"
                     android:textStyle="bold"
                     app:autoSizeMaxTextSize="20sp"
@@ -586,7 +587,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:text="@string/guidance_remain"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/nvTextTertiary"
                     android:textSize="11sp" />
             </LinearLayout>
 
@@ -604,7 +605,7 @@
                     android:fontFamily="@font/inter"
                     android:gravity="center"
                     android:maxLines="1"
-                    android:textColor="@color/accent"
+                    android:textColor="?attr/nvAccent"
                     android:textSize="20sp"
                     android:textStyle="bold"
                     app:autoSizeMaxTextSize="20sp"
@@ -616,7 +617,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:text="@string/guidance_speed"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/nvTextTertiary"
                     android:textSize="11sp" />
             </LinearLayout>
 
@@ -635,7 +636,7 @@
                     android:fontFamily="@font/inter"
                     android:gravity="center"
                     android:maxLines="1"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/nvTextPrimary"
                     android:textSize="14sp"
                     android:textStyle="bold"
                     app:autoSizeMaxTextSize="14sp"
@@ -648,7 +649,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:text="@string/guidance_gps"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/nvTextTertiary"
                     android:textSize="11sp" />
             </LinearLayout>
         </LinearLayout>
@@ -665,7 +666,7 @@
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
-                android:background="@color/divider" />
+                android:background="?attr/nvDivider" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -684,7 +685,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:fontFamily="@font/inter"
-                        android:textColor="@color/text_primary"
+                        android:textColor="?attr/nvTextPrimary"
                         android:textSize="15sp"
                         android:textStyle="bold" />
 
@@ -693,7 +694,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
                         android:text="@string/guidance_lights"
-                        android:textColor="@color/text_tertiary"
+                        android:textColor="?attr/nvTextTertiary"
                         android:textSize="11sp" />
                 </LinearLayout>
 
@@ -708,7 +709,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:fontFamily="@font/inter"
-                        android:textColor="@color/text_primary"
+                        android:textColor="?attr/nvTextPrimary"
                         android:textSize="15sp"
                         android:textStyle="bold" />
 
@@ -717,7 +718,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
                         android:text="@string/guidance_tolls"
-                        android:textColor="@color/text_tertiary"
+                        android:textColor="?attr/nvTextTertiary"
                         android:textSize="11sp" />
                 </LinearLayout>
 
@@ -732,7 +733,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:fontFamily="@font/inter"
-                        android:textColor="@color/text_primary"
+                        android:textColor="?attr/nvTextPrimary"
                         android:textSize="15sp"
                         android:textStyle="bold" />
 
@@ -741,7 +742,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
                         android:text="@string/guidance_step_progress"
-                        android:textColor="@color/text_tertiary"
+                        android:textColor="?attr/nvTextTertiary"
                         android:textSize="11sp" />
                 </LinearLayout>
             </LinearLayout>
@@ -753,7 +754,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:fontFamily="@font/inter"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/nvTextSecondary"
                 android:textSize="11sp" />
         </LinearLayout>
 
@@ -764,7 +765,7 @@
             android:layout_marginTop="10dp"
             android:fontFamily="@font/inter"
             android:text="@string/guidance_ble_hint"
-            android:textColor="@color/text_tertiary"
+            android:textColor="?attr/nvTextTertiary"
             android:textSize="12sp"
             android:visibility="gone" />
 
@@ -813,7 +814,7 @@
         <ProgressBar
             android:layout_width="40dp"
             android:layout_height="40dp"
-            android:indeterminateTint="@color/accent" />
+            android:indeterminateTint="?attr/nvAccent" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -821,7 +822,7 @@
             android:layout_marginTop="12dp"
             android:fontFamily="@font/inter"
             android:text="@string/guidance_planning"
-            android:textColor="@color/text_primary"
+            android:textColor="?attr/nvTextPrimary"
             android:textSize="14sp" />
     </LinearLayout>
 
@@ -862,7 +863,7 @@
                 android:layout_marginTop="10dp"
                 android:fontFamily="@font/inter"
                 android:text="@string/hud_arrived"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/nvTextPrimary"
                 android:textSize="20sp"
                 android:textStyle="bold" />
 
@@ -874,7 +875,7 @@
                 android:gravity="center"
                 android:maxLines="1"
                 android:ellipsize="end"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/nvTextSecondary"
                 android:textSize="12sp" />
 
             <LinearLayout
@@ -897,7 +898,7 @@
                         android:fontFamily="@font/inter"
                         android:gravity="center"
                         android:maxLines="1"
-                        android:textColor="@color/text_primary"
+                        android:textColor="?attr/nvTextPrimary"
                         android:textSize="18sp"
                         android:textStyle="bold" />
 
@@ -906,7 +907,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
                         android:text="@string/guidance_arrive_distance"
-                        android:textColor="@color/text_tertiary"
+                        android:textColor="?attr/nvTextTertiary"
                         android:textSize="11sp" />
                 </LinearLayout>
 
@@ -924,7 +925,7 @@
                         android:fontFamily="@font/inter"
                         android:gravity="center"
                         android:maxLines="1"
-                        android:textColor="@color/text_primary"
+                        android:textColor="?attr/nvTextPrimary"
                         android:textSize="18sp"
                         android:textStyle="bold" />
 
@@ -933,7 +934,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
                         android:text="@string/guidance_arrive_duration"
-                        android:textColor="@color/text_tertiary"
+                        android:textColor="?attr/nvTextTertiary"
                         android:textSize="11sp" />
                 </LinearLayout>
 
@@ -951,7 +952,7 @@
                         android:fontFamily="@font/inter"
                         android:gravity="center"
                         android:maxLines="1"
-                        android:textColor="@color/accent"
+                        android:textColor="?attr/nvAccent"
                         android:textSize="18sp"
                         android:textStyle="bold" />
 
@@ -960,7 +961,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
                         android:text="@string/guidance_arrive_avg"
-                        android:textColor="@color/text_tertiary"
+                        android:textColor="?attr/nvTextTertiary"
                         android:textSize="11sp" />
                 </LinearLayout>
             </LinearLayout>
@@ -993,7 +994,7 @@
             android:paddingEnd="24dp"
             android:paddingBottom="10dp"
             android:text="@string/guidance_finish"
-            android:textColor="@color/text_secondary"
+            android:textColor="?attr/nvTextSecondary"
             android:textSize="14sp" />
     </LinearLayout>
     <!--
@@ -1033,6 +1034,7 @@
                 android:id="@+id/iv_cross_turn"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
+                android:background="?attr/nvTurnBadgeBg"
                 android:contentDescription="@string/hud_turn_icon"
                 android:src="@drawable/amap_navi_lbs_sou9" />
 
@@ -1043,7 +1045,7 @@
                 android:layout_marginStart="8dp"
                 android:fontFamily="@font/inter"
                 android:maxLines="1"
-                android:textColor="@color/accent"
+                android:textColor="?attr/nvAccent"
                 android:textSize="26sp"
                 android:textStyle="bold"
                 app:autoSizeMaxTextSize="26sp"
@@ -1059,7 +1061,7 @@
                 android:ellipsize="end"
                 android:fontFamily="@font/inter"
                 android:maxLines="2"
-                android:textColor="@color/text_primary"
+                android:textColor="?attr/nvTextPrimary"
                 android:textSize="15sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -1068,7 +1070,7 @@
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:layout_marginTop="8dp"
-            android:background="#1FFFFFFF" />
+            android:background="?attr/nvDivider" />
 
         <!-- 大图：占满中间剩余空间，fitCenter 不裁切路形 -->
         <ImageView
@@ -1100,7 +1102,7 @@
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/inter"
                     android:maxLines="1"
-                    android:textColor="@color/accent"
+                    android:textColor="?attr/nvAccent"
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
@@ -1108,7 +1110,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/guidance_eta"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/nvTextTertiary"
                     android:textSize="10sp" />
             </LinearLayout>
 
@@ -1125,7 +1127,7 @@
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/inter"
                     android:maxLines="1"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/nvTextPrimary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
@@ -1133,7 +1135,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/guidance_remain"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/nvTextTertiary"
                     android:textSize="10sp" />
             </LinearLayout>
 
@@ -1150,7 +1152,7 @@
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/inter"
                     android:maxLines="1"
-                    android:textColor="@color/text_primary"
+                    android:textColor="?attr/nvTextPrimary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
@@ -1158,7 +1160,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/guidance_speed"
-                    android:textColor="@color/text_tertiary"
+                    android:textColor="?attr/nvTextTertiary"
                     android:textSize="10sp" />
             </LinearLayout>
         </LinearLayout>

@@ -32,6 +32,94 @@
         <item name="android:colorBackgroundFloating">@color/surface_high</item>
         <!-- 转场动画 -->
         <item name="android:windowAnimationStyle">@style/Animation.MotoActivity</item>
+
+        <!--
+          ==================== 导航页配色（夜间 = 现状） ====================
+          基础主题里全部落成夜间值，所以任何没套白天主题的页面行为完全不变。
+          逐项说明见 values/attrs.xml。
+        -->
+        <item name="nvTextPrimary">@color/nv_night_text_primary</item>
+        <item name="nvTextSecondary">@color/nv_night_text_secondary</item>
+        <item name="nvTextTertiary">@color/nv_night_text_tertiary</item>
+        <item name="nvAccent">@color/nv_night_accent</item>
+        <item name="nvWarn">@color/nv_night_warn</item>
+        <item name="nvDanger">@color/nv_night_danger</item>
+        <item name="nvCaution">@color/nv_night_caution</item>
+        <item name="nvDivider">@color/nv_night_divider</item>
+        <item name="nvPanelColor">@color/nv_night_panel</item>
+        <item name="nvPanelStroke">@color/nv_night_panel_stroke</item>
+        <item name="nvCircleColor">@color/nv_night_circle</item>
+        <item name="nvCircleStroke">@color/nv_night_circle_stroke</item>
+        <item name="nvCrossPanelColor">@color/nv_night_cross_panel</item>
+        <item name="nvBottomCardColor">@color/nv_night_bottom_card</item>
+        <item name="nvCardColor">@color/nv_night_card</item>
+        <item name="nvCardStroke">@color/nv_night_card_stroke</item>
+        <item name="nvBadgeColor">@color/nv_night_badge</item>
+        <item name="nvBadgeStroke">@color/nv_night_badge_stroke</item>
+        <item name="nvGrabberColor">@color/nv_night_grabber</item>
+        <item name="nvScrimFrom">@color/nv_night_scrim_from</item>
+        <item name="nvScrimTo">@color/nv_night_scrim_to</item>
+        <item name="nvShadeColor">@color/nv_night_shade</item>
+        <!-- 夜间不加底衬：官方 sou 图是白箭头，深色面板上本来就对。
+             用透明 drawable 而不是 @null —— 见 bg_turn_badge_none.xml 里的说明 -->
+        <item name="nvTurnBadgeBg">@drawable/bg_turn_badge_none</item>
+        <item name="nvLaneBg">@color/nv_night_lane_bg</item>
+        <item name="nvLaneBgActive">@color/nv_night_lane_bg_active</item>
+        <item name="nvLaneArrow">@color/nv_night_lane_arrow</item>
+        <item name="nvLaneArrowDim">@color/nv_night_lane_arrow_dim</item>
+    </style>
+
+    <!--
+      ==================== 导航页 · 白天主题 ====================
+
+      只覆盖 nv* 那一层，其余全部继承 `Theme.MotoHeadUnit`（字体、转场、弹窗、
+      Material 组件外观）。用法：在 `setContentView` **之前**
+      `setTheme(R.style.Theme_MotoHeadUnit_NaviDay)`。
+
+      另外把几个 Material 语义色一起调深，否则导航页里的 Button（停止导航 /
+      投屏 / 更优路线）在浅色面板上仍是浅色文字，看起来像禁用态。
+    -->
+    <style name="Theme.MotoHeadUnit.NaviDay">
+        <item name="nvTextPrimary">@color/nv_day_text_primary</item>
+        <item name="nvTextSecondary">@color/nv_day_text_secondary</item>
+        <item name="nvTextTertiary">@color/nv_day_text_tertiary</item>
+        <item name="nvAccent">@color/nv_day_accent</item>
+        <item name="nvWarn">@color/nv_day_warn</item>
+        <item name="nvDanger">@color/nv_day_danger</item>
+        <item name="nvCaution">@color/nv_day_caution</item>
+        <item name="nvDivider">@color/nv_day_divider</item>
+        <item name="nvPanelColor">@color/nv_day_panel</item>
+        <item name="nvPanelStroke">@color/nv_day_panel_stroke</item>
+        <item name="nvCircleColor">@color/nv_day_circle</item>
+        <item name="nvCircleStroke">@color/nv_day_circle_stroke</item>
+        <item name="nvCrossPanelColor">@color/nv_day_cross_panel</item>
+        <item name="nvBottomCardColor">@color/nv_day_bottom_card</item>
+        <item name="nvCardColor">@color/nv_day_card</item>
+        <item name="nvCardStroke">@color/nv_day_card_stroke</item>
+        <item name="nvBadgeColor">@color/nv_day_badge</item>
+        <item name="nvBadgeStroke">@color/nv_day_badge_stroke</item>
+        <item name="nvGrabberColor">@color/nv_day_grabber</item>
+        <item name="nvScrimFrom">@color/nv_day_scrim_from</item>
+        <item name="nvScrimTo">@color/nv_day_scrim_to</item>
+        <item name="nvShadeColor">@color/nv_day_shade</item>
+        <!-- 白天必须给白箭头垫蓝底，否则官方白箭头在白面板上直接消失 -->
+        <item name="nvTurnBadgeBg">@drawable/bg_turn_badge</item>
+        <item name="nvLaneBg">@color/nv_day_lane_bg</item>
+        <item name="nvLaneBgActive">@color/nv_day_lane_bg_active</item>
+        <item name="nvLaneArrow">@color/nv_day_lane_arrow</item>
+        <item name="nvLaneArrowDim">@color/nv_day_lane_arrow_dim</item>
+
+        <!-- 状态栏图标转深色（白渐变 scrim 上白图标看不见） -->
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowBackground">@color/nv_day_panel</item>
+        <item name="android:colorBackground">@color/nv_day_panel</item>
+        <item name="colorOnSurface">@color/nv_day_text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/nv_day_text_secondary</item>
+        <item name="colorSurface">@color/nv_day_panel</item>
+        <item name="colorOutline">@color/nv_day_panel_stroke</item>
+        <item name="android:textColorPrimary">@color/nv_day_text_primary</item>
+        <item name="android:textColorSecondary">@color/nv_day_text_secondary</item>
     </style>
 
     <!-- ===================== 弹窗 ===================== -->

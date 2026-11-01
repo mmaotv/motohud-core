@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 顶部渐变：让状态栏与顶栏在地图/卫星图上始终可读 -->
+<!-- 顶部渐变：让状态栏与顶栏在地图/卫星图上始终可读（夜间黑、白天白） -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <gradient
         android:angle="270"
-        android:endColor="#00000000"
-        android:startColor="#CC000000" />
+        android:endColor="?attr/nvScrimTo"
+        android:startColor="?attr/nvScrimFrom" />
 </shape>

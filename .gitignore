@@ -26,5 +26,9 @@ local.properties
 # 本地测试截图（adb screencap 产物，不入库）
 test_shots/
 
+# 发版产物（100MB+ 的 APK；GitHub 单文件上限 100MB，arm64 包已经超了，
+# 只能走 Release 附件，不进仓库。历史 release-v0.0.21/22 已入库，不再动）
+release-v*/
+
 # 高德 SDK 下载缓存（prepare_amap_sdk.py）
 /tools/.cache/

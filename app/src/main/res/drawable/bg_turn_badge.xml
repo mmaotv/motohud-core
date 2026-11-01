@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  转向图标底衬（仅白天主题引用，夜间该 attr 为 @null）。
+
+  官方 `amap_navi_lbs_sou*` 是"白箭头 + 灰环"的**双色图**，不能染色（染了
+  环岛的「环 + 出口箭头」会糊成一个色块）。白箭头摆到白色面板上等于消失，
+  所以垫一块**交通标志蓝**的圆角底 —— 蓝底白箭头正是国标指示标志的配色，
+  也和车道牌同一套蓝，视觉上是一家人。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/sign_blue" />
+    <corners android:radius="14dp" />
+</shape>

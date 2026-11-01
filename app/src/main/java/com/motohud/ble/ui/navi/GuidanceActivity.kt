@@ -49,6 +49,7 @@ import com.amap.api.navi.AMapNaviView
 import com.motohud.ble.MotoHudApp
 import com.motohud.ble.R
 import com.motohud.ble.amap.AmapManager
+import com.motohud.ble.amap.AmapMapConfig
 import com.motohud.ble.amap.AmapRepo
 import com.motohud.ble.amap.RoutePlanResult
 import com.motohud.ble.amap.RouteQueryOptions
@@ -330,6 +331,13 @@ class GuidanceActivity : AppCompatActivity() {
     /** 当前是否横屏：镜头缩放/俯角/前移都要跟着变，横屏和竖屏必须有区别 */
     private var landscapeNow = false
 
+    /**
+     * 本页用的是哪套配色（由 onCreate 在 inflate 之前定下，见那里的注释）。
+     * 地图的 mapType 另由 [AmapMapConfig.applyDisplay] 按同一个
+     * `AmapMapConfig.resolveDark` 决定，两边同源，不会出现"卡片白天、地图夜间"。
+     */
+    private var darkTheme = true
+
     /** 上一次已播报过的路段序号：进入新路段时播一次「前方 X 米 左/右转」 */
     private var lastAnnouncedStep = -1
 
@@ -472,6 +480,27 @@ class GuidanceActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        /*
+         * ===================== 日 / 夜主题 =====================
+         * 必须在 super.onCreate / setContentView **之前**定下来。
+         *
+         * 导航页的配色全部写成 `?attr/nvXxx`（见 values/attrs.xml），这类引用
+         * 是在**布局解析那一刻**从主题里取值的；setContentView 之后再 setTheme
+         * 只会影响之后新建的 View，已经 inflate 的 TextView 颜色一个字都不会变。
+         *
+         * 自动档要算日出日落，而这时地图还没建、拿不到 cameraPosition，
+         * 所以用**终点经纬度**顶替 —— 一次导航的起终点必然在同一座城市，
+         * 日出日落差不出几分钟。拿不到终点时 resolveDark 自己退回时间判断。
+         */
+        NaviPrefs.init(this)
+        darkTheme = AmapMapConfig.resolveDark(
+            intent.getDoubleExtra(EXTRA_LAT, 0.0),
+            intent.getDoubleExtra(EXTRA_LNG, 0.0)
+        )
+        setTheme(
+            if (darkTheme) R.style.Theme_MotoHeadUnit else R.style.Theme_MotoHeadUnit_NaviDay
+        )
+
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_guidance)
 
@@ -500,6 +529,7 @@ class GuidanceActivity : AppCompatActivity() {
         // 坡度感知：设备有气压计才创建，没有就留 null（整套逻辑静默关闭）
         terrainSense = com.motohud.ble.navi.TerrainSense(this)
         bindViews()
+        applyThemeExtras()
         applyWindowInsets()
         // 旋转不重建 Activity，布局形态（横屏右下面板 / 竖屏底部通栏）由这里统一施加
         applyOrientationLayout(
@@ -606,6 +636,78 @@ class GuidanceActivity : AppCompatActivity() {
         tvArriveAvg = findViewById(R.id.tv_arrive_avg)
         betterRouteCard = findViewById(R.id.better_route_card)
         tvBetterRoute = findViewById(R.id.tv_better_route)
+    }
+
+    /**
+     * 主题定了之后还要"手工补"的几处。
+     *
+     * 布局里能用 `?attr/nvXxx` 表达的都已经自动生效了，这里只处理那些
+     * **没法写成资源**的东西：
+     *
+     * 1. **转向图标的 padding** —— 白天要给官方白箭头垫一块蓝底（`bg_turn_badge`），
+     *    不内缩的话箭头会顶到蓝底边缘，看着像贴纸。夜间没有底衬，padding 必须是 0，
+     *    否则 88dp 的箭头白白缩小一圈，横屏侧栏本来就小。
+     * 2. **状态栏图标深浅** —— 白天顶部 scrim 是白的，白色状态栏图标直接消失。
+     *    主题里的 `android:windowLightStatusBar` 只管到系统认定的主题，用
+     *    WindowInsetsControllerCompat 再兜一层更稳（部分 OEM 只认后者）。
+     */
+    /**
+     * 解析一个主题属性成实际颜色。
+     *
+     * 属性值可能指向颜色资源（`@color/nv_day_danger`），也可能是内联色值，
+     * 两条路都要能走 —— 所以先看 `resourceId`，没有再取 `data`。
+     */
+    private fun themeColor(attr: Int): Int {
+        val tv = android.util.TypedValue()
+        if (!theme.resolveAttribute(attr, tv, true)) return Color.WHITE
+        return when {
+            tv.resourceId != 0 -> ContextCompat.getColor(this, tv.resourceId)
+            tv.type >= android.util.TypedValue.TYPE_FIRST_COLOR_INT &&
+                tv.type <= android.util.TypedValue.TYPE_LAST_COLOR_INT -> tv.data
+            else -> Color.WHITE
+        }
+    }
+
+    private fun applyThemeExtras() {
+        val dense = resources.displayMetrics.density
+        // 内缩量按"底衬还剩多少可呼吸的边"来定，不是按图标的百分比：
+        // 88dp 底衬收 5dp、44dp 收 3dp，箭头才撑得起来。收太多（试过 8dp）
+        // 箭头会缩成一个小白点，远看只剩一块蓝。
+        val padBig = if (darkTheme) 0 else (5 * dense).roundToInt()
+        val padSmall = if (darkTheme) 0 else (3 * dense).roundToInt()
+        ivTurnIcon.setPadding(padBig, padBig, padBig, padBig)
+        ivCrossTurn.setPadding(padSmall, padSmall, padSmall, padSmall)
+
+        /*
+         * 3. **悬浮圆钮的投影** —— 夜间深色按钮压在地图上，靠颜色就分得清；
+         *    白天是白按钮压在白/浅灰地图上，只靠 1dp 描边几乎看不出边界
+         *    （真机截图里那几个圆钮像是"印"在地图上的）。给一点 elevation
+         *    让系统画一圈柔和阴影，比加粗描边自然得多。
+         */
+        val lift = if (darkTheme) 0f else 3 * dense
+        listOf(R.id.btn_back, R.id.btn_voice, R.id.btn_cast, R.id.btn_overview,
+            R.id.btn_recenter, R.id.btn_pip).forEach { id ->
+            findViewById<View>(id)?.elevation = lift
+        }
+
+        applySystemBarAppearance()
+    }
+
+    /**
+     * 状态栏 / 导航栏图标的深浅。
+     *
+     * **必须在每次旋转后再设一次**：本页 `configChanges` 带了 orientation，
+     * 转屏不重建 Activity，但系统会重算一次 Window 的 decor insets，
+     * 白天的"深色图标"标记会被丢回默认（白图标）。
+     * 真机复现：白天横屏图标是深灰，转竖屏后变纯白，正好压在浅色地图上
+     * —— 时钟基本看不见。
+     */
+    private fun applySystemBarAppearance() {
+        runCatching {
+            val ctl = WindowCompat.getInsetsController(window, window.decorView)
+            ctl.isAppearanceLightStatusBars = !darkTheme
+            ctl.isAppearanceLightNavigationBars = !darkTheme
+        }
     }
 
     /**
@@ -2583,10 +2685,7 @@ class GuidanceActivity : AppCompatActivity() {
         val tone = com.motohud.ble.navi.CameraKind.group(type)
         if (tone == lastCameraTone) return
         lastCameraTone = tone
-        val color = androidx.core.content.ContextCompat.getColor(
-            this, com.motohud.ble.navi.CameraKind.colorRes(type)
-        )
-        tvCameraWarn.setTextColor(color)
+        tvCameraWarn.setTextColor(themeColor(com.motohud.ble.navi.CameraKind.colorAttr(type)))
     }
 
     /**
@@ -2601,7 +2700,6 @@ class GuidanceActivity : AppCompatActivity() {
         if (lane != null && lane.count > 0) {
             // 配色跟地图主题同源：白天 = 交通标志那样蓝底白箭头，夜间 = 深色底。
             // 每秒一次求值不心疼（就是日期的三角函数），换来"切主题立刻生效"。
-            laneGuideView.nightMode = com.motohud.ble.amap.AmapMapConfig.resolveDark(aMap)
             laneGuideView.setGuide(lane)
             // 无障碍：把"左/直/右"逐车道念出来，读屏和车机文字兜底都靠它
             laneGuideView.contentDescription = (0 until lane.count)
@@ -3352,6 +3450,17 @@ class GuidanceActivity : AppCompatActivity() {
         // 不重算的后果：竖屏启动、转横屏后 native 仍按竖屏缓冲区出图（实测 302x1257），
         // 图会被压成一条竖条，看起来像"放大图又坏了"。
         applyCrossImageSize()
+
+        /*
+         * 状态栏图标深浅必须**放在最后，而且要推迟一帧**。
+         *
+         * 上面这一堆 layoutParams 改动 + `requestApplyInsets()` 会让系统重算
+         * 一次 decor insets，重算时把 appearance 标记刷回主题默认值（基础主题是
+         * 深色 → 白图标）。放在开头设等于白设：真机复现是白天横屏深灰图标，
+         * 转竖屏立刻变纯白、压在浅色地图上，时钟基本看不见。
+         * post 到下一帧，等这轮重算结束再写。
+         */
+        window.decorView.post { applySystemBarAppearance() }
     }
 
     /**

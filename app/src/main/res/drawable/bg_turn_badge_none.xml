@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  转向图标"无底衬"（夜间主题用）。
+
+  为什么不用 `<item name="nvTurnBadgeBg">@null</item>`：
+  `@null` 在两个主题之间切换时表现不稳定 —— 实测同一份代码，夜间有的
+  图标垫了底、有的一会儿又没垫。改成一块**全透明的 shape**，语义一样
+  （看不见），但走的是正常的 drawable 解析路径，行为确定。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@android:color/transparent" />
+</shape>

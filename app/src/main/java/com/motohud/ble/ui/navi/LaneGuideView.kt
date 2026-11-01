@@ -10,7 +10,9 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
 import android.util.AttributeSet
+import android.util.TypedValue
 import android.view.View
+import androidx.core.content.ContextCompat
 import com.motohud.ble.R
 import com.motohud.ble.navi.Arrow
 import com.motohud.ble.navi.LaneGuide
@@ -55,58 +57,59 @@ class LaneGuideView @JvmOverloads constructor(
     /** 官方 action 图按需解码，一次一张，避免每帧 decode */
     private val arrowCache = HashMap<Int, Bitmap>()
 
-    /** 可走车道箭头色：官方原图是灰的，染成白色 = 高德那种"亮箭头 + 亮格子" */
-    var accentColor: Int = Color.WHITE
-        set(v) { field = v; invalidate() }
-
-    /** 不可走车道箭头色：半透明白，远看是"暗着的" */
-    var dimColor: Int = Color.parseColor("#59FFFFFF")
-        set(v) { field = v; invalidate() }
-
-    /** 格子底色（不可走 / 判定不出可用性时） */
-    var laneBgColor: Int = Color.parseColor("#1AFFFFFF")
-        set(v) { field = v; invalidate() }
-
-    /** 可走车道的格子底色：整格提亮，远看先分辨"哪几格是亮的" */
-    var laneBgActiveColor: Int = Color.parseColor("#33FFFFFF")
-        set(v) { field = v; invalidate() }
-
     /**
-     * 白天 / 夜间两套配色。
+     * 四个颜色全部从**主题属性**读（`nvLaneBg` / `nvLaneBgActive` /
+     * `nvLaneArrow` / `nvLaneArrowDim`），不再由调用方传 `nightMode`。
      *
-     * **白天就是一块交通指示牌**：车道箭头本来就该是"蓝底白箭头"——现实里的
-     * 车道指示牌（以及高德自己）都是这个配色，白天在强光下也最跳。夜间沿用
-     * 深色底的半透明白，才不刺眼。
+     * 为什么改：早先是 `laneGuideView.nightMode = resolveDark(aMap)`，跟地图同源
+     * 但仍然只有"深/浅"两档，而这个 View 的底色本该和它所在的那块面板一致
+     * （面板是玻璃白，格子却是半透明白，会糊在一起）。走主题之后它跟整页配色
+     * 天然一致，也不用再担心哪天忘了传。
      *
-     * 由调用方传 `AmapMapConfig.resolveDark(aMap)`（跟地图主题同源，跟随
-     * "自动/白天/夜间"设置），这样不会出现"地图是白天、车道牌是夜间"的错位。
+     * **白天就是一块交通指示牌**：蓝底白箭头 —— 现实里的车道指示牌就是这个配色
+     * （GB 5768 指示标志蓝 #1466CC），白天强光下最跳。夜间是深色底的半透明白。
      */
-    var nightMode: Boolean = true
-        set(v) {
-            if (field == v) return
-            field = v
-            applyPalette()
-            invalidate()
-        }
+    private var accentColor: Int = Color.WHITE
+    private var dimColor: Int = Color.parseColor("#59FFFFFF")
+    private var laneBgColor: Int = Color.parseColor("#1AFFFFFF")
+    private var laneBgActiveColor: Int = Color.parseColor("#33FFFFFF")
 
     init {
-        applyPalette()
+        readPalette()
     }
 
-    private fun applyPalette() {
-        if (nightMode) {
-            accentColor = Color.WHITE
-            dimColor = Color.parseColor("#59FFFFFF")
-            laneBgColor = Color.parseColor("#1AFFFFFF")
-            laneBgActiveColor = Color.parseColor("#33FFFFFF")
-        } else {
-            // 交通标志蓝：可走车道用饱和的亮蓝（#1466CC ≈ GB 5768 指示标志蓝），
-            // 不可走压成暗蓝，保证同一行里"哪几格亮"仍然一眼可辨
-            accentColor = Color.WHITE
-            dimColor = Color.parseColor("#99FFFFFF")
-            laneBgColor = Color.parseColor("#FF1B3F6B")
-            laneBgActiveColor = Color.parseColor("#FF1466CC")
+    /**
+     * 从当前 context 的主题取四个颜色。
+     *
+     * 用 `resolveAttribute` 而不是 `obtainStyledAttributes`：属性值可能指向
+     * 颜色资源（`@color/xxx`）也可能是内联色值，`resolveAttribute` + `data`
+     * 两条路都能覆盖。
+     */
+    private fun readPalette() {
+        accentColor = themeColor(R.attr.nvLaneArrow, Color.WHITE)
+        dimColor = themeColor(R.attr.nvLaneArrowDim, Color.parseColor("#59FFFFFF"))
+        laneBgColor = themeColor(R.attr.nvLaneBg, Color.parseColor("#1AFFFFFF"))
+        laneBgActiveColor = themeColor(R.attr.nvLaneBgActive, Color.parseColor("#33FFFFFF"))
+    }
+
+    private fun themeColor(attr: Int, fallback: Int): Int {
+        val tv = TypedValue()
+        if (!context.theme.resolveAttribute(attr, tv, true)) return fallback
+        return when {
+            tv.resourceId != 0 -> ContextCompat.getColor(context, tv.resourceId)
+            tv.type >= TypedValue.TYPE_FIRST_COLOR_INT &&
+                tv.type <= TypedValue.TYPE_LAST_COLOR_INT -> tv.data
+            else -> fallback
         }
+    }
+
+    /**
+     * 主题换了（Activity 重建 / 手动再套一层 theme）之后重新取色。
+     * 正常流程里不会用到 —— 日/夜是进页面时定的 —— 但留着不吃亏。
+     */
+    fun reloadPalette() {
+        readPalette()
+        invalidate()
     }
 
     fun setGuide(g: LaneGuide?) {

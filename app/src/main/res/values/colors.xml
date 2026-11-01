@@ -43,6 +43,81 @@
 
     <color name="text_on_accent">#FF1D1D1F</color>
 
+    <!--
+      ==================== 导航页 日 / 夜 双套配色 ====================
+
+      这些色值只经 attrs 的 nv* 属性被引用，不直接在布局里写死 ——
+      切换主题时改的是主题里的映射，布局一个字都不用动。
+
+      夜晚那套就是原来的深色玻璃风，一个色值都没改（零回归）。
+      白天那套的思路不是"把黑换成白"那么简单：
+        · 面板用 **97% 白**而不是纯白 —— 纯白在地图（本身就是浅灰）上会失去
+          "浮起来"的层次，97% 白配 8% 黑描边才有卡片的边界感；
+        · 橙色 accent 在纯白上对比度只有 2.4:1，30sp 大字勉强、12sp 小字就废了，
+          所以白天把橙**压深**到 #E07000（对比度约 3.4:1），仍是同一个色相；
+        · 警示橙同理压到 #D95300，红色用 #D70015（比夜间的 #FF453A 深一档）。
+      夜间：面板近黑半透明，白天：面板近白半透明。
+    -->
+
+    <!-- 夜间（= 现状，全局基础主题用这套） -->
+    <color name="nv_night_text_primary">#FFFFFFFF</color>
+    <color name="nv_night_text_secondary">#99EBEBF5</color>
+    <color name="nv_night_text_tertiary">#4DEBEBF5</color>
+    <color name="nv_night_accent">#FFFF9F0A</color>
+    <color name="nv_night_warn">#FFFF9F0A</color>
+    <color name="nv_night_danger">#FFFF453A</color>
+    <color name="nv_night_caution">#FFFFD60A</color>
+    <color name="nv_night_divider">#1FFFFFFF</color>
+    <color name="nv_night_panel">#F0141416</color>
+    <color name="nv_night_panel_stroke">#33FFFFFF</color>
+    <color name="nv_night_circle">#E6141416</color>
+    <color name="nv_night_circle_stroke">#40FFFFFF</color>
+    <color name="nv_night_cross_panel">#FF0B0B0D</color>
+    <color name="nv_night_bottom_card">#F21C1C1E</color>
+    <color name="nv_night_card">#E6202022</color>
+    <color name="nv_night_card_stroke">#1AFFFFFF</color>
+    <color name="nv_night_badge">#33FF9F0A</color>
+    <color name="nv_night_badge_stroke">#66FF9F0A</color>
+    <color name="nv_night_grabber">#40FFFFFF</color>
+    <color name="nv_night_scrim_from">#CC000000</color>
+    <color name="nv_night_scrim_to">#00000000</color>
+    <color name="nv_night_shade">#B3000000</color>
+    <color name="nv_night_lane_bg">#1AFFFFFF</color>
+    <color name="nv_night_lane_bg_active">#33FFFFFF</color>
+    <color name="nv_night_lane_arrow">#FFFFFFFF</color>
+    <color name="nv_night_lane_arrow_dim">#59FFFFFF</color>
+
+    <!-- 白天 -->
+    <color name="nv_day_text_primary">#FF16181C</color>
+    <color name="nv_day_text_secondary">#99000000</color>
+    <color name="nv_day_text_tertiary">#4D000000</color>
+    <color name="nv_day_accent">#FFE07000</color>
+    <color name="nv_day_warn">#FFD95300</color>
+    <color name="nv_day_danger">#FFD70015</color>
+    <color name="nv_day_caution">#FF9E6B00</color>
+    <color name="nv_day_divider">#1F000000</color>
+    <color name="nv_day_panel">#F7FFFFFF</color>
+    <color name="nv_day_panel_stroke">#14000000</color>
+    <color name="nv_day_circle">#FFFFFFFF</color>
+    <color name="nv_day_circle_stroke">#29000000</color>
+    <color name="nv_day_cross_panel">#FFFFFFFF</color>
+    <color name="nv_day_bottom_card">#F7FFFFFF</color>
+    <color name="nv_day_card">#F7FFFFFF</color>
+    <color name="nv_day_card_stroke">#1A000000</color>
+    <color name="nv_day_badge">#1AE07000</color>
+    <color name="nv_day_badge_stroke">#40E07000</color>
+    <color name="nv_day_grabber">#33000000</color>
+    <color name="nv_day_scrim_from">#99FFFFFF</color>
+    <color name="nv_day_scrim_to">#00FFFFFF</color>
+    <color name="nv_day_shade">#B3FFFFFF</color>
+    <color name="nv_day_lane_bg">#FF1B3F6B</color>
+    <color name="nv_day_lane_bg_active">#FF1466CC</color>
+    <color name="nv_day_lane_arrow">#FFFFFFFF</color>
+    <color name="nv_day_lane_arrow_dim">#99FFFFFF</color>
+
+    <!-- 交通标志蓝：转向图标底衬 / 车道牌同源 -->
+    <color name="sign_blue">#FF1466CC</color>
+
     <!-- 兼容旧引用 -->
     <color name="purple_200">#FFBB86FC</color>
     <color name="purple_500">#FFFF9F0A</color>

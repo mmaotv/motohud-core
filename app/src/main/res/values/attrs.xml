@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  导航页（以及后续全 App）的**日/夜双套配色**。
+
+  为什么走 attr 而不是直接 @color：
+  颜色要能"换一套"，而 Android 的资源解析发生在 inflate 那一刻。用主题属性
+  引用（`?attr/nvXxx`）之后，只要在 `setContentView` 之前 `setTheme(白天主题)`，
+  整个布局就会按白天的色值渲染出来 —— 不用为日/夜各维护一份 layout，也不用
+  在代码里逐个 View 改颜色（那种写法一定会漏，且下次改布局又得同步一遍）。
+
+  为什么不用 `values-night`：
+  本项目"日/夜"是用户设置（自动/白天/夜间），**不跟随系统 uiMode**。骑手可能
+  白天在户外把手机调成深色模式，也可能夜里想让界面保持浅色。用 values-night
+  会让这两件事绑死，而且改全局 night mode 会 recreate 所有 Activity。
+
+  基础主题 `Theme.MotoHeadUnit` 里这些 attr 全部落成**夜间值**，所以：
+    · 其它页面（地图选点、历史详情等）引用了同一套 drawable 时行为完全不变；
+    · 只有显式套上 `Theme.MotoHeadUnit.NaviDay` 的页面才会切成白天。
+-->
+<resources>
+
+    <!-- 文字三级 -->
+    <attr name="nvTextPrimary" format="reference|color" />
+    <attr name="nvTextSecondary" format="reference|color" />
+    <attr name="nvTextTertiary" format="reference|color" />
+
+    <!-- 语义色：主强调（橙）/ 警示（电子眼·施工）/ 危险（闯红灯·停止） -->
+    <attr name="nvAccent" format="reference|color" />
+    <attr name="nvWarn" format="reference|color" />
+    <attr name="nvDanger" format="reference|color" />
+    <!-- 电子眼第三档（占道类）：黄。白底上纯黄几乎不可见，白天要压成褐金 -->
+    <attr name="nvCaution" format="reference|color" />
+    <attr name="nvDivider" format="reference|color" />
+
+    <!-- 玻璃面板：转向卡 / 车道行 / 电子眼行 / 目的地卡 -->
+    <attr name="nvPanelColor" format="reference|color" />
+    <attr name="nvPanelStroke" format="reference|color" />
+
+    <!-- 圆形按钮（返回 / 语音 / 投屏 / 定位 / 全览） -->
+    <attr name="nvCircleColor" format="reference|color" />
+    <attr name="nvCircleStroke" format="reference|color" />
+
+    <!-- 路口放大图整块底板：必须完全不透明，盖住底下侧栏 -->
+    <attr name="nvCrossPanelColor" format="reference|color" />
+
+    <!-- 底部信息卡 / 到达卡玻璃 -->
+    <attr name="nvBottomCardColor" format="reference|color" />
+    <attr name="nvCardColor" format="reference|color" />
+    <attr name="nvCardStroke" format="reference|color" />
+
+    <!-- 模式徽章（摩托车 / 驾车） -->
+    <attr name="nvBadgeColor" format="reference|color" />
+    <attr name="nvBadgeStroke" format="reference|color" />
+
+    <!-- 折叠手柄 -->
+    <attr name="nvGrabberColor" format="reference|color" />
+
+    <!-- 顶部渐变 scrim：让状态栏在任意底图上可读 -->
+    <attr name="nvScrimFrom" format="reference|color" />
+    <attr name="nvScrimTo" format="reference|color" />
+
+    <!-- 全屏遮罩（规划中 / 已到达）：浅色主题下必须是白遮罩，否则深字配黑底看不见 -->
+    <attr name="nvShadeColor" format="reference|color" />
+
+    <!--
+      转向图标底衬。
+
+      高德官方转向图 `amap_navi_lbs_sou*` 是**白色粗箭头 + 灰色圆环**的双色图，
+      不能染色（染了就糊成一团）。所以白天不能直接摆在白面板上 —— 白箭头会消失。
+      做法是给它垫一块**交通标志蓝**的圆角底（和车道牌同一套蓝），
+      "蓝底白箭头"正是国标指示标志的配色，也正好是用户提出来的思路。
+
+      夜间该 attr 为 @null，图标照旧裸放在深色面板上。
+    -->
+    <attr name="nvTurnBadgeBg" format="reference" />
+
+    <!-- 车道牌调色板（LaneGuideView 从 theme 读，不再各自传 nightMode） -->
+    <attr name="nvLaneBg" format="reference|color" />
+    <attr name="nvLaneBgActive" format="reference|color" />
+    <attr name="nvLaneArrow" format="reference|color" />
+    <attr name="nvLaneArrowDim" format="reference|color" />
+
+</resources>

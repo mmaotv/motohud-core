@@ -160,12 +160,17 @@ object CameraKind {
      * 红灯色给测速（最需要立刻反应）、橙黄给信号灯、黄色给占道、灰白给通用违章。
      * 不用图标：横屏侧栏这一行只有一行字高，塞图标会把文字挤到省略。
      */
-    @androidx.annotation.ColorRes
-    fun colorRes(type: Int): Int = when (group(type)) {
-        G_SPEED -> com.motohud.ble.R.color.red
-        G_SIGNAL -> com.motohud.ble.R.color.orange
-        G_LANE -> com.motohud.ble.R.color.yellow
-        else -> com.motohud.ble.R.color.text_secondary
+    /**
+     * 返回的是**主题属性**而不是颜色资源，因为同一个角色在白天/夜间要用不同色值：
+     * 纯黄 `#FFD60A` 在白色面板上对比度只有 1.4:1，等于看不见；而夜里用深金
+     * `#9E6B00` 又糊进黑底。走 attr 之后，取色由调用方按当前主题解析。
+     */
+    @androidx.annotation.AttrRes
+    fun colorAttr(type: Int): Int = when (group(type)) {
+        G_SPEED -> com.motohud.ble.R.attr.nvDanger
+        G_SIGNAL -> com.motohud.ble.R.attr.nvWarn
+        G_LANE -> com.motohud.ble.R.attr.nvCaution
+        else -> com.motohud.ble.R.attr.nvTextSecondary
     }
 }
 

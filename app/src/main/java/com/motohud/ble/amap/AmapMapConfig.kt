@@ -83,6 +83,26 @@ object AmapMapConfig {
         }
     }.getOrDefault(false)
 
+    /**
+     * 同上，但坐标由调用方给。
+     *
+     * 场景：导航页必须在 `setContentView` **之前**决定套哪套主题（晚了布局已经
+     * 按旧主题 inflate 完，改不回来），而那时候地图还没建好、拿不到 cameraPosition。
+     * 传终点经纬度就够用 —— 一次导航的起终点必然在同一个时区/同一座城市，
+     * 日出日落差不出几分钟。
+     */
+    fun resolveDark(lat: Double, lng: Double): Boolean = runCatching {
+        when (NaviPrefs.mapTheme.value) {
+            NaviPrefs.THEME_DAY -> false
+            NaviPrefs.THEME_NIGHT -> true
+            else -> if (lat != 0.0 && lng != 0.0) {
+                DayNight.isNight(lat, lng)
+            } else {
+                DayNight.isNight(DEFAULT_LAT, DEFAULT_LNG)
+            }
+        }
+    }.getOrDefault(false)
+
     /** 没有地图中心时的兜底坐标：国内中部，日出日落时刻取到中位数 */
     private const val DEFAULT_LAT = 30.6
     private const val DEFAULT_LNG = 104.1

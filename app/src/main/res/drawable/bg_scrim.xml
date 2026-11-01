@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 空态遮罩 -->
+<!--
+  全屏遮罩（规划中 / 已到达）。
+
+  必须跟着主题走：深色主题下是黑遮罩配白字，浅色主题下若是黑遮罩，
+  其中的深色文字就直接看不见了。
+-->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="#B3000000" />
+    <solid android:color="?attr/nvShadeColor" />
 </shape>
