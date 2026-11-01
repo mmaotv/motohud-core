@@ -184,6 +184,11 @@
               转向图标放大到 88dp 并靠左：横屏侧栏只有 300dp 宽，原来 52dp 的图标
               在车机视角下（人眼到屏 40~60cm）几乎看不清是左转还是左前方。
               高德的导航卡也是"左边一个大箭头、右边一列文字"的结构。
+
+              图用的是**高德官方**的 `amap_navi_lbs_sou*`（白色粗箭头 + 灰环），
+              所以**不能加 tint**：加了会把灰环和箭头染成同一个颜色，环岛的
+              「环 + 出口箭头」两层结构就糊成一个色块了。官方原图在深色面板上
+              本来就是对的白字白图。
             -->
             <ImageView
                 android:id="@+id/iv_turn_icon"
@@ -191,8 +196,7 @@
                 android:layout_height="88dp"
                 android:contentDescription="@string/hud_turn_icon"
                 android:scaleType="fitCenter"
-                android:src="@drawable/ic_turn_straight"
-                app:tint="@color/accent" />
+                android:src="@drawable/amap_navi_lbs_sou9" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -1024,13 +1028,13 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
+            <!-- 大图卡头部的小转向图标：同样是官方 sou* 图，不加 tint（原因见转向卡） -->
             <ImageView
                 android:id="@+id/iv_cross_turn"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
                 android:contentDescription="@string/hud_turn_icon"
-                android:src="@drawable/ic_turn_straight"
-                app:tint="@color/accent" />
+                android:src="@drawable/amap_navi_lbs_sou9" />
 
             <TextView
                 android:id="@+id/tv_cross_distance"

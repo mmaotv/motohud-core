@@ -2853,7 +2853,8 @@ class GuidanceActivity : AppCompatActivity() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val action = RemoteAction(
-            Icon.createWithResource(this, R.drawable.ic_turn_arrive),
+            // 画中画"结束导航"的按钮图标：用官方"终点旗"（sou15），不再自绘
+            Icon.createWithResource(this, R.drawable.amap_navi_lbs_sou15),
             getString(R.string.guidance_stop),
             getString(R.string.guidance_stop),
             stopIntent
