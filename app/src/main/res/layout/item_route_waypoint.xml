@@ -1,62 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 途经点行：序号 + 名称 + 删除。点行改点、长按排序，见 RouteSelectActivity -->
+<!--
+  途经点胶囊：序号 + 名称 + 删除。
+
+  选路页改成全屏地图后，途经点行从"竖排列表"变成底部一条横向胶囊带，
+  一个点一个胶囊，加号跟在最后 —— 跟高德那排途经点是同一个意思。
+  点胶囊改点、长按排序，见 RouteSelectActivity。
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/wp_row"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_marginTop="6dp"
-    android:background="@drawable/bg_card"
+    android:layout_width="wrap_content"
+    android:layout_height="34dp"
+    android:layout_marginEnd="8dp"
+    android:background="@drawable/bg_chip"
     android:gravity="center_vertical"
+    android:maxWidth="200dp"
     android:orientation="horizontal"
-    android:paddingStart="14dp"
-    android:paddingTop="10dp"
-    android:paddingEnd="8dp"
-    android:paddingBottom="10dp">
+    android:paddingStart="7dp"
+    android:paddingEnd="4dp">
 
     <TextView
         android:id="@+id/wp_index"
-        android:layout_width="22dp"
-        android:layout_height="22dp"
-        android:background="@drawable/bg_chip"
-        android:gravity="center"
+        android:layout_width="18dp"
+        android:layout_height="18dp"
+        android:background="@drawable/bg_chip_selected"
         android:fontFamily="@font/inter"
-        android:textColor="?attr/mtAccent"
-        android:textSize="11sp" />
+        android:gravity="center"
+        android:textColor="?attr/mtTextOnAccent"
+        android:textSize="10sp"
+        android:textStyle="bold" />
 
-    <LinearLayout
-        android:layout_width="0dp"
+    <TextView
+        android:id="@+id/wp_name"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="10dp"
-        android:layout_weight="1"
-        android:orientation="vertical">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:fontFamily="@font/inter"
-            android:text="@string/route_waypoint"
-            android:textColor="?attr/mtTextTertiary"
-            android:textSize="10sp" />
-
-        <TextView
-            android:id="@+id/wp_name"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
-            android:ellipsize="end"
-            android:fontFamily="@font/inter"
-            android:maxLines="1"
-            android:textColor="?attr/mtTextPrimary"
-            android:textSize="14sp" />
-    </LinearLayout>
+        android:layout_marginStart="7dp"
+        android:ellipsize="end"
+        android:fontFamily="@font/inter"
+        android:maxLines="1"
+        android:textColor="?attr/mtTextPrimary"
+        android:textSize="13sp" />
 
     <ImageView
         android:id="@+id/wp_remove"
-        android:layout_width="36dp"
-        android:layout_height="36dp"
+        android:layout_width="26dp"
+        android:layout_height="26dp"
+        android:layout_marginStart="2dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="@string/route_waypoint_remove"
-        android:padding="9dp"
+        android:padding="7dp"
         android:src="@drawable/ic_close"
         android:tint="?attr/mtTextTertiary" />
 </LinearLayout>

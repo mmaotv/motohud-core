@@ -89,7 +89,10 @@ class PlaceSearchActivity : AppCompatActivity() {
     private var destLL: Pair<Double, Double>? = null
 
     // ---------- 顺路搜模式 ----------
+    /** 这一页有没有路线可参考（有 → 显示沿途分类行） */
     private var alongRoute = false
+    /** 当前这次搜索是否限制在路线走廊内（分类行最前面那个「沿途 / 全城」开关） */
+    private var routeScoped = false
     private var selectedType: RPType? = null
     private val allTypes = listOf(
         RPType.TypeGasStation,
@@ -134,6 +137,15 @@ class PlaceSearchActivity : AppCompatActivity() {
         if (sLat != 0.0 && sLng != 0.0) startLL = sLat to sLng
         if (dLat != 0.0 && dLng != 0.0) destLL = dLat to dLng
         alongRoute = intent.getBooleanExtra(EXTRA_ALONG, false)
+        /*
+         * `alongRoute` = 这一页**有路线可参考**（决定要不要显示沿途分类）；
+         * `routeScoped` = 当前这一次搜索**是否限制在路线走廊内**。
+         *
+         * 两者拆开是为了"选途经点"那个合并入口：用户从选路页点「途经点」进来，
+         * 既要能"顺路加个加油站"，也要能"加一个路线外的地点"。默认贴路线搜
+         * （从选路页进来的动机八成是顺路办事），点一下「全城」就放开范围。
+         */
+        routeScoped = alongRoute
         // 顺路搜模式给搜索框一个明确提示
         if (alongRoute) {
             et.hint = getString(R.string.place_search_along_title)
@@ -180,7 +192,7 @@ class PlaceSearchActivity : AppCompatActivity() {
                 searchJob?.cancel()
                 debounce?.cancel()
                 if (text.isBlank()) {
-                    if (!alongRoute) {
+                    if (!routeScoped) {
                         adapter.submitList(emptyList())
                         state.visibility = View.GONE
                     }
@@ -188,7 +200,7 @@ class PlaceSearchActivity : AppCompatActivity() {
                 }
                 debounce = scope.launch {
                     delay(450)
-                    if (alongRoute) runAlongRouteSearch(text.trim())
+                    if (routeScoped) runAlongRouteSearch(text.trim())
                     else runSearch(text.trim(), live = true)
                 }
             }
@@ -202,7 +214,7 @@ class PlaceSearchActivity : AppCompatActivity() {
                 if (t.isNotBlank()) {
                     searchJob?.cancel()
                     debounce?.cancel()
-                    if (alongRoute) runAlongRouteSearch(t) else runSearch(t, live = false)
+                    if (routeScoped) runAlongRouteSearch(t) else runSearch(t, live = false)
                 }
                 true
             } else false
@@ -269,6 +281,45 @@ class PlaceSearchActivity : AppCompatActivity() {
     // ---------- 类型筛选（顺路搜）----------
 
     private fun buildChips() {
+        catsRow.removeAllViews()
+
+        /*
+         * 范围开关（第一个 chip）：沿途 ↔ 全城。
+         *
+         * 合并入口之后，"顺路办事"和"加一个路线外的点"都从这一页进来，
+         * 差别只有搜索范围这一项。与其在上一页让用户先选模式，不如在这里
+         * 一个 chip 切换，还能随时来回换着搜。
+         */
+        val scope = TextView(this).apply {
+            textSize = 13f
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            setBackgroundResource(R.drawable.bg_chip)
+            setOnClickListener {
+                routeScoped = !routeScoped
+                renderScopeChip(this)
+                // 提示文字跟着范围走："沿途搜索" / "输入地点、公交站、加油站…"
+                et.hint = getString(
+                    if (routeScoped) R.string.place_search_along_title else R.string.place_search_hint
+                )
+                // 分类只在「沿途」范围下有意义，全城时收起来
+                for (i in 1 until catsRow.childCount) {
+                    catsRow.getChildAt(i).visibility =
+                        if (routeScoped) View.VISIBLE else View.GONE
+                }
+                val t = et.text?.toString().orEmpty().trim()
+                if (routeScoped) {
+                    runAlongRouteSearch(t)
+                } else {
+                    selectedType = null
+                    adapter.submitList(emptyList())
+                    state.visibility = View.GONE
+                    if (t.isNotBlank()) runSearch(t, live = false)
+                }
+            }
+        }
+        renderScopeChip(scope)
+        catsRow.addView(scope)
+
         val cats = listOf(
             getString(R.string.cat_all) to null as RPType?,
             "加油站" to RPType.TypeGasStation,
@@ -278,7 +329,6 @@ class PlaceSearchActivity : AppCompatActivity() {
             "服务区" to RPType.TypeServiceArea,
             "银行" to RPType.TypeATM
         )
-        catsRow.removeAllViews()
         cats.forEachIndexed { idx, (label, type) ->
             val chip = TextView(this).apply {
                 text = label
@@ -289,12 +339,39 @@ class PlaceSearchActivity : AppCompatActivity() {
                 applyChipState(this, selected)
                 setOnClickListener {
                     selectedType = type
-                    for (i in 0 until catsRow.childCount) applyChipState(catsRow.getChildAt(i) as TextView, i == idx)
+                    // 从 1 开始：0 号是「沿途 / 全城」范围 chip，不能被类型选中态覆盖
+                    for (i in 1 until catsRow.childCount) {
+                        applyChipState(catsRow.getChildAt(i) as TextView, i == idx + 1)
+                    }
                     runAlongRouteSearch(et.text?.toString().orEmpty().trim())
                 }
             }
             catsRow.addView(chip)
         }
+    }
+
+    /**
+     * 范围 chip：**实心橙 = 沿途**，描边橙字 = 全城。
+     *
+     * 不用 [applyChipState] 那套"淡底=选中、灰字=未选中"——
+     * 那是给类型筛选用的，套到范围上会让"全城"看着像禁用按钮。
+     * 也不走 backgroundTint（bg_chip 是半透明的，染完还是淡橙，白字压上去看不清），
+     * 直接换 `bg_chip_selected` 这张实心底的图。
+     */
+    private fun renderScopeChip(chip: TextView) {
+        chip.text = getString(
+            if (routeScoped) R.string.search_scope_along else R.string.search_scope_city
+        )
+        chip.setBackgroundResource(
+            if (routeScoped) R.drawable.bg_chip_selected else R.drawable.bg_chip
+        )
+        chip.setTextColor(
+            themeColor(
+                if (routeScoped) R.attr.mtTextOnAccent else R.attr.mtAccent,
+                android.graphics.Color.WHITE
+            )
+        )
+        chip.typeface = android.graphics.Typeface.DEFAULT_BOLD
     }
 
     private fun applyChipState(chip: TextView, selected: Boolean) {

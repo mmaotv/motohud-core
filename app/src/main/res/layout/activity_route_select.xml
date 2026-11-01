@@ -1,430 +1,365 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 路线选择页：先看方案，再进导航 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  路线选择页 = 一张完整的地图 + 两层浮层。
+
+  改造前是「上面一长串表单（起点 / 途经点 / 添加途经点 / 沿途搜索 / 目的地 /
+  偏好 / 避让区）+ 中间一个 220dp 的小地图 + 下面的方案列表」，要看方案得先
+  滚两屏，地图小得看不出绕不绕路。
+
+  现在地图铺满整屏，所有信息压成两层浮层：
+  · 顶部：返回 + 起点→终点（一眼看清"从哪到哪"）
+  · 底部：途经点胶囊 + 方案卡片（横向滑）+ 开始导航
+
+  「添加途经点」和「沿途搜索」合并成底部那一个 `rs_add_waypoint` 入口 ——
+  两者本来就都是"往路线里塞一个点"，分两个按钮只会让人犹豫点哪个。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="?attr/mtWindow"
-    android:orientation="vertical">
+    android:background="?attr/mtWindow">
 
-    <!-- 顶栏 -->
-    <LinearLayout
-        android:id="@+id/rs_top_bar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="12dp"
-        android:paddingTop="8dp"
-        android:paddingEnd="12dp"
-        android:paddingBottom="8dp">
-
-        <ImageView
-            android:id="@+id/rs_btn_back"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:background="@drawable/bg_navi_circle"
-            android:contentDescription="@string/cancel"
-            android:padding="11dp"
-            android:src="@drawable/ic_arrow_back"
-            android:tint="?attr/mtTextPrimary" />
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="10dp"
-            android:layout_weight="1"
-            android:fontFamily="@font/inter"
-            android:text="@string/route_select_title"
-            android:textColor="?attr/mtTextPrimary"
-            android:textSize="17sp"
-            android:textStyle="bold" />
-    </LinearLayout>
-
-    <!--
-      起点（可改）。
-
-      以前起点永远是"当前位置"，于是这一页只能做"从这里出发怎么走"。
-      但很多时候用户只是**查路线** —— 从公司到家多久、A 到 B 怎么走，
-      这时候必须能指定起点。
-    -->
-    <!--
-      可滚动区：起点 / 途经点 / 目的地 / 偏好 / 避让区 / 预览图 / 方案列表。
-
-      途经点最多 5 个，每行 72dp，全塞进固定高度会把方案列表压成 0 高
-      （方案一条都看不见，只剩个"开始导航"按钮）。所以整块改成可滚动，
-      底部按钮区仍然固定，保证随时能点开始。
-    -->
-    <androidx.core.widget.NestedScrollView
-        android:id="@+id/rs_scroll"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:clipToPadding="false"
-        android:fillViewport="true">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical">
-
-    <LinearLayout
-        android:id="@+id/rs_origin_row"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="4dp"
-        android:layout_marginEnd="16dp"
-        android:background="@drawable/bg_card"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="14dp"
-        android:paddingTop="12dp"
-        android:paddingEnd="12dp"
-        android:paddingBottom="12dp">
-
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="10dp"
-            android:layout_weight="1"
-            android:orientation="vertical">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:fontFamily="@font/inter"
-                android:text="@string/route_select_from"
-                android:textColor="?attr/mtTextTertiary"
-                android:textSize="11sp" />
-
-            <TextView
-                android:id="@+id/rs_origin_name"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:ellipsize="end"
-                android:fontFamily="@font/inter"
-                android:maxLines="1"
-                android:text="@string/origin_current"
-                android:textColor="?attr/mtTextPrimary"
-                android:textSize="14sp" />
-        </LinearLayout>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/origin_change"
-            android:textColor="?attr/mtAccent"
-            android:textSize="12sp" />
-    </LinearLayout>
-
-    <!--
-      途经点（必经）。
-
-      用户自己知道哪条路能过：把必经的路口/路段加进来，算路就会依次穿过它们。
-      只保证"经过这些点"，两点之间仍由高德选路 —— 真正要锁死中间段还得配合
-      避让区（见 AvoidZone）。所以下面还有一个「避让区」入口。
-    -->
-    <LinearLayout
-        android:id="@+id/rs_waypoint_box"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:orientation="vertical" />
-
-    <LinearLayout
-        android:id="@+id/rs_add_waypoint"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="6dp"
-        android:layout_marginEnd="16dp"
-        android:background="@drawable/bg_chip"
-        android:gravity="center_vertical"
-        android:minHeight="40dp"
-        android:orientation="horizontal"
-        android:paddingStart="14dp"
-        android:paddingTop="8dp"
-        android:paddingEnd="14dp"
-        android:paddingBottom="8dp">
-
-        <ImageView
-            android:layout_width="16dp"
-            android:layout_height="16dp"
-            android:contentDescription="@string/route_waypoint_add"
-            android:src="@drawable/ic_add"
-            android:tint="?attr/mtAccent" />
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_weight="1"
-            android:fontFamily="@font/inter"
-            android:text="@string/route_waypoint_add"
-            android:textColor="?attr/mtAccent"
-            android:textSize="13sp" />
-
-        <TextView
-            android:id="@+id/rs_waypoint_count"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:fontFamily="@font/inter"
-            android:textColor="?attr/mtTextTertiary"
-            android:textSize="11sp" />
-    </LinearLayout>
-
-    <!-- 沿途搜索：在去目的地的路上顺手办件事（加油 / 充电 / 餐饮…），选的点直接加为途经点 -->
-    <LinearLayout
-        android:id="@+id/rs_along_row"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="6dp"
-        android:layout_marginEnd="16dp"
-        android:background="@drawable/bg_chip"
-        android:gravity="center_vertical"
-        android:minHeight="40dp"
-        android:orientation="horizontal"
-        android:paddingStart="14dp"
-        android:paddingTop="8dp"
-        android:paddingEnd="14dp"
-        android:paddingBottom="8dp">
-
-        <ImageView
-            android:layout_width="16dp"
-            android:layout_height="16dp"
-            android:contentDescription="@string/route_along_search"
-            android:src="@drawable/ic_search"
-            android:tint="?attr/mtAccent" />
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_weight="1"
-            android:fontFamily="@font/inter"
-            android:text="@string/route_along_search"
-            android:textColor="?attr/mtAccent"
-            android:textSize="13sp" />
-    </LinearLayout>
-
-    <!-- 目的地 + 路线偏好入口 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="6dp"
-        android:layout_marginEnd="16dp"
-        android:background="@drawable/bg_card"
-        android:orientation="vertical"
-        android:padding="14dp">
-
-        <TextView
-            android:id="@+id/rs_dest_name"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:fontFamily="@font/inter"
-            android:maxLines="1"
-            android:textColor="?attr/mtTextPrimary"
-            android:textSize="16sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/rs_dest_sub"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="3dp"
-            android:ellipsize="end"
-            android:fontFamily="@font/inter"
-            android:maxLines="1"
-            android:textColor="?attr/mtTextTertiary"
-            android:textSize="12sp" />
-
-        <LinearLayout
-            android:id="@+id/rs_pref_row"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:fontFamily="@font/inter"
-                android:text="@string/route_prefs"
-                android:textColor="?attr/mtTextSecondary"
-                android:textSize="13sp" />
-
-            <TextView
-                android:id="@+id/rs_pref_value"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:background="@drawable/bg_chip"
-                android:ellipsize="end"
-                android:fontFamily="@font/inter"
-                android:maxLines="1"
-                android:paddingStart="10dp"
-                android:paddingTop="5dp"
-                android:paddingEnd="10dp"
-                android:paddingBottom="5dp"
-                android:textColor="?attr/mtAccent"
-                android:textSize="12sp" />
-        </LinearLayout>
-
-        <!--
-          避让区入口：圈出"这块地方我不能进"。
-
-          和途经点是互补关系 —— 途经点只管"必须经过哪"，管不到两点之间怎么走；
-          避让区才是把中间段锁死的那个。所以两个入口都给，用户按需用。
-        -->
-        <LinearLayout
-            android:id="@+id/rs_avoid_row"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:fontFamily="@font/inter"
-                android:text="@string/route_avoid_zones"
-                android:textColor="?attr/mtTextSecondary"
-                android:textSize="13sp" />
-
-            <TextView
-                android:id="@+id/rs_avoid_value"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:background="@drawable/bg_chip"
-                android:ellipsize="end"
-                android:fontFamily="@font/inter"
-                android:maxLines="1"
-                android:paddingStart="10dp"
-                android:paddingTop="5dp"
-                android:paddingEnd="10dp"
-                android:paddingBottom="5dp"
-                android:textColor="?attr/mtTextPrimary"
-                android:textSize="12sp" />
-        </LinearLayout>
-    </LinearLayout>
-
-    <!-- 路线预览图：多条方案同屏画出，颜色区分；
-         点列表任一条 → 该条加粗高亮 + 相机转到它。
-         纯列表看不出"绕不绕路"，地图是这一页最该有的东西。 -->
+    <!-- 地图容器：没 Key / 没同意隐私时整块隐藏，露出底色当兜底 -->
     <FrameLayout
+        android:id="@+id/rs_map_box"
         android:layout_width="match_parent"
-        android:layout_height="220dp"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="10dp"
-        android:layout_marginEnd="16dp"
-        android:background="@drawable/bg_card"
-        android:clipToOutline="true">
+        android:layout_height="match_parent">
 
         <com.amap.api.maps.MapView
             android:id="@+id/rs_map"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
-
-        <TextView
-            android:id="@+id/rs_map_hint"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom|start"
-            android:layout_margin="10dp"
-            android:background="@drawable/bg_navi_panel"
-            android:fontFamily="@font/inter"
-            android:paddingStart="8dp"
-            android:paddingTop="4dp"
-            android:paddingEnd="8dp"
-            android:paddingBottom="4dp"
-            android:text="@string/route_select_map_hint"
-            android:textColor="?attr/mtTextSecondary"
-            android:textSize="10sp"
-            android:visibility="gone" />
     </FrameLayout>
 
-    <TextView
+    <!-- 顶部：返回 + 起终点卡 -->
+    <LinearLayout
+        android:id="@+id/rs_top_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginStart="20dp"
-        android:layout_marginTop="12dp"
-        android:layout_marginBottom="8dp"
-        android:text="@string/route_select_pick"
-        android:textColor="?attr/mtTextTertiary"
-        android:textSize="12sp" />
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rs_list"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:clipToPadding="false"
-        android:nestedScrollingEnabled="false"
-        android:paddingBottom="12dp" />
-
-    </LinearLayout>
-    </androidx.core.widget.NestedScrollView>
-
-    <ProgressBar
-        android:id="@+id/rs_loading"
-        android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginBottom="12dp"
-        android:indeterminateTint="?attr/mtAccent"
-        android:visibility="gone" />
-
-    <TextView
-        android:id="@+id/rs_empty"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="24dp"
-        android:layout_marginEnd="24dp"
-        android:layout_marginBottom="16dp"
-        android:gravity="center"
-        android:text="@string/route_select_empty"
-        android:textColor="?attr/mtTextTertiary"
-        android:textSize="13sp"
-        android:visibility="gone" />
-
-    <!-- 次级操作：把目的地交给第三方地图 App -->
-    <TextView
-        android:id="@+id/rs_other_map"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="8dp"
-        android:background="@drawable/bg_chip"
-        android:gravity="center"
-        android:minHeight="44dp"
+        android:layout_gravity="top"
+        android:gravity="top"
+        android:orientation="horizontal"
         android:paddingStart="12dp"
-        android:paddingTop="10dp"
-        android:paddingEnd="12dp"
-        android:paddingBottom="10dp"
-        android:text="@string/route_select_other_map"
-        android:textColor="?attr/mtTextSecondary"
-        android:textSize="13sp" />
+        android:paddingTop="8dp"
+        android:paddingEnd="12dp">
 
-    <Button
-        android:id="@+id/rs_start"
-        style="@style/Widget.Moto.Button.Accent"
-        android:layout_width="match_parent"
-        android:layout_height="52dp"
+        <ImageView
+            android:id="@+id/rs_btn_back"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginTop="2dp"
+            android:background="@drawable/bg_navi_circle"
+            android:contentDescription="@string/cancel"
+            android:elevation="4dp"
+            android:padding="11dp"
+            android:src="@drawable/ic_arrow_back"
+            app:tint="?attr/mtTextPrimary" />
+
+        <LinearLayout
+            android:id="@+id/rs_endpoints_card"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_navi_panel"
+            android:elevation="4dp"
+            android:orientation="vertical"
+            android:paddingStart="14dp"
+            android:paddingTop="11dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="11dp">
+
+            <!-- 起点（可改） -->
+            <LinearLayout
+                android:id="@+id/rs_origin_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:minHeight="26dp"
+                android:orientation="horizontal">
+
+                <View
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/dot_green" />
+
+                <TextView
+                    android:id="@+id/rs_origin_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="9dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:fontFamily="@font/inter"
+                    android:maxLines="1"
+                    android:text="@string/origin_current"
+                    android:textColor="?attr/mtTextPrimary"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:fontFamily="@font/inter"
+                    android:text="@string/origin_change"
+                    android:textColor="?attr/mtAccent"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginStart="17dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp"
+                android:background="?attr/mtDivider" />
+
+            <!-- 终点 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <View
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/dot_orange" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="9dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/rs_dest_name"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:fontFamily="@font/inter"
+                        android:maxLines="1"
+                        android:textColor="?attr/mtTextPrimary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/rs_dest_sub"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:ellipsize="end"
+                        android:fontFamily="@font/inter"
+                        android:maxLines="1"
+                        android:textColor="?attr/mtTextTertiary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 地图上的操作提示（多方案时提示"点卡片切换"），位置由代码贴在顶部卡下方 -->
+    <TextView
+        android:id="@+id/rs_map_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start|top"
         android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="16dp"
-        android:text="@string/route_select_start"
-        android:textSize="16sp" />
-</LinearLayout>
+        android:background="@drawable/bg_navi_panel"
+        android:elevation="3dp"
+        android:fontFamily="@font/inter"
+        android:paddingStart="9dp"
+        android:paddingTop="5dp"
+        android:paddingEnd="9dp"
+        android:paddingBottom="5dp"
+        android:text="@string/route_select_map_hint"
+        android:textColor="?attr/mtTextSecondary"
+        android:textSize="11sp"
+        android:visibility="gone" />
+
+    <!--
+      底部面板：途经点 + 方案 + 开始导航。
+      面板贴底，上面留出地图 —— 方案换一条，地图立刻跟着高亮，不用再滚回去看。
+    -->
+    <LinearLayout
+        android:id="@+id/rs_panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@drawable/bg_navi_panel"
+        android:elevation="10dp"
+        android:orientation="vertical"
+        android:paddingTop="12dp"
+        android:paddingBottom="10dp">
+
+        <!-- 途经点胶囊行：左边是已加的点，右边是合并后的唯一入口 -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:id="@+id/rs_waypoint_box"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal" />
+
+                <!--
+                  合并入口：单击 = 搜索 / 沿途搜（同一个搜索页，分类与自由输入都在里面），
+                  长按 = 直接在地图上点位置。原先「添加途经点」「沿途搜索」两个并排按钮
+                  谁点哪个全靠猜，现在只有一个。
+                -->
+                <LinearLayout
+                    android:id="@+id/rs_add_waypoint"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:background="@drawable/bg_chip"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="11dp"
+                    android:paddingEnd="12dp">
+
+                    <ImageView
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:contentDescription="@string/route_waypoint_add_merged"
+                        android:src="@drawable/ic_add"
+                        app:tint="?attr/mtAccent" />
+
+                    <TextView
+                        android:id="@+id/rs_add_waypoint_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:fontFamily="@font/inter"
+                        android:text="@string/route_waypoint_add_merged"
+                        android:textColor="?attr/mtAccent"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/rs_waypoint_count"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:fontFamily="@font/inter"
+                        android:textColor="?attr/mtTextTertiary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- 方案卡片：横向滑，横向排才看得出"谁快谁慢" -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rs_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:clipToPadding="false"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:scrollbars="none" />
+
+        <ProgressBar
+            android:id="@+id/rs_loading"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="4dp"
+            android:indeterminateTint="?attr/mtAccent"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/rs_empty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="20dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginEnd="20dp"
+            android:gravity="center"
+            android:text="@string/route_select_empty"
+            android:textColor="?attr/mtTextTertiary"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <!-- 工具行：偏好 / 避让区 / 第三方地图，都收成小胶囊，不占纵向空间 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp">
+
+            <TextView
+                android:id="@+id/rs_pref_row"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip"
+                android:ellipsize="end"
+                android:fontFamily="@font/inter"
+                android:gravity="center"
+                android:maxLines="1"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:textColor="?attr/mtAccent"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/rs_avoid_row"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip"
+                android:ellipsize="end"
+                android:fontFamily="@font/inter"
+                android:gravity="center"
+                android:maxLines="1"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:textColor="?attr/mtTextSecondary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/rs_other_map"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:fontFamily="@font/inter"
+                android:gravity="center"
+                android:maxLines="1"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="@string/route_select_other_map"
+                android:textColor="?attr/mtTextSecondary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/rs_start"
+            style="@style/Widget.Moto.Button.Accent"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:layout_marginStart="14dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginEnd="14dp"
+            android:text="@string/route_select_start"
+            android:textSize="16sp" />
+    </LinearLayout>
+</FrameLayout>

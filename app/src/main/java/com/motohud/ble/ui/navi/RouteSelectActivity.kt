@@ -3,10 +3,13 @@ package com.motohud.ble.ui.navi
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
@@ -86,7 +89,19 @@ class RouteSelectActivity : AppCompatActivity() {
     /** 正在为哪个目标选点：-1 = 起点，>=0 = 途经点下标 */
     private var pickingForWaypoint = -1
 
+    /** 长按「途经点」直接地图选点：选完才落位，取消不留空胶囊 */
+    private var pickingNewWaypoint = false
+
     private val mapPickLauncher = registerMapPick { lat, lng ->
+        /*
+         * 长按「途经点」进来的：这时候还没有那一行（取消选点不该留个空胶囊），
+         * 所以走 append 而不是 setWaypoint。
+         */
+        if (pickingNewWaypoint) {
+            pickingNewWaypoint = false
+            appendWaypoint(getString(R.string.waypoint_map_pick), lat, lng)
+            return@registerMapPick
+        }
         val target = pickingForWaypoint
         pickingForWaypoint = -1
         if (target >= 0) {
@@ -112,7 +127,12 @@ class RouteSelectActivity : AppCompatActivity() {
         else setOrigin(name, lat, lng)
     }
 
-    /** 沿路线搜索：选出的 POI 直接**追加**为一个新途经点（顺路办件事） */
+    /**
+     * 途经点搜索（合并入口那一单击）：选出的 POI **追加**为一个新途经点。
+     *
+     * 顺路搜和普通搜在这里合流 —— 搜索页内部会同时给出"沿途分类"和自由输入，
+     * 选哪个最后都是往路线里加一个点，所以回到本页只需要一条处理路径。
+     */
     private val alongRouteLauncher = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
     ) { r ->
@@ -122,17 +142,7 @@ class RouteSelectActivity : AppCompatActivity() {
         val lat = r.data?.getDoubleExtra(PlaceSearchActivity.EXTRA_LAT, 0.0) ?: 0.0
         val lng = r.data?.getDoubleExtra(PlaceSearchActivity.EXTRA_LNG, 0.0) ?: 0.0
         if (lat == 0.0 && lng == 0.0) return@registerForActivityResult
-        if (waypoints.size >= RouteQueryOptions.MAX_WAYPOINTS) {
-            Toast.makeText(
-                this,
-                getString(R.string.route_waypoint_limit, RouteQueryOptions.MAX_WAYPOINTS),
-                Toast.LENGTH_SHORT
-            ).show()
-            return@registerForActivityResult
-        }
-        waypoints += Waypoint(name, lat, lng)
-        renderWaypoints()
-        plan()
+        appendWaypoint(name, lat, lng)
     }
 
     // ---------- 路线预览图 ----------
@@ -184,7 +194,7 @@ class RouteSelectActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.rs_dest_name).text = destName
         findViewById<TextView>(R.id.rs_dest_sub).text = CoordConverter.formatLatLng(destLat, destLng)
 
-        prefValue = findViewById(R.id.rs_pref_value)
+        prefValue = findViewById(R.id.rs_pref_row)
         renderPref()
 
         list = findViewById(R.id.rs_list)
@@ -201,7 +211,11 @@ class RouteSelectActivity : AppCompatActivity() {
                 prefetchSpeech()
             }
         )
-        list.layoutManager = LinearLayoutManager(this)
+        /*
+         * 方案列表横向排（方案是"并排比大小"，竖排一屏只看得到一条）。
+         * 横屏且面板挪到右侧时改回竖排 —— 由 applyLayout() 统一处理。
+         */
+        list.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         list.adapter = adapter
 
         originName = getString(R.string.origin_current)
@@ -223,17 +237,70 @@ class RouteSelectActivity : AppCompatActivity() {
             true
         }
         findViewById<View>(R.id.rs_other_map).setOnClickListener { showThirdPartyMaps() }
-        findViewById<View>(R.id.rs_add_waypoint).setOnClickListener { addWaypoint() }
-        findViewById<View>(R.id.rs_along_row).setOnClickListener { openAlongRouteSearch() }
         findViewById<View>(R.id.rs_avoid_row).setOnClickListener {
             startActivity(Intent(this, AvoidZoneActivity::class.java))
+        }
+
+        /*
+         * 合并后的**唯一**途经点入口。
+         *
+         * 原先「添加途经点」和「沿途搜索」是两个并排按钮，点进去还要再选一次
+         * 「搜索 / 地图选点」——同一个动作被拆成三层。现在：
+         * · 单击 → 搜索页（沿途分类 + 自由搜索都在里面，选中即追加为途经点）
+         * · 长按 → 直接在地图上点位置（少数情况：用户知道那个路口在哪）
+         */
+        findViewById<View>(R.id.rs_add_waypoint).setOnClickListener { pickWaypointBySearch() }
+        findViewById<View>(R.id.rs_add_waypoint).setOnLongClickListener {
+            pickWaypointOnMap()
+            true
         }
 
         renderWaypoints()
         renderAvoidZones()
 
         setupMap(savedInstanceState)
+        applyLayout()
         ensureLocationPermissionThenPlan()
+    }
+
+    /**
+     * 选路页是"一张全屏地图 + 两层浮层"，横竖屏只调面板的位置和列表方向，
+     * 不重建页面（重建会丢已算好的方案和地图视野）。
+     *
+     * 竖屏：面板贴底通栏，方案横向滑 —— 手机上一屏能横着比 2~3 条。
+     * 横屏：面板收窄贴右下，方案改竖排 —— 车机高只有 360dp，通栏贴底会把地图压没。
+     */
+    private fun applyLayout() {
+        val land = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val panel = findViewById<View>(R.id.rs_panel)
+        val lp = panel.layoutParams as FrameLayout.LayoutParams
+        if (land) {
+            lp.width = dp(300)
+            lp.gravity = Gravity.END or Gravity.BOTTOM
+            lp.marginEnd = dp(10)
+            lp.bottomMargin = dp(10)
+            list.layoutManager = LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false)
+            adapter.horizontal = false
+        } else {
+            lp.width = FrameLayout.LayoutParams.MATCH_PARENT
+            lp.gravity = Gravity.BOTTOM
+            lp.marginEnd = 0
+            lp.bottomMargin = 0
+            list.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+            adapter.horizontal = true
+        }
+        panel.layoutParams = lp
+        // 方向换了卡片尺寸也得跟着换（横向 188dp / 竖向撑满）
+        adapter.notifyDataSetChanged()
+
+        // 地图提示贴在顶部卡下方：insets 是在 topBar 上异步算出来的，
+        // 这里等它落定再取 bottom，否则拿到的是加 insets 之前的位置
+        val hint = findViewById<View>(R.id.rs_map_hint)
+        hint.post {
+            val hp = hint.layoutParams as FrameLayout.LayoutParams
+            hp.topMargin = findViewById<View>(R.id.rs_top_bar).bottom + dp(6)
+            hint.layoutParams = hp
+        }
     }
 
     // ---------- 路线预览图 ----------
@@ -322,8 +389,16 @@ class RouteSelectActivity : AppCompatActivity() {
             runCatching {
                 val builder = com.amap.api.maps.model.LatLngBounds.Builder()
                 target.forEach { builder.include(it) }
+                /*
+                 * 四边给足内边距，让整条路线缩进顶部卡与底部面板之间的空档。
+                 *
+                 * 试过 `newLatLngBounds(bounds, w, h, padding)` 按可视区适配再 scrollBy
+                 * 微调，结果相机直接飞到北京 —— 两次 animateCamera 连发会互相打断，
+                 * 后一次把前一次的动画取消在中间态。宁可多留白，也不要用这种时序技巧。
+                 */
                 map.animateCamera(
-                    com.amap.api.maps.CameraUpdateFactory.newLatLngBounds(builder.build(), dp(48))
+                    com.amap.api.maps.CameraUpdateFactory
+                        .newLatLngBounds(builder.build(), dp(110))
                 )
             }
         }
@@ -384,7 +459,8 @@ class RouteSelectActivity : AppCompatActivity() {
     }
 
     private fun renderPref() {
-        prefValue.text = NaviPrefs.summary()
+        // 胶囊里只有一行字，"偏好 · 速度最快" 比单写"速度最快"更能说明这个可以点
+        prefValue.text = getString(R.string.route_pref_chip, NaviPrefs.summary())
     }
 
     // ---------- 起点 ----------
@@ -395,24 +471,62 @@ class RouteSelectActivity : AppCompatActivity() {
 
     // ---------- 途经点 ----------
 
-    /**
-     * 添加一个途经点：先插一个「点击选择」的空位，再立刻弹选点面板。
+    /*
+     * 合并后的唯一途经点入口（见 onCreate 的按钮绑定）。
      *
-     * 先加行再选点（而不是选完再加）是为了让用户看到"点加了几个了"——
-     * 上限提示才有落点，也随时能取消这一条。
+     * 原先这里有两个并列按钮：「添加途经点（必经）」和「沿途搜索（顺路加站）」，
+     * 而且「添加途经点」点开还要再选一次"搜索 / 地图选点"——同一个目标（往路线里
+     * 加一个点）被拆成两三个入口，用户每次都得先想"我这个情况该点哪个"。
+     *
+     * 现在只剩一个：「途经点」。
+     * · 单击 → 搜索页。那一页同时有"沿途分类"（加油/充电/餐饮…）和自由输入，
+     *   沿途搜和普通搜本来就是同一件事的两种取法，没必要在上一页就逼用户选。
+     * · 长按 → 地图选点。少数情况：用户知道那个路口在哪，直接戳地图更快。
      */
-    private fun addWaypoint() {
-        if (waypoints.size >= RouteQueryOptions.MAX_WAYPOINTS) {
-            Toast.makeText(
+
+    /** 单击：进搜索页选点（沿途分类 + 自由搜索都在里面） */
+    private fun pickWaypointBySearch() {
+        if (!checkWaypointCapacity()) return
+        alongRouteLauncher.launch(
+            PlaceSearchActivity.intent(
                 this,
-                getString(R.string.route_waypoint_limit, RouteQueryOptions.MAX_WAYPOINTS),
-                Toast.LENGTH_SHORT
-            ).show()
-            return
-        }
-        waypoints += Waypoint(getString(R.string.route_waypoint_empty), 0.0, 0.0)
+                getString(R.string.route_waypoint_pick_title),
+                startLat, startLng,
+                // 把当前路线几何传过去：搜索页据此画路线背景、并支持沿走廊召回
+                routeLatLng = routePolylineArray(),
+                startLat = startLat, startLng = startLng,
+                destLat = destLat, destLng = destLng,
+                alongRoute = true
+            )
+        )
+    }
+
+    /** 长按：直接在地图上点位置 */
+    private fun pickWaypointOnMap() {
+        if (!checkWaypointCapacity()) return
+        pickingNewWaypoint = true
+        // 没选过点时坐标是 0，直接传 0 会让选点页停在高德默认城市（北京）。
+        // 退到当前位置 / 上次地图位置，至少让用户落在自己所在的城市。
+        val base = currentFix() ?: NaviPrefs.mapCamera()?.let { it.lat to it.lng }
+        mapPickLauncher.launch(MapPickActivity.intent(this, base?.first ?: 0.0, base?.second ?: 0.0))
+    }
+
+    private fun checkWaypointCapacity(): Boolean {
+        if (waypoints.size < RouteQueryOptions.MAX_WAYPOINTS) return true
+        Toast.makeText(
+            this,
+            getString(R.string.route_waypoint_limit, RouteQueryOptions.MAX_WAYPOINTS),
+            Toast.LENGTH_SHORT
+        ).show()
+        return false
+    }
+
+    /** 追加一个途经点并重算 —— 上限检查在调用方做，这里只管落位 */
+    private fun appendWaypoint(name: String, lat: Double, lng: Double) {
+        if (waypoints.size >= RouteQueryOptions.MAX_WAYPOINTS) return
+        waypoints += Waypoint(name, lat, lng)
         renderWaypoints()
-        showWaypointPicker(waypoints.lastIndex)
+        plan()
     }
 
     private fun showWaypointPicker(index: Int) {
@@ -464,38 +578,6 @@ class RouteSelectActivity : AppCompatActivity() {
         waypoints[index] = Waypoint(name, lat, lng)
         renderWaypoints()
         plan()
-    }
-
-    /**
-     * 沿路线搜索（顺路搜）入口：把当前已算出的路线折线降采样后传给搜索页，
-     * 搜索页在背景地图上画路线，并用 [com.motohud.ble.amap.AmapRepo.routePoiSearch]
-     * 沿路线走廊召回 POI。选中的点作为新途经点追加，实现"顺路办件事"。
-     */
-    private fun openAlongRouteSearch() {
-        val poly = routePolylineArray()
-        if (poly == null) {
-            Toast.makeText(this, R.string.route_along_no_route, Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (waypoints.size >= RouteQueryOptions.MAX_WAYPOINTS) {
-            Toast.makeText(
-                this,
-                getString(R.string.route_waypoint_limit, RouteQueryOptions.MAX_WAYPOINTS),
-                Toast.LENGTH_SHORT
-            ).show()
-            return
-        }
-        alongRouteLauncher.launch(
-            PlaceSearchActivity.intent(
-                this,
-                getString(R.string.place_search_along_title),
-                startLat, startLng,
-                routeLatLng = poly,
-                startLat = startLat, startLng = startLng,
-                destLat = destLat, destLng = destLng,
-                alongRoute = true
-            )
-        )
     }
 
     /**
@@ -584,11 +666,12 @@ class RouteSelectActivity : AppCompatActivity() {
     private fun renderAvoidZones() {
         lifecycleScope.launch {
             val zones = AvoidZoneStore.enabled(this@RouteSelectActivity)
-            val tv = findViewById<TextView>(R.id.rs_avoid_value)
+            val tv = findViewById<TextView>(R.id.rs_avoid_row)
+            // 胶囊宽度只有半行，只报数量；具体哪几个区在点进去的页面里看
             tv.text = if (zones.isEmpty()) {
-                getString(R.string.route_avoid_none)
+                getString(R.string.route_avoid_chip)
             } else {
-                getString(R.string.route_avoid_count, zones.size, zones.take(2).joinToString("、") { it.name })
+                getString(R.string.route_avoid_chip_count, zones.size)
             }
         }
     }
@@ -851,11 +934,14 @@ class RouteSelectActivity : AppCompatActivity() {
      * 上半部分（起点 / 途经点 / 目的地 / 预览图）内容多时可以滚动，
      * 算完路线如果不滚一下，用户看到的是"为你找到以下方案"却看不到方案。
      */
+    /**
+     * 方案算完把列表滚到第一条 —— 以前是整页滚动（NestedScrollView 时代），
+     * 现在方案列表是独立的一条，滚它自己就行。
+     */
     private fun revealRouteList() {
-        val sv = findViewById<androidx.core.widget.NestedScrollView>(R.id.rs_scroll)
-        sv.post {
-            val need = list.bottom - sv.height
-            if (need > sv.scrollY) sv.smoothScrollTo(0, need)
+        if (routes.isEmpty()) return
+        list.post {
+            (list.layoutManager as? LinearLayoutManager)?.scrollToPosition(0)
         }
     }
 
@@ -940,6 +1026,14 @@ private class RouteOptionAdapter(
 
     private var data: List<RouteData> = emptyList()
     private var selected = 0
+
+    /**
+     * 列表方向。由宿主在 [RouteSelectActivity.applyLayout] 里设置 ——
+     * 不能在 onBindViewHolder 里读 `itemView.parent`，那时 ViewHolder 还没挂到
+     * RecyclerView 上，parent 是 null，会一律当成竖排撑满宽度（真机就是这么发现的：
+     * 只有一条方案时卡片横着铺满整行）。
+     */
+    var horizontal = true
 
     /** 每条方案的角标文案，见 [buildBadges] */
     private var badges: List<String> = emptyList()
@@ -1034,9 +1128,18 @@ private class RouteOptionAdapter(
             if (position == selected) R.drawable.bg_card_selected else R.drawable.bg_card
         )
         holder.root.setOnClickListener { onClick(position) }
-        // 间距：卡片之间留 8dp
+
+        /*
+         * 卡片尺寸跟着列表方向走：
+         * 横向条（竖屏底部）→ 固定 188dp 宽、右边留 8dp，一屏能并排 2~3 条；
+         * 竖向列（横屏右栏）→ 撑满栏宽、下边留 8dp。
+         * 布局里写的 188dp 只是"横向"时的初值，这里会覆盖掉。
+         */
+        val d = ctx.resources.displayMetrics.density
         (holder.root.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
-            lp.bottomMargin = (8 * ctx.resources.displayMetrics.density).toInt()
+            lp.width = if (horizontal) (188 * d).toInt() else ViewGroup.LayoutParams.MATCH_PARENT
+            lp.marginEnd = if (horizontal) (8 * d).toInt() else 0
+            lp.bottomMargin = if (horizontal) 0 else (8 * d).toInt()
             holder.root.layoutParams = lp
         }
     }

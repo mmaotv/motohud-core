@@ -657,6 +657,9 @@
     <string name="place_search_along_title">沿途搜索</string>
     <string name="place_search_along_no_route">尚未规划出路线，无法沿路线搜索</string>
     <string name="cat_all">全部</string>
+    <!-- 搜索范围开关：沿途 = 只在路线走廊内召回；全城 = 不限范围 -->
+    <string name="search_scope_along">沿途</string>
+    <string name="search_scope_city">全城</string>
     <string name="route_along_search">沿途搜索（顺路加站）</string>
     <string name="route_along_no_route">请先规划出路线，再顺路搜索</string>
 
@@ -667,6 +670,11 @@
     <!-- 自定义路线：途经点 + 避让区 -->
     <string name="route_waypoint">途经点</string>
     <string name="route_waypoint_add">添加途经点（必经）</string>
+    <!-- 合并后的唯一入口：一个按钮既搜地点也顺路搜（长按 = 地图选点） -->
+    <string name="route_waypoint_add_merged">途经点</string>
+    <string name="route_pref_chip">偏好 · %1$s</string>
+    <string name="route_avoid_chip">避让区</string>
+    <string name="route_avoid_chip_count">避开 %1$d 区</string>
     <string name="route_waypoint_pick_title">选择途经点</string>
     <string name="route_waypoint_map_pick_sub">拖动地图，把途经点对准屏幕中心</string>
     <string name="route_waypoint_remove">删除途经点</string>

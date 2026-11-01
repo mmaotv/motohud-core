@@ -1,79 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  候选路线卡片（对齐高德选路页的排版）：
-  左边一列是"多久 / 多远"——决定选哪条的唯一依据，字号最大；
-  右边一列是方案标签与路况细节，字号小、颜色浅，不抢视线。
-  高德选路页就是这么排的：时间在最左，纵向扫一眼就能比大小。
+  候选路线卡片（横向排布，一张卡一条方案）。
+
+  改造前是整行铺满（时间在左、细节在右），因为列表是竖着排的。
+  现在方案列表改成地图底部的横向滑动条，卡片必须自带固定宽度，
+  否则一张卡就占满一屏、还看不出有第二条。
+
+  信息层级不变：**多久**最大（选哪条就看这个），距离次之，细节最轻。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
+    android:layout_width="188dp"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_card"
-    android:orientation="horizontal"
-    android:paddingStart="14dp"
-    android:paddingTop="12dp"
-    android:paddingEnd="14dp"
-    android:paddingBottom="12dp">
+    android:minHeight="86dp"
+    android:orientation="vertical"
+    android:paddingStart="13dp"
+    android:paddingTop="10dp"
+    android:paddingEnd="13dp"
+    android:paddingBottom="10dp">
 
-    <LinearLayout
-        android:layout_width="0dp"
+    <TextView
+        android:id="@+id/tv_route_label"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:background="@drawable/bg_mode_badge"
+        android:ellipsize="end"
+        android:fontFamily="@font/inter"
+        android:maxLines="1"
+        android:paddingStart="7dp"
+        android:paddingTop="2dp"
+        android:paddingEnd="7dp"
+        android:paddingBottom="2dp"
+        android:textColor="?attr/mtAccent"
+        android:textSize="10sp"
+        android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/tv_route_eta"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:fontFamily="@font/inter"
-            android:maxLines="1"
-            android:textColor="?attr/mtTextPrimary"
-            android:textSize="24sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/tv_route_distance"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:fontFamily="@font/inter"
-            android:maxLines="1"
-            android:textColor="?attr/mtTextSecondary"
-            android:textSize="12sp" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="0dp"
+    <TextView
+        android:id="@+id/tv_route_eta"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="center_vertical"
-        android:layout_weight="1.25"
-        android:gravity="end"
-        android:orientation="vertical">
+        android:layout_marginTop="5dp"
+        android:fontFamily="@font/inter"
+        android:maxLines="1"
+        android:textColor="?attr/mtTextPrimary"
+        android:textSize="21sp"
+        android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/tv_route_label"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_mode_badge"
-            android:fontFamily="@font/inter"
-            android:paddingStart="7dp"
-            android:paddingTop="2dp"
-            android:paddingEnd="7dp"
-            android:paddingBottom="2dp"
-            android:textColor="?attr/mtAccent"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+    <TextView
+        android:id="@+id/tv_route_distance"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="1dp"
+        android:fontFamily="@font/inter"
+        android:maxLines="1"
+        android:textColor="?attr/mtTextSecondary"
+        android:textSize="12sp" />
 
-        <TextView
-            android:id="@+id/tv_route_detail"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:ellipsize="end"
-            android:fontFamily="@font/inter"
-            android:gravity="end"
-            android:maxLines="2"
-            android:textColor="?attr/mtTextTertiary"
-            android:textSize="12sp" />
-    </LinearLayout>
+    <TextView
+        android:id="@+id/tv_route_detail"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="3dp"
+        android:ellipsize="end"
+        android:fontFamily="@font/inter"
+        android:maxLines="1"
+        android:textColor="?attr/mtTextTertiary"
+        android:textSize="11sp" />
 </LinearLayout>
