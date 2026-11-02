@@ -332,6 +332,11 @@ class GuidanceActivity : AppCompatActivity() {
     /** 当前是否横屏：镜头缩放/俯角/前移都要跟着变，横屏和竖屏必须有区别 */
     private var landscapeNow = false
 
+    /** 上次 applyOrientationLayout 在横屏下采用的侧栏方向，用于设置改完后 onResume 重排 */
+    private var landAppliedSide = NaviPrefs.LAND_SIDE_RIGHT
+    /** 上次 initVoice 采用的引擎开关值，用于设置改完后 onResume 重建播报器 */
+    private var voiceEngineApplied = true
+
     /**
      * 本页用的是哪套配色（由 onCreate 在 inflate 之前定下，见那里的注释）。
      * 地图的 mapType 另由 [AmapMapConfig.applyDisplay] 按同一个
@@ -3057,12 +3062,14 @@ class GuidanceActivity : AppCompatActivity() {
         presetSpeaker = voice as? com.motohud.ble.navi.PresetPackSpeaker
         // 用内置语音包时"路名不念"必须讲一次，否则用户以为功能坏了；
         // 但每次进导航都弹就是骚扰，所以只提示一次。
-        if (NaviPrefs.voice.value && !TtsModelStore.isInstalled(this) &&
-            !NaviPrefs.packHintShown()
+        if (NaviPrefs.voice.value && NaviPrefs.voiceEngine.value &&
+            !TtsModelStore.isInstalled(this) && !NaviPrefs.packHintShown()
         ) {
             NaviPrefs.markPackHintShown()
             Toast.makeText(this, R.string.guidance_voice_no_model, Toast.LENGTH_LONG).show()
         }
+        // 记录本次实际采用的引擎开关，供 onResume 判断是否需要重建
+        voiceEngineApplied = NaviPrefs.voiceEngine.value
     }
 
     /**
@@ -3227,6 +3234,17 @@ class GuidanceActivity : AppCompatActivity() {
         applyScreenPrefs()
         // 设置面板里可能刚改过语音开关，回前台时同步按钮状态
         updateVoiceButton()
+        // 设置里可能刚改过：引擎开关 → 重建播报器；横屏侧栏方向 → 重排布局。
+        // 导航页在设置面板下方，改完关掉面板回到这里时由 onResume 兜底生效。
+        if (NaviPrefs.voiceEngine.value != voiceEngineApplied) {
+            voiceEngineApplied = NaviPrefs.voiceEngine.value
+            runCatching { voice?.release() }
+            initVoice()
+        }
+        if (landscapeNow && NaviPrefs.landSide.value != landAppliedSide) {
+            landAppliedSide = NaviPrefs.landSide.value
+            applyOrientationLayout(true)
+        }
         // 导航可能是在通知栏 / 画中画里被"结束导航"停掉的：那边只停了引擎，
         // 本页的 stopped 不会跟着变，回到这里还会显示"导航中"，用户以为没停掉。
         if (!stopped && !engine.state.value.running && started) {
@@ -3290,6 +3308,10 @@ class GuidanceActivity : AppCompatActivity() {
 
     private fun applyOrientationLayout(landscape: Boolean) {
         landscapeNow = landscape
+        // 横屏侧栏方向：读设置，关=靠右（默认），开=靠左（整条侧栏与按钮镜像到另一侧）
+        val sideLeft = landscape &&
+            NaviPrefs.landSide.value == NaviPrefs.LAND_SIDE_LEFT
+        if (landscape) landAppliedSide = NaviPrefs.landSide.value
         val dm = resources.displayMetrics
         fun dp(v: Int): Int = (v * dm.density).toInt()
 
@@ -3305,13 +3327,15 @@ class GuidanceActivity : AppCompatActivity() {
         // 左上角只承担「退出」这一个动作，不会被误触到别的控件。
         (topBar.layoutParams as FrameLayout.LayoutParams).apply {
             width = if (landscape) dp(DP_PANEL_LAND) else ViewGroup.LayoutParams.MATCH_PARENT
-            gravity = if (landscape) Gravity.TOP or Gravity.END else Gravity.TOP
+            gravity = if (landscape)
+                (if (sideLeft) Gravity.TOP or Gravity.START else Gravity.TOP or Gravity.END)
+            else Gravity.TOP
             topBar.layoutParams = this
         }
         // 顶栏第一行横屏只剩「画中画」（且已 GONE），目的地卡也隐藏 ——
         // 整行塌陷，转向横幅因此顶到栏顶，把原来被两个 44dp 圆钮占掉的 52dp 全数拿回来。
         findViewById<LinearLayout>(R.id.top_row).gravity = if (landscape) {
-            Gravity.END or Gravity.CENTER_VERTICAL
+            (if (sideLeft) Gravity.START else Gravity.END) or Gravity.CENTER_VERTICAL
         } else {
             Gravity.START or Gravity.CENTER_VERTICAL
         }
@@ -3323,11 +3347,18 @@ class GuidanceActivity : AppCompatActivity() {
         // 一个 rightMargin = 8 + 44 + 6 + 44 = 102dp 把圆钮那块让出来。
         applyQuickActions(landscape)
         (quickActions.layoutParams as FrameLayout.LayoutParams).apply {
-            gravity = if (landscape) Gravity.TOP or Gravity.START else Gravity.TOP or Gravity.END
+            gravity = if (landscape)
+                (if (sideLeft) Gravity.TOP or Gravity.END else Gravity.TOP or Gravity.START)
+            else Gravity.TOP or Gravity.END
             if (landscape) {
-                // 与返回键左对齐、挂在它下方（topMargin 由 insets listener 补 52dp）
-                marginStart = dp(12)
-                marginEnd = 0
+                // 侧栏在左时，按钮列镜像到右侧（与返回键保持同侧、留出地图空间）
+                if (sideLeft) {
+                    marginStart = 0
+                    marginEnd = dp(12)
+                } else {
+                    marginStart = dp(12)
+                    marginEnd = 0
+                }
             } else {
                 marginStart = 0
                 marginEnd = dp(12)
@@ -3363,7 +3394,7 @@ class GuidanceActivity : AppCompatActivity() {
             if (landscape) {
                 width = dp(DP_PANEL_LAND)
                 height = ViewGroup.LayoutParams.MATCH_PARENT
-                gravity = Gravity.TOP or Gravity.END
+                gravity = if (sideLeft) Gravity.TOP or Gravity.START else Gravity.TOP or Gravity.END
                 marginStart = 0
                 topMargin = 0
                 bottomMargin = 0
@@ -3421,14 +3452,14 @@ class GuidanceActivity : AppCompatActivity() {
         val card = bottomInfo.layoutParams as FrameLayout.LayoutParams
         val acts = mapActions.layoutParams as FrameLayout.LayoutParams
         if (landscape) {
-            // 信息卡：右侧竖直条，与顶栏同宽对齐成一条侧栏；地图拿回左侧全部空间
-            card.gravity = Gravity.END or Gravity.BOTTOM
+            // 信息卡：竖直条，与顶栏同宽对齐成一条侧栏；地图拿回另一侧全部空间
+            card.gravity = if (sideLeft) Gravity.START or Gravity.BOTTOM else Gravity.END or Gravity.BOTTOM
             card.width = dp(DP_PANEL_LAND)
-            // 地图操作键横屏已搬到左上角竖列（见 applyQuickActions）：这个容器里
-            // 只剩全览（横屏 GONE），留着不显示，位置给个不碍事的左下角
-            acts.gravity = Gravity.START or Gravity.BOTTOM
-            acts.marginStart = dp(12)
-            acts.marginEnd = 0
+            // 地图操作键横屏已搬到按钮列：这个容器里只剩全览（横屏 GONE），
+            // 位置给个不碍事的侧栏对侧角落
+            acts.gravity = if (sideLeft) Gravity.END or Gravity.BOTTOM else Gravity.START or Gravity.BOTTOM
+            acts.marginStart = if (sideLeft) 0 else dp(12)
+            acts.marginEnd = if (sideLeft) dp(12) else 0
             acts.bottomMargin = dp(16)
         } else {
             // 竖屏：恢复底部通栏 + 右侧悬浮操作键

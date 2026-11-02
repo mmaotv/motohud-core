@@ -602,8 +602,12 @@
     <string name="settings_auto_connect_desc">打开 App 自动连回上次的车机</string>
     <string name="settings_voice">语音播报</string>
     <string name="settings_voice_desc">转弯前播报引导语</string>
+    <string name="settings_voice_engine_enable">启用离线语音引擎</string>
+    <string name="settings_voice_engine_enable_desc">关闭后改用内置语音包（不念路名）</string>
     <string name="settings_traffic_layer">地图实时路况</string>
     <string name="settings_traffic_layer_desc">显示红绿拥堵色带，会增加流量消耗</string>
+    <string name="settings_land_left">横屏侧栏靠左</string>
+    <string name="settings_land_left_desc">关闭则靠右（默认），可把导航卡片与按钮换到另一侧</string>
 
     <!-- ================= 车况二级页 ================= -->
     <string name="navi_vehicle_entry">车况</string>

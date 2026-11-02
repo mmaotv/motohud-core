@@ -110,6 +110,9 @@ class SettingsSheetDialog : BottomSheetDialogFragment() {
         b.swVoice.isChecked = NaviPrefs.voice.value
         b.swVoice.setOnCheckedChangeListener { _, on -> NaviPrefs.setVoice(on) }
 
+        b.swVoiceEngine.isChecked = NaviPrefs.voiceEngine.value
+        b.swVoiceEngine.setOnCheckedChangeListener { _, on -> NaviPrefs.setVoiceEngine(on) }
+
         b.setVoiceMode.setOnClickListener { pickVoiceMode() }
         renderVoiceMode()
 
@@ -138,6 +141,11 @@ class SettingsSheetDialog : BottomSheetDialogFragment() {
         // 不在这里重建已经打开的地图页：那样会让导航中的路线闪烁重绘。
         b.swTraffic.isChecked = NaviPrefs.mapTraffic.value
         b.swTraffic.setOnCheckedChangeListener { _, on -> NaviPrefs.setMapTraffic(on) }
+
+        b.swLandLeft.isChecked = NaviPrefs.landSide.value == NaviPrefs.LAND_SIDE_LEFT
+        b.swLandLeft.setOnCheckedChangeListener { _, on ->
+            NaviPrefs.setLandSide(if (on) NaviPrefs.LAND_SIDE_LEFT else NaviPrefs.LAND_SIDE_RIGHT)
+        }
 
         b.setMapTheme.setOnClickListener { pickMapTheme() }
         renderMapTheme()

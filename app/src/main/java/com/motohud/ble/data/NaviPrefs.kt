@@ -43,6 +43,10 @@ object NaviPrefs {
     const val THEME_DAY = 1
     const val THEME_NIGHT = 2
 
+    /** 横屏侧栏位置：靠右（默认）/ 靠左 */
+    const val LAND_SIDE_RIGHT = 0
+    const val LAND_SIDE_LEFT = 1
+
     /** 导航页亮度：跟随系统 / 较暗 / 正常 */
     const val BRIGHT_FOLLOW = 0
     const val BRIGHT_DIM = 1
@@ -89,6 +93,12 @@ object NaviPrefs {
 
     /** 播报音量倍率（引擎原始输出偏小，需要放大才听得清） */
     private const val KEY_TTS_VOLUME = "tts_volume"
+
+    /** 横屏侧栏位置（靠右 / 靠左） */
+    private const val KEY_LAND_SIDE = "land_side"
+
+    /** 是否启用离线语音引擎（关闭则改用内置语音包，即使已下载模型） */
+    private const val KEY_VOICE_ENGINE = "voice_engine"
 
     /** 内置语音包说明是否弹过（只提示一次） */
     private const val KEY_PACK_HINT = "voice_pack_hint_shown"
@@ -196,6 +206,25 @@ object NaviPrefs {
      */
     private val _ttsVolume = MutableStateFlow(DEFAULT_TTS_VOLUME)
     val ttsVolume: StateFlow<Float> = _ttsVolume.asStateFlow()
+
+    /**
+     * 横屏导航界面侧栏位置（[LAND_SIDE_RIGHT] / [LAND_SIDE_LEFT]）。
+     *
+     * 默认靠右：驾驶时右手拇指够得着侧栏按钮，左上角只留「退出」。
+     * 左撇子或习惯左手操作的人可以翻到左边，整条侧栏与悬浮按钮一起镜像到另一侧。
+     */
+    private val _landSide = MutableStateFlow(LAND_SIDE_RIGHT)
+    val landSide: StateFlow<Int> = _landSide.asStateFlow()
+
+    /**
+     * 是否启用离线神经 TTS 引擎。
+     *
+     * 默认开：装了模型就用引擎（能念任意路名）。关掉后**即使模型已下载**也退回
+     * 内置语音包（零延迟、不念路名），想用预录包的人随时能切回去。
+     * 引擎与内置包互斥（两套同时出声会叠音），见 [com.motohud.ble.navi.SpeechRouter]。
+     */
+    private val _voiceEngine = MutableStateFlow(true)
+    val voiceEngine: StateFlow<Boolean> = _voiceEngine.asStateFlow()
 
     /**
      * 是否把导航信息投到车机（BLE 转发开关）。
@@ -325,6 +354,8 @@ object NaviPrefs {
             ?: PresetVoice.DEFAULT.id
         _ttsSpeed.value = prefs.getFloat(KEY_TTS_SPEED, 1.0f)
         _ttsVolume.value = prefs.getFloat(KEY_TTS_VOLUME, DEFAULT_TTS_VOLUME)
+        _landSide.value = prefs.getInt(KEY_LAND_SIDE, LAND_SIDE_RIGHT)
+        _voiceEngine.value = prefs.getBoolean(KEY_VOICE_ENGINE, true)
         // 「投屏」从页面改成开关：默认开（连了车机就是要投），忽略已废弃的 phone_mode
         _castEnabled.value = prefs.getBoolean(KEY_CAST, true)
         _bridgeEnabled.value = prefs.getBoolean(KEY_BRIDGE, false)
@@ -386,6 +417,17 @@ object NaviPrefs {
     fun setTtsVolume(v: Float) {
         _ttsVolume.value = v
         prefs.edit().putFloat(KEY_TTS_VOLUME, v).apply()
+    }
+
+    fun setLandSide(side: Int) {
+        val v = side.coerceIn(LAND_SIDE_RIGHT, LAND_SIDE_LEFT)
+        _landSide.value = v
+        prefs.edit().putInt(KEY_LAND_SIDE, v).apply()
+    }
+
+    fun setVoiceEngine(on: Boolean) {
+        _voiceEngine.value = on
+        prefs.edit().putBoolean(KEY_VOICE_ENGINE, on).apply()
     }
 
     fun setTtsStyle(id: String) {

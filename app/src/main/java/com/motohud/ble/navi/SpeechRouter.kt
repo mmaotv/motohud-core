@@ -1,6 +1,7 @@
 package com.motohud.ble.navi
 
 import android.content.Context
+import com.motohud.ble.data.NaviPrefs
 import com.motohud.ble.navi.tts.SherpaSpeaker
 import com.motohud.ble.navi.tts.TtsModelStore
 
@@ -32,6 +33,11 @@ object SpeechRouter {
      */
     fun create(context: Context): Speaker {
         val app = context.applicationContext
+        // 用户关闭了离线语音引擎：无论模型是否下载，都走内置包（零延迟、不念路名）。
+        // 这样"已下载但想用预录包"和"根本没下载"走同一条兜底路径，互不冲突。
+        if (!NaviPrefs.voiceEngine.value) {
+            return newPreset(app, "引擎已关闭")
+        }
         if (!TtsModelStore.isInstalled(app)) {
             // 模型没装：走内置包。没有它这里就只能返回静默（老行为）
             return newPreset(app, "未安装语音模型")

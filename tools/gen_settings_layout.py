@@ -220,6 +220,7 @@ SECTIONS = [
     ]),
     ('settings_section_voice', [
         ('sw', 'sw_voice', 'settings_voice', 'settings_voice_desc'),
+        ('sw', 'sw_voice_engine', 'settings_voice_engine_enable', 'settings_voice_engine_enable_desc'),
         ('jump', 'set_voice_mode', 'settings_voice_mode_title', None, 'tv_voice_mode_value'),
         ('jump', 'set_voice_engine', 'settings_voice_engine', None, 'set_voice_engine_state'),
         ('jump', 'set_preset_voice', 'settings_preset_voice_title', None, 'tv_preset_voice_value'),
@@ -229,6 +230,7 @@ SECTIONS = [
         ('sw', 'sw_cue_harsh', 'settings_cue_harsh_title', 'settings_cue_harsh_desc'),
     ]),
     ('settings_map_section', [
+        ('sw', 'sw_land_left', 'settings_land_left', 'settings_land_left_desc'),
         ('sw', 'sw_traffic', 'settings_traffic_layer', 'settings_traffic_layer_desc'),
         ('jump', 'set_map_theme', 'settings_map_theme_title', None, 'tv_map_theme_value'),
         ('jump', 'set_offline_map', 'settings_offline_map_title', 'settings_offline_map_desc', None),
