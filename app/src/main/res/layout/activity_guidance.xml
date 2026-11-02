@@ -359,48 +359,6 @@
             android:textSize="12sp"
             android:visibility="gone" />
 
-        <!-- 更优/更畅通路线提示（非阻塞，横竖屏都贴在顶栏下方居中） -->
-        <LinearLayout
-            android:id="@+id/better_route_card"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/bg_navi_panel"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="14dp"
-            android:paddingTop="9dp"
-            android:paddingEnd="10dp"
-            android:paddingBottom="9dp"
-            android:visibility="gone">
-
-            <TextView
-                android:id="@+id/tv_better_route"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:fontFamily="@font/inter"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:textColor="?attr/nvTextPrimary"
-                android:textSize="13sp" />
-
-            <Button
-                android:id="@+id/btn_better_adopt"
-                style="@style/Widget.Moto.Button.Accent"
-                android:layout_width="wrap_content"
-                android:layout_height="34dp"
-                android:layout_marginStart="10dp"
-                android:text="@string/guidance_better_route_adopt" />
-
-            <Button
-                android:id="@+id/btn_better_dismiss"
-                style="@style/Widget.Moto.Button.Ghost"
-                android:layout_width="wrap_content"
-                android:layout_height="34dp"
-                android:layout_marginStart="6dp"
-                android:text="@string/guidance_better_route_dismiss" />
-        </LinearLayout>
     </LinearLayout>
 
     <!--
@@ -798,6 +756,57 @@
                 android:layout_weight="1"
                 android:text="@string/navi_cast_to_car" />
         </LinearLayout>
+    </LinearLayout>
+
+    <!--
+      更优/更畅通路线提示卡（根浮层，不塞进侧栏）：
+      横屏侧栏只有 360dp 高，原先塞在侧栏最底部，会被同侧的底部 ETA 卡盖住一半（真机复现）。
+      改成根浮层后由 applyOrientationLayout 贴到「地图区域」底部 —— 竖屏让过底部 ETA 卡，
+      横屏只占地图那一侧（让开侧栏），并且宽度撑满可用区域、文字可换两行，保证完整可见。
+    -->
+    <LinearLayout
+        android:id="@+id/better_route_card"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_navi_panel"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingTop="9dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="9dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tv_better_route"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="@font/inter"
+            android:maxLines="2"
+            android:textColor="?attr/nvTextPrimary"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btn_better_adopt"
+            style="@style/Widget.Moto.Button.Accent"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:layout_marginStart="10dp"
+            android:text="@string/guidance_better_route_adopt" />
+
+        <Button
+            android:id="@+id/btn_better_dismiss"
+            style="@style/Widget.Moto.Button.Ghost"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:layout_marginStart="6dp"
+            android:text="@string/guidance_better_route_dismiss" />
     </LinearLayout>
 
     <!-- 规划中遮罩 -->

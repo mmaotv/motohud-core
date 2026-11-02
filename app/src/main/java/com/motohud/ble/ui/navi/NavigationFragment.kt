@@ -548,7 +548,8 @@ class NavigationFragment : Fragment(R.layout.fragment_navigation) {
                     MarkerOptions()
                         .position(pos)
                         .anchor(0.5f, 0.5f)
-                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE))
+                        // 摩托车俯视图标，车头朝正北（setFlat(true) 随地图旋转、图标上=真北）
+                        .icon(com.motohud.ble.amap.VehicleMarker.icon(requireContext()))
                         .setFlat(true)
                         .zIndex(9f)
                 )

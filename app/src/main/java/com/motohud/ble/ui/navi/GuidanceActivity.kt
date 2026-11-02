@@ -37,7 +37,6 @@ import androidx.lifecycle.lifecycleScope
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.MapView
-import com.amap.api.maps.model.BitmapDescriptorFactory
 import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.LatLngBounds
 import com.amap.api.maps.model.Marker
@@ -165,6 +164,8 @@ class GuidanceActivity : AppCompatActivity() {
     private var routePoints: List<LatLng> = emptyList()
     private var routeCum: DoubleArray = DoubleArray(0)
     private var lastProgressM = -1
+    /** 上次切分到的折线下标：下标没变就不必重设折线顶点（避免无谓的几何重建） */
+    private var lastProgressIdx = -1
 
     private lateinit var topBar: View
     private lateinit var bottomInfo: View
@@ -272,6 +273,16 @@ class GuidanceActivity : AppCompatActivity() {
     private var destLat = 0.0
     private var destLng = 0.0
     private var lastCameraMs = 0L
+    /** 最后一次可信航向：停车/低速时沿用它，避免镜头跟着乱跳的 GPS 航向打转 */
+    private var lastCamBearing = 0f
+    /** 底部系统栏/手势条高度：卡片是 GONE 状态收不到 inset 分发，只能借别的 View 记下来 */
+    private var sysBottomInset = 0
+    /** 用户触碰地图后的自动恢复跟随任务（触碰期间只暂停，不永久停跟） */
+    private val resumeFollowRunnable = Runnable {
+        userPanned = false
+        lastCameraMs = 0L
+        followOnMap(engine.state.value, force = true)
+    }
 
     /** 周期性检查更优/更畅通路线：每隔一段时间重新算路并对比当前路线 */
     private val betterRouteHandler = Handler(Looper.getMainLooper())
@@ -780,6 +791,7 @@ class GuidanceActivity : AppCompatActivity() {
         }
         ViewCompat.setOnApplyWindowInsetsListener(bottomInfo) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            sysBottomInset = bars.bottom
             if (landscapeNow) {
                 val endSide = (v.layoutParams as FrameLayout.LayoutParams).gravity and Gravity.END == Gravity.END
                 if (endSide) {
@@ -889,6 +901,7 @@ class GuidanceActivity : AppCompatActivity() {
             route?.let { drawRoute(it, fitAll = true) }
         }
         findViewById<View>(R.id.btn_recenter).setOnClickListener {
+            betterRouteHandler.removeCallbacks(resumeFollowRunnable)
             userPanned = false
             lastCameraMs = 0L
             followOnMap(engine.state.value, force = true)
@@ -1412,6 +1425,10 @@ class GuidanceActivity : AppCompatActivity() {
         }
         tvBetterRoute.text = msg
         betterRouteCard.visibility = View.VISIBLE
+        // 卡片平时是 GONE：不接收 inset 分发，也没被测量过。
+        // 显示时必须自己摆一次，且要在布局完成后再摆一次（要读 bottomInfo 高度）。
+        positionBetterRouteCard()
+        betterRouteCard.post { positionBetterRouteCard() }
         // 卡片在顶栏，骑行中未必看得见；说一声才不会错过这次换线机会
         say("前方路况变化，发现更快路线", SpeechPriority.INFO, cue = com.motohud.ble.navi.SpeechArbiter.BETTER_ROUTE)
     }
@@ -1587,8 +1604,15 @@ class GuidanceActivity : AppCompatActivity() {
                     runCatching { isMyLocationEnabled = false }
                     // 路况瓦片跟着设置走：开着爽但要付费（流量），默认关
                     runCatching { setTrafficEnabled(NaviPrefs.mapTraffic.value) }
-                    // 用户拖动地图 → 暂停自动跟随（专业导航软件的通行做法）
-                    setOnMapTouchListener { userPanned = true }
+                    // 用户拖动地图 → 暂停自动跟随（专业导航软件的通行做法）。
+                    // 但只是**暂停**：手离开后 [PANNED_RESUME_MS] 自动恢复跟随，
+                    // 否则摸一下地图镜头就永久停在原地（老实现只置位不复位，
+                    // 除了点「回中」没有别的出路，骑行中根本腾不出手去点）。
+                    setOnMapTouchListener {
+                        userPanned = true
+                        betterRouteHandler.removeCallbacks(resumeFollowRunnable)
+                        betterRouteHandler.postDelayed(resumeFollowRunnable, PANNED_RESUME_MS)
+                    }
                     // V11：把 3D 建筑压到覆盖物下方。横屏低俯角时建筑体块会盖住
                     // 路线和转向标，是骑行中"看不清该走哪"的主要来源之一。
                     com.motohud.ble.amap.AmapMapConfig.navigationBuildingLayer(this)
@@ -1645,6 +1669,7 @@ class GuidanceActivity : AppCompatActivity() {
         routePoints = points
         routeCum = cum.toDoubleArray()
         lastProgressM = -1
+        lastProgressIdx = -1
         safeMap {
             aheadLine?.remove()
             doneLine?.remove()
@@ -1668,6 +1693,11 @@ class GuidanceActivity : AppCompatActivity() {
                     .width(11f)
                     .color(themeColor(R.attr.mtTrackDone, android.graphics.Color.WHITE))
                     .setDottedLine(false)
+                    // 已走路段同样抽稀：它每秒都要重设一次顶点，
+                    // 顶点越多重建越慢，卡顿就出在这里
+                    .apply {
+                        if (com.motohud.ble.data.NaviPrefs.routeReduce.value) setReducePoint(true)
+                    }
                     .zIndex(2f)
             )
             destMarker?.remove()
@@ -1687,13 +1717,26 @@ class GuidanceActivity : AppCompatActivity() {
         }
     }
 
-    /** 按已行驶距离把折线切成「已走（灰）」与「未走（主色）」两段 */
+    /**
+     * 按已行驶距离把折线切成「已走（灰）」与「未走（主色）」两段。
+     *
+     * 这里是整条橙色路线"抖一下"的源头：`Polyline.points = ...` 是**无条件**
+     * 重建几何缓冲的，一条长途路线动辄上千个顶点，1Hz 重建两次（灰+橙）就会
+     * 顶掉当帧绘制，肉眼就是一格一格的跳。两道闸：
+     *  1) 位移不足 [PROGRESS_STEP_M] 不动 —— 高频小幅重算没有视觉收益；
+     *  2) 切分下标没变就彻底不设点 —— 停车/等灯时 traveled 一直在微动，
+     *     但下标不动，此时重建纯属白烧。
+     */
     private fun renderProgress(traveled: Int) {
         if (routePoints.size < 2 || routeCum.isEmpty()) return
-        // 位移不足 20m 不重画：1Hz 每帧重设上千个点会拖慢地图渲染
-        if (lastProgressM >= 0 && kotlin.math.abs(traveled - lastProgressM) < 20) return
-        lastProgressM = traveled
+        if (lastProgressM >= 0 && kotlin.math.abs(traveled - lastProgressM) < PROGRESS_STEP_M) return
         val idx = splitIndexFor(traveled.toDouble())
+        if (idx == lastProgressIdx) {
+            lastProgressM = traveled
+            return
+        }
+        lastProgressIdx = idx
+        lastProgressM = traveled
         val done = routePoints.subList(0, (idx + 1).coerceIn(1, routePoints.size))
         val ahead = routePoints.subList(idx.coerceIn(0, routePoints.size - 1), routePoints.size)
         safeMap {
@@ -1726,13 +1769,22 @@ class GuidanceActivity : AppCompatActivity() {
                     MarkerOptions()
                         .position(pos)
                         .anchor(0.5f, 0.5f)
-                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE))
-                        .setFlat(true)
+                        // 摩托车俯视图标，车头朝正北
+                        .icon(com.motohud.ble.amap.VehicleMarker.icon(this))
+                        // billboard（不平贴）：导航页地图是 3D 倾斜的，平贴会把圆形压成椭圆、
+                        // 剪影糊成一团。billboard 始终正对立面，圆是圆、车是车，最清晰。
+                        .setFlat(false)
                         .zIndex(9f)
                 )
             } else {
                 m.position = pos
             }
+            // 车头方向对齐道路前进方向：billboard 不随地图旋转，用「行进方位 - 地图方位」
+            // 得到图标在屏幕上的旋转角 —— 地图车头朝上时恰好为 0（正朝前），
+            // 北向上时按行进方位偏转，两种模式都能让车头贴着道路方向。
+            val mapBearing = map.cameraPosition?.bearing ?: 0f
+            val head = if (s.bearing.isFinite()) s.bearing else 0f
+            meMarker?.let { it.rotateAngle = head - mapBearing }
             // 信号差时点变淡，提示用户（不用额外文案打扰）
             meMarker?.alpha = when {
                 !s.gpsActive -> 0.45f
@@ -1743,7 +1795,15 @@ class GuidanceActivity : AppCompatActivity() {
         }
     }
 
-    /** 地图跟随当前位置（节流 1.5s；用户拖动后停止跟随） */
+    /**
+     * 地图跟随当前位置。
+     *
+     * 平滑的关键是**动画时长要和定位更新周期对齐**：
+     * 定位 1Hz 到达，镜头动画就必须铺满这 1 秒，一段接一段地滑。
+     * 老实现固定 800ms 动画 + 1500ms 节流，每个周期里地图有 700ms 是彻底静止的，
+     * 表现就是"走一下、停一下"（一顿一顿）。这里节流降到 [CAM_FOLLOW_MS]
+     * 只用来挡重复发射，动画时长按实测间隔自适应。
+     */
     private fun followOnMap(s: NaviEngine.NaviState, force: Boolean = false) {
         val map = aMap ?: return
         if (s.latitude == 0.0 && s.longitude == 0.0) return
@@ -1755,7 +1815,11 @@ class GuidanceActivity : AppCompatActivity() {
             ) > 5000f
         ) return
         val now = System.currentTimeMillis()
-        if (!force && now - lastCameraMs < 1500L) return
+        if (!force && now - lastCameraMs < CAM_FOLLOW_MS) return
+        val animMs = when {
+            force || lastCameraMs == 0L -> CAM_ANIM_MIN_MS
+            else -> (now - lastCameraMs).coerceIn(CAM_ANIM_MIN_MS, CAM_ANIM_MAX_MS)
+        }
         lastCameraMs = now
         lastFollowLat = s.latitude
         lastFollowLng = s.longitude
@@ -1771,29 +1835,71 @@ class GuidanceActivity : AppCompatActivity() {
         // 横屏俯角更大：3D 透视把前方道路拉长，同样高度能看到更远的路口
         val tilt = if (landscapeNow) 58f else 45f
         try {
+            /*
+             * 航向记忆：停车 / 低速时 GPS 航向会乱跳（原地打转），
+             * 但镜头不能跟着抖，也不能退回正北 —— 只沿用最后一次可信航向。
+             * 老实现在 speed<=8 时走 newLatLngZoom，那会把 bearing 和 tilt
+             * 一起重置成 0：一减速地图就"啪"地拍平变正北，是最刺眼的一次跳变。
+             */
+            if (s.bearing.isFinite() && s.speedKmh > 8f) lastCamBearing = s.bearing
+            val baseBearing = lastCamBearing
             // 横屏把镜头中心**前移**一段：否则车标永远在屏幕正中，
             // 前方路口刚冒头就被右侧信息条挡住，等于白放大。
-            val target = if (landscapeNow && s.bearing.isFinite() && s.speedKmh > 8f) {
-                ahead(s.latitude, s.longitude, s.bearing, CAMERA_AHEAD_M)
+            // 前移量不再随车速开关（以前 >8km/h 才前移，跨过 8km/h 时
+            // 目标点会瞬间跳 30m，同样是肉眼可见的一顿）。
+            var target = if (landscapeNow) {
+                ahead(s.latitude, s.longitude, baseBearing, CAMERA_AHEAD_M)
             } else {
                 LatLng(s.latitude, s.longitude)
             }
-            if (s.bearing.isFinite() && s.speedKmh > 8f) {
-                map.animateCamera(
-                    CameraUpdateFactory.newCameraPosition(
-                        com.amap.api.maps.model.CameraPosition.builder()
-                            .target(target)
-                            .zoom(zoom)
-                            .bearing(s.bearing)
-                            .tilt(tilt)
-                            .build()
-                    ), 800, null
-                )
-            } else {
-                map.animateCamera(
-                    CameraUpdateFactory.newLatLngZoom(target, zoom), 800, null
-                )
+            /*
+             * 横屏侧栏占了一整侧（300dp），屏幕正中其实被侧栏挤偏了：
+             * 车标应该落在「去掉侧栏后剩余区域」的中心，而不是压在侧栏边上。
+             *
+             * 换算比例尺**必须实测**，不能用 zoom 反推的中心 mpp：
+             * 3D 倾斜(58°)下画面越靠下透视越大，车标正好在下方，那里的
+             * 实际米/像素是画面中心的两倍以上。之前按中心 mpp 算 150dp 的偏移，
+             * 落地实际推了近 300dp，车标直接被推出可视区（真机复现过）。
+             * 这里沿相机右向平移 20m 量一次投影差，得到车标所在行的真实比例尺。
+             */
+            if (landscapeNow) {
+                val viewW = (mapView?.width ?: 0).toFloat()
+                val panelPx = DP_PANEL_LAND * resources.displayMetrics.density
+                if (viewW > panelPx * 1.3f) {
+                    val sideLeft = NaviPrefs.landSide.value == NaviPrefs.LAND_SIDE_LEFT
+                    // 目标屏幕 x：侧栏在左 → 右半区中心；侧栏在右 → 左半区中心
+                    val free = viewW - panelPx
+                    val wantX = if (sideLeft) panelPx + free / 2f else free / 2f
+                    val centerX = viewW / 2f
+                    val proj = map.projection
+                    val veh = LatLng(s.latitude, s.longitude)
+                    if (proj != null) {
+                        val p1 = proj.toScreenLocation(veh)
+                        val p2 = proj.toScreenLocation(ahead(s.latitude, s.longitude, baseBearing + 90f, 20.0))
+                        val dxPx = Math.abs(p2.x - p1.x).toFloat()
+                        if (dxPx > 2f) {
+                            val mPerPx = 20.0 / dxPx.toDouble()
+                            // 车标往 wantX 挪 → 镜头目标反向平移同样的地面距离
+                            val shiftM = (Math.abs(centerX - wantX) * mPerPx).coerceIn(0.0, 120.0)
+                            // 侧栏在右 → 目标右移（车标左移）；侧栏在左 → 目标左移（车标右移）
+                            val shiftBearing = baseBearing + if (sideLeft) -90f else 90f
+                            target = ahead(target.latitude, target.longitude, shiftBearing, shiftM)
+                        }
+                    }
+                }
             }
+            // 统一用 CameraPosition 动相机：bearing/tilt 全程保持，
+            // 只有 target 在变 —— 这样每一帧都只是平移，不会出现转向/拍平的二次运动。
+            map.animateCamera(
+                CameraUpdateFactory.newCameraPosition(
+                    com.amap.api.maps.model.CameraPosition.builder()
+                        .target(target)
+                        .zoom(zoom)
+                        .bearing(baseBearing)
+                        .tilt(tilt)
+                        .build()
+                ), animMs, null
+            )
         } catch (_: Exception) {
         }
     }
@@ -3046,6 +3152,7 @@ class GuidanceActivity : AppCompatActivity() {
         engine.onSdkSpeech = null
         engine.onRerouteRequest = null
         betterRouteHandler.removeCallbacks(betterRouteTask)
+        betterRouteHandler.removeCallbacks(resumeFollowRunnable)
         hideBetterRouteCard()
         engine.stop()
         // 停导航就停气压计：传感器回调一直在跑会白白耗电，而且离开导航后
@@ -3531,6 +3638,39 @@ class GuidanceActivity : AppCompatActivity() {
          * post 到下一帧，等这轮重算结束再写。
          */
         window.decorView.post { applySystemBarAppearance() }
+        // 更优路线提示卡是根浮层：布局量完再定位（竖屏要用底部 ETA 卡的实际高度让位）
+        betterRouteCard.post { positionBetterRouteCard() }
+    }
+
+    /**
+     * 摆放更优/更畅通路线提示卡（根浮层）。
+     *
+     * - 竖屏：贴底、水平居中，底部让过 [bottomInfo]（ETA 卡）的实际高度，完整露在它上方；
+     * - 横屏：只占地图那一侧（让开 300dp 侧栏），贴地图区域底部，不会被侧栏/ETA 卡遮住。
+     * 卡片宽度撑满可用区域，文字可换两行 —— 解决"提示被遮挡一半、展示不全"。
+     */
+    private fun positionBetterRouteCard() {
+        val lp = betterRouteCard.layoutParams as? FrameLayout.LayoutParams ?: return
+        val dm = resources.displayMetrics
+        fun dp(v: Int): Int = (v * dm.density).toInt()
+        lp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        lp.width = FrameLayout.LayoutParams.MATCH_PARENT
+        lp.topMargin = 0
+        if (landscapeNow) {
+            val sideLeft = NaviPrefs.landSide.value == NaviPrefs.LAND_SIDE_LEFT
+            // 侧栏在左 → 卡片只占右侧地图区；侧栏在右 → 卡片只占左侧地图区
+            lp.marginStart = if (sideLeft) dp(DP_PANEL_LAND) + dp(12) else dp(12)
+            lp.marginEnd = if (sideLeft) dp(12) else dp(DP_PANEL_LAND) + dp(12)
+            // 让开底部系统栏/手势条：只留 12dp 会有一截压在导航栏下面，
+            // 看着就是"卡片超出显示范围"（真机横屏必现）
+            lp.bottomMargin = sysBottomInset + dp(12)
+        } else {
+            lp.marginStart = dp(12)
+            lp.marginEnd = dp(12)
+            val etaH = if (bottomInfo.height > 0) bottomInfo.height else dp(200)
+            lp.bottomMargin = etaH + sysBottomInset + dp(8)
+        }
+        betterRouteCard.layoutParams = lp
     }
 
     /**
@@ -3615,6 +3755,7 @@ class GuidanceActivity : AppCompatActivity() {
         app.naviForwarder.detach(TAG_FORWARD)
         runCatching { unregisterReceiver(pipReceiver) }
         betterRouteHandler.removeCallbacks(betterRouteTask)
+        betterRouteHandler.removeCallbacks(resumeFollowRunnable)
         // 必须在 mapView.onDestroy 之前：CrossOverlay 挂在 aMap 上，地图先销毁会抛
         runCatching { vectorCrossRenderer?.release() }
         vectorCrossRenderer = null
@@ -3756,6 +3897,21 @@ class GuidanceActivity : AppCompatActivity() {
 
         /** 横屏镜头前移距离（米）：把车标压到屏幕下方，前方路口才看得全 */
         private const val CAMERA_AHEAD_M = 30.0
+
+        /** 相机跟随最小节流（毫秒）：只用来挡重复发射，真正平滑靠下面的动画时长 */
+        private const val CAM_FOLLOW_MS = 200L
+        /** 相机动画时长下限：起步/回中时别拖沓，也别瞬移 */
+        private const val CAM_ANIM_MIN_MS = 400L
+        /** 相机动画时长上限：定位卡顿/丢星时不至于滑太久 */
+        private const val CAM_ANIM_MAX_MS = 1200L
+        /** 用户触碰地图后，手离开多久自动恢复跟随图标 */
+        private const val PANNED_RESUME_MS = 4000L
+        /**
+         * 已走/未走折线的最小重切步长（米）。
+         * 设折线顶点会让渲染引擎重建几何缓冲，是「橙色路线一格一格跳」的主因；
+         * 40m 在 100km/h 下也才 1.4 秒一次，视觉上完全跟得上。
+         */
+        private const val PROGRESS_STEP_M = 40
 
         /** 更优路线检查间隔（4 分钟，兼顾体验与流量节省） */
         private const val BETTER_ROUTE_INTERVAL_MS = 4 * 60_000L

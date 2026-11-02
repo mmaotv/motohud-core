@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  导航「当前位置」图标：摩托车俯视剪影，车头朝上（正北）。
+
+  为什么是俯视图：图标要表达「车头指向哪」。俯视图能从上方一眼看出车头/车尾方向；
+  侧视图平放会变成横躺的摩托，方向感全无。
+
+  配色：蓝色圆底 + 白色描边环 + 白色剪影。
+  - 白天浅色地图：蓝色底块醒目；
+  - 夜间深色地图：白环 + 白剪影发亮，不会糊进暗色路面。
+
+  形状偏「粗壮」：车轮用实心圆、车把做成一整条最宽横杠、车身窄，
+  小尺寸（约 32dp）下也能读出「两个轮子 + 宽车把」的摩托车特征。
+
+  朝向：调用方用 billboard 标记并读取地图方位反向旋转，让图标「上」始终对准真北，
+  且不会被地图 3D 倾斜压扁。见 amap/VehicleMarker + GuidanceActivity.updateMeMarker。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="32dp"
+    android:height="32dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+
+    <!-- 圆底 + 白色描边环 -->
+    <path
+        android:fillColor="#FF2C7BE5"
+        android:pathData="M3,32 a29,29 0 1,0 58,0 a29,29 0 1,0 -58,0 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.5" />
+
+    <!-- 前轮（上方，实心圆） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M26,15 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 Z" />
+
+    <!-- 车把（最宽的一整条横杠，摩托车最典型的俯视特征） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M19,21 h26 a2.5,2.5 0 0 1 0,5 h-26 a2.5,2.5 0 0 1 0,-5 Z" />
+
+    <!-- 车身（油箱+座垫，较窄，连接前后） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M31,24 h2 a5,5 0 0 1 5,5 v9 a5,5 0 0 1 -5,5 h-2 a5,5 0 0 1 -5,-5 v-9 a5,5 0 0 1 5,-5 Z" />
+
+    <!-- 后轮（下方，比前轮略宽） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M25,49 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 Z" />
+</vector>
