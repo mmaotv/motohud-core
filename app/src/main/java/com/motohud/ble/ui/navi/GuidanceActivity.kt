@@ -3832,7 +3832,12 @@ class GuidanceActivity : AppCompatActivity() {
         val lp = betterRouteCard.layoutParams as? FrameLayout.LayoutParams ?: return
         val dm = resources.displayMetrics
         fun dp(v: Int): Int = (v * dm.density).toInt()
-        lp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        // 这里**不能**用 CENTER_HORIZONTAL：FrameLayout 对 CENTER_HORIZONTAL 的算法是
+        //   childLeft = (父宽 - 子宽)/2 + leftMargin - rightMargin
+        // 而子宽 = 父宽 - leftMargin - rightMargin（MATCH_PARENT），
+        // 代进去等于 leftMargin 被算了两遍 —— 横屏让开侧栏时卡片整体右移了 300dp，
+        // 右边直接被切掉（真机复现）。用 START 就只加一次左边距。
+        lp.gravity = Gravity.BOTTOM or Gravity.START
         lp.width = FrameLayout.LayoutParams.MATCH_PARENT
         lp.topMargin = 0
         if (landscapeNow) {
