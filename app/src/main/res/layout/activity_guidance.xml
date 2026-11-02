@@ -835,16 +835,24 @@
             android:id="@+id/btn_better_adopt"
             style="@style/Widget.Moto.Button.Accent"
             android:layout_width="wrap_content"
-            android:layout_height="34dp"
+            android:layout_height="40dp"
             android:layout_marginStart="10dp"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:paddingTop="0dp"
+            android:paddingBottom="0dp"
             android:text="@string/guidance_better_route_adopt" />
 
         <Button
             android:id="@+id/btn_better_dismiss"
             style="@style/Widget.Moto.Button.Ghost"
             android:layout_width="wrap_content"
-            android:layout_height="34dp"
+            android:layout_height="40dp"
             android:layout_marginStart="6dp"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:paddingTop="0dp"
+            android:paddingBottom="0dp"
             android:text="@string/guidance_better_route_dismiss" />
     </LinearLayout>
 

@@ -1929,38 +1929,78 @@ class GuidanceActivity : AppCompatActivity() {
                 LatLng(s.latitude, s.longitude)
             }
             /*
-             * 横屏侧栏占了一整侧（300dp），屏幕正中其实被侧栏挤偏了：
-             * 车标应该落在「去掉侧栏后剩余区域」的中心，而不是压在侧栏边上。
+             * 横屏：把车标**钉在固定的屏幕位置**上（横=去掉侧栏后的中心，纵=屏高 70%），
+             * 而不是靠「前移固定米数 + 侧移固定米数」去凑。
              *
-             * 换算比例尺**必须实测**，不能用 zoom 反推的中心 mpp：
-             * 3D 倾斜(58°)下画面越靠下透视越大，车标正好在下方，那里的
-             * 实际米/像素是画面中心的两倍以上。之前按中心 mpp 算 150dp 的偏移，
-             * 落地实际推了近 300dp，车标直接被推出可视区（真机复现过）。
-             * 这里沿相机右向平移 20m 量一次投影差，得到车标所在行的真实比例尺。
+             * 为什么必须按屏幕坐标闭环：
+             *  - 侧栏占了一整侧（300dp），屏幕正中是被挤偏的，车标应落在剩余区域的中心；
+             *  - 3D 倾斜(58°)下画面越靠下透视越大，车标所在行的米/像素是画面中心的两倍以上；
+             *  - **最要命的是缩放会变**：路口前 zoomBoost 把 18.8 拉到 19.8，同一个
+             *    「前移 30 米」在屏幕上放大了 2 倍多，直接把车标顶出画面下沿 ——
+             *    这正是「路口放大图一出现车标就被裁掉」的原因（固定地面偏移必然随缩放漂移）。
+             *
+             * 做法：拿当前相机把车标投到屏幕上，量出它离目标位置差多少像素，
+             * 再用**实测**的局部比例尺（沿相机右向量 20m / 沿行进方向 20m 各量一次）
+             * 把像素差换算成地面距离，把镜头目标反向平移同样的量。
+             * 每帧重算 ⇒ 缩放/俯角/侧栏任意变化都自动收敛，且不会像"按 zoom 反推 mpp"
+             * 那样在倾斜透视下算错。
              */
             if (landscapeNow) {
                 val viewW = (mapView?.width ?: 0).toFloat()
+                val viewH = (mapView?.height ?: 0).toFloat()
                 val panelPx = DP_PANEL_LAND * resources.displayMetrics.density
-                if (viewW > panelPx * 1.3f) {
+                val proj = map.projection
+                if (viewW > panelPx * 1.3f && viewH > 0f && proj != null) {
                     val sideLeft = NaviPrefs.landSide.value == NaviPrefs.LAND_SIDE_LEFT
-                    // 目标屏幕 x：侧栏在左 → 右半区中心；侧栏在右 → 左半区中心
                     val free = viewW - panelPx
                     val wantX = if (sideLeft) panelPx + free / 2f else free / 2f
-                    val centerX = viewW / 2f
-                    val proj = map.projection
-                    val veh = LatLng(s.latitude, s.longitude)
-                    if (proj != null) {
-                        val p1 = proj.toScreenLocation(veh)
-                        val p2 = proj.toScreenLocation(ahead(s.latitude, s.longitude, baseBearing + 90f, 20.0))
-                        val dxPx = Math.abs(p2.x - p1.x).toFloat()
-                        if (dxPx > 2f) {
-                            val mPerPx = 20.0 / dxPx.toDouble()
-                            // 车标往 wantX 挪 → 镜头目标反向平移同样的地面距离
-                            val shiftM = (Math.abs(centerX - wantX) * mPerPx).coerceIn(0.0, 120.0)
-                            // 侧栏在右 → 目标右移（车标左移）；侧栏在左 → 目标左移（车标右移）
-                            val shiftBearing = baseBearing + if (sideLeft) -90f else 90f
-                            target = ahead(target.latitude, target.longitude, shiftBearing, shiftM)
+                    val wantY = viewH * CAM_WANT_Y_FRAC
+                    val camTarget = map.cameraPosition?.target
+                    val nearCam = camTarget != null &&
+                        com.motohud.ble.navi.LocationFilter.distanceM(
+                            camTarget.latitude, camTarget.longitude, s.latitude, s.longitude
+                        ) < 2000f
+                    if (nearCam) {
+                        val pv = proj.toScreenLocation(LatLng(s.latitude, s.longitude))
+                        // 两个方向的局部比例尺分开量：倾斜透视下横竖差异很大，不能共用一个
+                        val pe = proj.toScreenLocation(
+                            ahead(s.latitude, s.longitude, baseBearing + 90f, 20.0)
+                        )
+                        val pf = proj.toScreenLocation(
+                            ahead(s.latitude, s.longitude, baseBearing, 20.0)
+                        )
+                        val dxPx = Math.abs(pe.x - pv.x)
+                        val dyPx = Math.abs(pf.y - pv.y)
+                        val mppX = 20.0 / dxPx
+                        val mppY = 20.0 / dyPx
+                        // 车标已经被推出画面时，投影会失真（20m 只跨 1~2 像素 ⇒ mppY 飙到 10m/px），
+                        // 这时任何补偿都是瞎推。直接判定为"不在视野内"，重新对到车上。
+                        val offScreen = pv.x < -viewW || pv.x > viewW * 2f ||
+                            pv.y < -viewH || pv.y > viewH * 2f
+                        if (dxPx > 2f && dyPx > 2f && mppX in 0.02..2.0 && mppY in 0.02..2.0 && !offScreen) {
+                            // 车标偏右 → 镜头右移（车标随之左移）
+                            val shiftRight = ((pv.x - wantX) * mppX).coerceIn(-CAM_MAX_SHIFT_M, CAM_MAX_SHIFT_M)
+                            // 车标偏高 → 镜头**往前**移（镜心越过车标，车标相对下沉）。
+                            // 注意方向和横轴相反：算反了会正反馈 —— 车标越往上飞、镜头越往后推，
+                            // 一秒钟就把车标顶出画面（真机复现过）。
+                            val shiftFwd = ((wantY - pv.y) * mppY).coerceIn(-CAM_MAX_SHIFT_M, CAM_MAX_SHIFT_M)
+                            var t = LatLng(camTarget!!.latitude, camTarget.longitude)
+                            if (kotlin.math.abs(shiftRight) > 0.05) {
+                                t = ahead(t.latitude, t.longitude, baseBearing + 90f, shiftRight)
+                            }
+                            if (kotlin.math.abs(shiftFwd) > 0.05) {
+                                t = ahead(t.latitude, t.longitude, baseBearing, shiftFwd)
+                            }
+                            target = t
+                        } else {
+                            // 比例尺失真 / 车标已在画面外：别硬推，先把镜头对到车上，
+                            // 保证「车标一定可见」，下一帧投影正常了再精确摆位
+                            target = LatLng(s.latitude, s.longitude)
                         }
+                    } else {
+                        // 相机还在别处（刚起步 / 刚重新规划）：先直接对到车上，
+                        // 下一帧进入闭环再精确摆位，避免用几百公里外的投影瞎推
+                        target = LatLng(s.latitude, s.longitude)
                     }
                 }
             }
@@ -4083,8 +4123,12 @@ class GuidanceActivity : AppCompatActivity() {
          */
         private const val DP_PANEL_LAND = 300
 
-        /** 横屏镜头前移距离（米）：把车标压到屏幕下方，前方路口才看得全 */
+        /** 横屏镜头前移距离（米）：只用于「竖屏/闭环未就绪」时的初值，横屏闭环会覆盖它 */
         private const val CAMERA_AHEAD_M = 30.0
+        /** 横屏车标应落在屏高的百分比：上面留 70% 看前方，下面 30% 是已走过的路 */
+        private const val CAM_WANT_Y_FRAC = 0.70f
+        /** 单帧允许调整的镜头偏移上限（米）：防止投影异常时把镜头甩飞 */
+        private const val CAM_MAX_SHIFT_M = 300.0
 
         /** 相机跟随最小节流（毫秒）：只用来挡重复发射，真正平滑靠下面的动画时长 */
         private const val CAM_FOLLOW_MS = 200L
