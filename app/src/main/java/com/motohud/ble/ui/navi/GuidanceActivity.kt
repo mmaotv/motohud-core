@@ -727,19 +727,33 @@ class GuidanceActivity : AppCompatActivity() {
         val baseStart = (12 * resources.displayMetrics.density).roundToInt()
         ViewCompat.setOnApplyWindowInsetsListener(topBar) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            // 横屏侧栏贴右边：右侧系统栏（三键导航横屏常驻右侧）要一并让开
-            v.updatePadding(top = bars.top + baseTop, right = bars.right + baseStart)
+            // 侧栏贴哪一侧，就避开哪一侧的系统栏/手势条。横屏侧栏靠左时 padding 跟着镜像，
+            // 否则内容会贴着左侧系统栏、右边却空出一条。
+            val endSide = (v.layoutParams as FrameLayout.LayoutParams).gravity and Gravity.END == Gravity.END
+            if (landscapeNow && !endSide) {
+                v.updatePadding(top = bars.top + baseTop, left = bars.left + baseStart, right = 0)
+            } else {
+                // 竖屏通栏 / 横屏靠右：都按右侧留白
+                v.updatePadding(top = bars.top + baseTop, right = bars.right + baseStart, left = 0)
+            }
             insets
         }
-        // 返回键独立悬浮在左上角，位置得自己算：顶栏那套 padding 已经带不动它了
+        // 返回键独立悬浮，位置得自己算：顶栏那套 padding 已经带不动它了。
+        // 它的 gravity 由 applyOrientationLayout 按侧栏方向设置（靠左→右上角，靠右→左上角），
+        // 这里只根据 gravity 决定贴哪一侧系统栏，保证与侧栏错开不重叠。
         val btnBack = findViewById<View>(R.id.btn_back)
         ViewCompat.setOnApplyWindowInsetsListener(btnBack) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            (v.layoutParams as FrameLayout.LayoutParams).apply {
-                topMargin = bars.top + baseTop
-                marginStart = bars.left + baseStart
-                v.layoutParams = this
+            val lp = v.layoutParams as FrameLayout.LayoutParams
+            lp.topMargin = bars.top + baseTop
+            if (lp.gravity and Gravity.END == Gravity.END) {
+                lp.marginStart = 0
+                lp.marginEnd = bars.right + baseStart
+            } else {
+                lp.marginStart = bars.left + baseStart
+                lp.marginEnd = 0
             }
+            v.layoutParams = lp
             insets
         }
         // 语音 / 投屏 / 定位悬浮容器：竖屏横排贴右上角（让开右侧系统栏/手势条）；
@@ -750,7 +764,9 @@ class GuidanceActivity : AppCompatActivity() {
             val belowBack = ((44 + 8) * resources.displayMetrics.density).toInt()
             (v.layoutParams as FrameLayout.LayoutParams).apply {
                 if (gravity and Gravity.END == Gravity.END) {
-                    topMargin = bars.top + baseTop
+                    // 竖屏：横排贴右上角，与顶栏同一行，无需给返回键让位；
+                    // 横屏靠左（镜像到右上角）：返回键已占顶部，必须错开到它下方。
+                    topMargin = bars.top + baseTop + (if (landscapeNow) belowBack else 0)
                     marginStart = 0
                     marginEnd = bars.right + baseStart
                 } else {
@@ -765,13 +781,24 @@ class GuidanceActivity : AppCompatActivity() {
         ViewCompat.setOnApplyWindowInsetsListener(bottomInfo) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             if (landscapeNow) {
-                // 横屏侧栏在右侧：按右边系统栏留白，避开手势条/挖孔；左侧留少量内边距
-                v.updatePadding(
-                    left = baseEnd,
-                    right = bars.right + baseEnd,
-                    top = baseTop,
-                    bottom = bars.bottom + baseBottom
-                )
+                val endSide = (v.layoutParams as FrameLayout.LayoutParams).gravity and Gravity.END == Gravity.END
+                if (endSide) {
+                    // 横屏侧栏在右侧：按右边系统栏留白，避开手势条/挖孔；左侧留少量内边距
+                    v.updatePadding(
+                        left = baseEnd,
+                        right = bars.right + baseEnd,
+                        top = baseTop,
+                        bottom = bars.bottom + baseBottom
+                    )
+                } else {
+                    // 横屏侧栏在左侧：镜像到左边留白，避让左侧系统栏
+                    v.updatePadding(
+                        left = bars.left + baseEnd,
+                        right = baseEnd,
+                        top = baseTop,
+                        bottom = bars.bottom + baseBottom
+                    )
+                }
             } else {
                 // 竖屏底部通栏：右边吃 inset，避开侧边手势条
                 v.updatePadding(bottom = bars.bottom + baseBottom, right = bars.right + baseEnd)
@@ -3368,6 +3395,19 @@ class GuidanceActivity : AppCompatActivity() {
         // 旋转不重建 Activity，insets 不会自动重发；gravity 换了必须让它重新走一遍
         // listener，否则横屏切竖屏后 marginEnd/marginStart 还是上一方向的值。
         quickActions.requestApplyInsets()
+        // 返回键跟随侧栏镜像：侧栏靠左时返回键移到**右上角**（否则会和左下侧卡片叠在一起），
+        // 竖屏或侧栏靠右时留在左上角。移完必须 requestApplyInsets 让上面的 listener
+        // 按新 gravity 重算 marginStart/marginEnd。
+        findViewById<View>(R.id.btn_back).apply {
+            (layoutParams as FrameLayout.LayoutParams).apply {
+                gravity = if (sideLeft) Gravity.TOP or Gravity.END else Gravity.TOP or Gravity.START
+                layoutParams = this
+            }
+            requestApplyInsets()
+        }
+        // 侧栏方向变了（onResume 无旋转时 insets 不会自动重发），让贴边的容器按新方向重算 padding
+        topBar.requestApplyInsets()
+        bottomInfo.requestApplyInsets()
         (findViewById<View>(R.id.dest_card).layoutParams as ViewGroup.MarginLayoutParams).apply {
             // 竖屏：给右侧悬浮的语音/投屏让位（102dp = 两个 44dp 圆钮 + 间距 + 8dp 空隙）
             marginEnd = if (landscape) 0 else dp(8 + 44 + 6 + 44)
