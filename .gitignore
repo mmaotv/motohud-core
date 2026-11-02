@@ -32,3 +32,6 @@ release-v*/
 
 # 高德 SDK 下载缓存（prepare_amap_sdk.py）
 /tools/.cache/
+
+# 本地验证截图（临时）
+.verify/
