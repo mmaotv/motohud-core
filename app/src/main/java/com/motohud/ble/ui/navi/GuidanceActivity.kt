@@ -39,6 +39,8 @@ import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.MapView
 import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.LatLngBounds
+import android.animation.ValueAnimator
+import android.view.animation.LinearInterpolator
 import com.amap.api.maps.model.Marker
 import com.amap.api.maps.model.MarkerOptions
 import com.amap.api.maps.model.Polyline
@@ -275,6 +277,10 @@ class GuidanceActivity : AppCompatActivity() {
     private var lastCameraMs = 0L
     /** 最后一次可信航向：停车/低速时沿用它，避免镜头跟着乱跳的 GPS 航向打转 */
     private var lastCamBearing = 0f
+    /** 上一次镜头动画时长（毫秒）：车标补间跟它同步，两者才不会各走各的 */
+    private var markerAnimMs = 900L
+    /** 车标补间动画：新定位到达时取消重来，不排队 */
+    private var markerAnim: ValueAnimator? = null
     /** 底部系统栏/手势条高度：卡片是 GONE 状态收不到 inset 分发，只能借别的 View 记下来 */
     private var sysBottomInset = 0
     /** 用户触碰地图后的自动恢复跟随任务（触碰期间只暂停，不永久停跟） */
@@ -1777,7 +1783,7 @@ class GuidanceActivity : AppCompatActivity() {
                         .zIndex(9f)
                 )
             } else {
-                m.position = pos
+                slideMarkerTo(m, pos)
             }
             // 车头方向对齐道路前进方向：billboard 不随地图旋转，用「行进方位 - 地图方位」
             // 得到图标在屏幕上的旋转角 —— 地图车头朝上时恰好为 0（正朝前），
@@ -1792,6 +1798,42 @@ class GuidanceActivity : AppCompatActivity() {
                 else -> 0.8f
             }
         } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * 车标在两次定位之间补间滑动。
+     *
+     * 只让镜头滑、车标每秒硬跳一次的话，观感仍然是"卡"：镜头在走，车标却一格一格
+     * 往前蹦（45km/h 下每秒十几米，屏幕上是几十个像素的跳变）。
+     * 补间时长取跟镜头同一份 [markerAnimMs]，两者同步推进，看起来就是车标钉在地面上、
+     * 地图从它下面滑过去。
+     *
+     * 兜底：位移 <1m（抖动）直接对准，>500m（定位漂移/重新规划）直接跳，不滑。
+     */
+    private fun slideMarkerTo(m: Marker, to: LatLng) {
+        val from = m.position
+        val d = com.motohud.ble.navi.LocationFilter.distanceM(
+            from.latitude, from.longitude, to.latitude, to.longitude
+        )
+        markerAnim?.cancel()
+        if (d < 1f || d > 500f) {
+            runCatching { m.position = to }
+            return
+        }
+        markerAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = markerAnimMs.coerceIn(CAM_ANIM_MIN_MS, CAM_ANIM_MAX_MS)
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                val f = it.animatedValue as Float
+                runCatching {
+                    m.position = LatLng(
+                        from.latitude + (to.latitude - from.latitude) * f,
+                        from.longitude + (to.longitude - from.longitude) * f
+                    )
+                }
+            }
+            start()
         }
     }
 
@@ -1821,6 +1863,7 @@ class GuidanceActivity : AppCompatActivity() {
             else -> (now - lastCameraMs).coerceIn(CAM_ANIM_MIN_MS, CAM_ANIM_MAX_MS)
         }
         lastCameraMs = now
+        markerAnimMs = animMs
         lastFollowLat = s.latitude
         lastFollowLng = s.longitude
         // 路口前（<200m 且要转弯）自动放大，过路口回退 —— 免去手动缩放。
@@ -3756,6 +3799,9 @@ class GuidanceActivity : AppCompatActivity() {
         runCatching { unregisterReceiver(pipReceiver) }
         betterRouteHandler.removeCallbacks(betterRouteTask)
         betterRouteHandler.removeCallbacks(resumeFollowRunnable)
+        // 车标补间还在跑的话先停：marker 随地图一起销毁，动画回调再 setPosition 会抛
+        markerAnim?.cancel()
+        markerAnim = null
         // 必须在 mapView.onDestroy 之前：CrossOverlay 挂在 aMap 上，地图先销毁会抛
         runCatching { vectorCrossRenderer?.release() }
         vectorCrossRenderer = null
