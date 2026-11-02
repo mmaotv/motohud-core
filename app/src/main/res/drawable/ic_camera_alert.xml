@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  电子眼剪影（拿不到限速数值时用的占位图标）。
+  用 evenOdd 打洞做出镜头，单色即可 —— 颜色由代码按电子眼分组 setImageTintList，
+  不用多套配色资源。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M9,4L7.5,6L4,6C2.9,6 2,6.9 2,8l0,10c0,1.1 0.9,2 2,2l16,0c1.1,0 2,-0.9 2,-2L22,8c0,-1.1 -0.9,-2 -2,-2l-3.5,0L15,4L9,4zM12,16.6c-2.21,0 -4,-1.79 -4,-4s1.79,-4 4,-4s4,1.79 4,4S14.21,16.6 12,16.6zM12,14.6c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2s-2,0.9 -2,2S10.9,14.6 12,14.6z" />
+</vector>

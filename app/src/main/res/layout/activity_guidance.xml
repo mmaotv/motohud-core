@@ -276,46 +276,85 @@
             android:visibility="gone" />
 
         <!--
-          电子眼 / 限速（导航 SDK updateCameraInfo）：
-          左边是限速徽章（红圈白底数字，和高德一样一眼可辨），右边是文字提示。
+          电子眼 / 限速卡（导航 SDK updateCameraInfo）—— 照着高德的做法重做：
+          原来「徽章 + 一行字」横排，距离、类型、限速、数量全挤在一行里，
+          骑行时扫一眼分不出主次。现在拆成「一列两行 + 左侧圆形图标」：
+            · 左侧：[限速红圈数字] 或 [同色调摄像头剪影]（拿不到限速才用剪影）
+            · 第一行（小字·次要色）：前方 500米 / 区间还剩 800米
+            · 第二行（大字·分组色）：测速摄像头（3 处）
+          大字用分组色（红=测速/橙=闯红灯/黄=占道/灰=通用违章），主次一眼分明。
         -->
         <LinearLayout
             android:id="@+id/ll_camera_warn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_horizontal"
-            android:layout_marginTop="6dp"
-            android:background="@drawable/bg_navi_panel"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_camera_card"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingStart="8dp"
-            android:paddingTop="4dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="4dp"
+            android:paddingTop="7dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="7dp"
             android:visibility="gone">
 
-            <TextView
-                android:id="@+id/tv_limit_badge"
-                android:layout_width="34dp"
-                android:layout_height="34dp"
-                android:background="@drawable/bg_limit_badge"
-                android:fontFamily="@font/inter"
-                android:gravity="center"
-                android:includeFontPadding="false"
-                android:textColor="?attr/nvDanger"
-                android:textSize="14sp"
-                android:textStyle="bold"
-                android:visibility="gone" />
+            <FrameLayout
+                android:layout_width="44dp"
+                android:layout_height="44dp">
 
-            <TextView
-                android:id="@+id/tv_camera_warn"
+                <TextView
+                    android:id="@+id/tv_limit_badge"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/bg_limit_badge"
+                    android:fontFamily="@font/inter"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:textColor="?attr/nvDanger"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
+                <ImageView
+                    android:id="@+id/iv_camera_kind"
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_camera_alert"
+                    android:visibility="gone" />
+            </FrameLayout>
+
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:fontFamily="@font/inter"
-                android:textColor="?attr/nvWarn"
-                android:textSize="12sp"
-                android:textStyle="bold" />
+                android:layout_marginStart="10dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tv_camera_ahead"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="@font/inter"
+                    android:maxLines="1"
+                    android:textColor="?attr/nvTextSecondary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_camera_warn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:ellipsize="end"
+                    android:fontFamily="@font/inter"
+                    android:maxLines="1"
+                    android:textColor="?attr/nvTextPrimary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- 路口放大图已移到地图层左下角，见布局顶部的 iv_cross_image -->

@@ -40,6 +40,7 @@ import com.amap.api.maps.MapView
 import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.LatLngBounds
 import android.animation.ValueAnimator
+import android.os.SystemClock
 import android.view.animation.LinearInterpolator
 import com.amap.api.maps.model.Marker
 import com.amap.api.maps.model.MarkerOptions
@@ -196,6 +197,8 @@ class GuidanceActivity : AppCompatActivity() {
     /** 电子眼提示整行（含限速徽章），显隐要整行控制 */
     private lateinit var llCameraWarn: View
     /** 电子眼 / 限速提示（updateCameraInfo） */
+    private lateinit var tvCameraAhead: TextView
+    private lateinit var ivCameraKind: ImageView
     private lateinit var tvCameraWarn: TextView
     /** 限速徽章（红圈数字）；0 = 无已知限速，隐藏 */
     private lateinit var tvLimitBadge: TextView
@@ -310,6 +313,9 @@ class GuidanceActivity : AppCompatActivity() {
     /** 上一次相机跟随的目标点（用于拦截异常跳跃） */
     private var lastFollowLat = 0.0
     private var lastFollowLng = 0.0
+    /** 「疑似漂移」的那一帧位置：连续两帧都在同一处就承认它是真的，重新锚定 */
+    private var farFixLat = 0.0
+    private var farFixLng = 0.0
     private var stopped = false
 
     /**
@@ -628,6 +634,8 @@ class GuidanceActivity : AppCompatActivity() {
         tvSignalWarn = findViewById(R.id.tv_signal_warn)
         laneGuideView = findViewById(R.id.ll_lane_guide)
         llCameraWarn = findViewById(R.id.ll_camera_warn)
+        tvCameraAhead = findViewById(R.id.tv_camera_ahead)
+        ivCameraKind = findViewById(R.id.iv_camera_kind)
         tvCameraWarn = findViewById(R.id.tv_camera_warn)
         tvLimitBadge = findViewById(R.id.tv_limit_badge)
         ivCrossImage = findViewById(R.id.iv_cross_image)
@@ -1180,6 +1188,14 @@ class GuidanceActivity : AppCompatActivity() {
                 engine.start(destName, destLat, destLng, from, r.route)
                 userPanned = false
                 lastCameraMs = 0L
+                // 跟随锚点必须一起清掉：引擎里还留着上一次会话的最后位置，
+                // 新会话第一帧从锚点"跳"到真实起点有几百米甚至几公里，
+                // 会撞上下面那个 5km 防抖守卫，相机从此再也不跟（真机复现）。
+                lastFollowLat = 0.0
+                lastFollowLng = 0.0
+                farFixLat = 0.0
+                farFixLng = 0.0
+                stopCameraGlide()
             } else if (r is RoutePlanResult.Failure) {
                 Toast.makeText(
                     this@GuidanceActivity,
@@ -1775,7 +1791,7 @@ class GuidanceActivity : AppCompatActivity() {
                     MarkerOptions()
                         .position(pos)
                         .anchor(0.5f, 0.5f)
-                        // 摩托车俯视图标，车头朝正北
+                        // 蓝底圆 + 方向箭头（定位图标），箭头朝上 = 行进方向
                         .icon(com.motohud.ble.amap.VehicleMarker.icon(this))
                         // billboard（不平贴）：导航页地图是 3D 倾斜的，平贴会把圆形压成椭圆、
                         // 剪影糊成一团。billboard 始终正对立面，圆是圆、车是车，最清晰。
@@ -1850,12 +1866,29 @@ class GuidanceActivity : AppCompatActivity() {
         val map = aMap ?: return
         if (s.latitude == 0.0 && s.longitude == 0.0) return
         if (userPanned && !force) return
-        // 兜底：单帧位移超过 5km 时不跟随，避免定位错点时地图"飞走"变白屏
-        if (!force && lastFollowLat != 0.0 &&
-            com.motohud.ble.navi.LocationFilter.distanceM(
+        // 兜底：单帧位移超过 5km 时不跟随，避免定位错点时地图"飞走"变白屏。
+        // **必须能自愈**：只有"连续两帧都待在远处"才算新的真实位置并重新锚定，
+        // 否则一次换会话/一次冷启动漂移就会把这个守卫永久卡死 ——
+        // 老实现只有 return 没有复位，锚点永不更新，相机从此再也不跟（真机复现：
+        // 首帧读的是上次会话残留的 29.5885，真实起点 29.5628，位移 5.5km）。
+        if (!force && lastFollowLat != 0.0) {
+            val jump = com.motohud.ble.navi.LocationFilter.distanceM(
                 lastFollowLat, lastFollowLng, s.latitude, s.longitude
-            ) > 5000f
-        ) return
+            )
+            if (jump > 5000f) {
+                val farConfirmed = farFixLat != 0.0 &&
+                    com.motohud.ble.navi.LocationFilter.distanceM(
+                        farFixLat, farFixLng, s.latitude, s.longitude
+                    ) < 500f
+                if (!farConfirmed) {
+                    farFixLat = s.latitude
+                    farFixLng = s.longitude
+                    return
+                }
+            }
+        }
+        farFixLat = 0.0
+        farFixLng = 0.0
         val now = System.currentTimeMillis()
         if (!force && now - lastCameraMs < CAM_FOLLOW_MS) return
         val animMs = when {
@@ -1931,20 +1964,93 @@ class GuidanceActivity : AppCompatActivity() {
                     }
                 }
             }
-            // 统一用 CameraPosition 动相机：bearing/tilt 全程保持，
-            // 只有 target 在变 —— 这样每一帧都只是平移，不会出现转向/拍平的二次运动。
-            map.animateCamera(
-                CameraUpdateFactory.newCameraPosition(
-                    com.amap.api.maps.model.CameraPosition.builder()
-                        .target(target)
-                        .zoom(zoom)
-                        .bearing(baseBearing)
-                        .tilt(tilt)
-                        .build()
-                ), animMs, null
-            )
+            // 用「每帧 moveCamera 自己补间」代替 animateCamera —— 不是风格选择，是必须：
+            // 实测把 animateCamera 按 3Hz（比动画时长更密）连续调用时，AMap 会把后续动画
+            // 整个丢掉，cameraPosition 900ms 一动不动，车标直接被跑出屏幕（真机复现）。
+            // 自己补间还有个好处：镜头与车标共用同一个时长，两者严格同步，不会各走各的。
+            startCameraGlide(map, target, zoom, baseBearing, tilt, animMs)
         } catch (_: Exception) {
         }
+    }
+
+    /** 相机补间：起点 → 终点线性插值，每帧 moveCamera 一次 */
+    private class CamGlide(
+        val fromLat: Double, val fromLng: Double,
+        val toLat: Double, val toLng: Double,
+        val fromZoom: Float, val toZoom: Float,
+        val fromBrg: Float, val toBrg: Float,
+        val fromTilt: Float, val toTilt: Float,
+        val startMs: Long, val durMs: Long
+    )
+
+    private var camGlide: CamGlide? = null
+
+    /**
+     * 启动一次相机补间。
+     *
+     * 起点取**当前相机实际位置**而不是上一次的目标：定位帧之间用户可能拖过地图、
+     * 或者上次补间只走了一半，从实际位置续上才不会跳。
+     */
+    private fun startCameraGlide(
+        map: com.amap.api.maps.AMap,
+        to: LatLng,
+        zoom: Float,
+        bearing: Float,
+        tilt: Float,
+        durMs: Long
+    ) {
+        val mv = mapView ?: return
+        val cur = map.cameraPosition
+        val from = cur?.target ?: to
+        camGlide = CamGlide(
+            from.latitude, from.longitude, to.latitude, to.longitude,
+            cur?.zoom ?: zoom, zoom,
+            cur?.bearing ?: bearing, bearing,
+            cur?.tilt ?: tilt, tilt,
+            SystemClock.uptimeMillis(), durMs.coerceAtLeast(1L)
+        )
+        mv.removeCallbacks(camGlideTick)
+        mv.postOnAnimation(camGlideTick)
+    }
+
+    private val camGlideTick = object : Runnable {
+        override fun run() {
+            val g = camGlide ?: return
+            val mv = mapView ?: return
+            val map = aMap ?: return
+            val t = ((SystemClock.uptimeMillis() - g.startMs).toFloat() / g.durMs).coerceIn(0f, 1f)
+            runCatching {
+                map.moveCamera(
+                    CameraUpdateFactory.newCameraPosition(
+                        com.amap.api.maps.model.CameraPosition.builder()
+                            .target(
+                                LatLng(
+                                    g.fromLat + (g.toLat - g.fromLat) * t,
+                                    g.fromLng + (g.toLng - g.fromLng) * t
+                                )
+                            )
+                            .zoom(g.fromZoom + (g.toZoom - g.fromZoom) * t)
+                            .bearing(lerpBearing(g.fromBrg, g.toBrg, t))
+                            .tilt(g.fromTilt + (g.toTilt - g.fromTilt) * t)
+                            .build()
+                    )
+                )
+            }
+            if (t < 1f) mv.postOnAnimation(this) else camGlide = null
+        }
+    }
+
+    /** 角度插值走最短弧：359°→1° 不能倒着转一圈 */
+    private fun lerpBearing(a: Float, b: Float, t: Float): Float {
+        var d = (b - a) % 360f
+        if (d > 180f) d -= 360f
+        if (d < -180f) d += 360f
+        return (a + d * t + 360f) % 360f
+    }
+
+    private fun stopCameraGlide() {
+        camGlide = null
+        mapView?.removeCallbacks(camGlideTick)
     }
 
     /** 把镜头中心沿行进方向前移 [meters] 米，让车标落在屏幕下方、前方路况看得更远 */
@@ -2869,6 +2975,23 @@ class GuidanceActivity : AppCompatActivity() {
     }
 
     /**
+     * 左侧圆形图标区：有极限速数字就只放数字，没有才放同色调的摄像头剪影。
+     *
+     * 两个控件互斥 —— 叠在一起会变成「数字上压着一个镜头」，像没做完。
+     * [show] 为 true 时按电子眼分组取色做 tint，不额外准备多套图标。
+     */
+    private fun bindCameraGlyph(show: Boolean, type: Int) {
+        if (show) {
+            val color = themeColor(com.motohud.ble.navi.CameraKind.colorAttr(type))
+            if (ivCameraKind.visibility != View.VISIBLE) ivCameraKind.visibility = View.VISIBLE
+            val tint = android.content.res.ColorStateList.valueOf(color)
+            if (ivCameraKind.imageTintList != tint) ivCameraKind.imageTintList = tint
+        } else if (ivCameraKind.visibility != View.GONE) {
+            ivCameraKind.visibility = View.GONE
+        }
+    }
+
+    /**
      * 导航 SDK 新增能力的界面渲染：车道线 / 电子眼限速 / 路口放大图 / 重新规划提示。
      *
      * 这四样在接入导航 SDK 之前**一项都做不到**（搜索 SDK 不给这些数据），
@@ -2891,40 +3014,52 @@ class GuidanceActivity : AppCompatActivity() {
             laneGuideView.visibility = View.GONE
         }
 
-        // ---- 电子眼 / 限速 ----
+        // ---- 电子眼 / 限速卡 ----
+        // 结构照高德：左侧限速圈（或摄像头剪影）+ 一列两行（距离 / 类型）。
+        // 主次靠「字号 + 颜色」区分，不靠堆字数。
         val cam = s.camera
         val showLimit = s.limitSpeedKmh > 0 && s.running
         when {
             cam != null && cam.distanceM in 1..CAMERA_SHOW_M -> {
-                llCameraWarn.visibility = View.VISIBLE
-                tvCameraWarn.text = if (cam.interval) {
+                if (llCameraWarn.visibility != View.VISIBLE) llCameraWarn.visibility = View.VISIBLE
+                // 第一行（小字）：距离；区间测速改写「区间还剩」
+                tvCameraAhead.text = if (cam.interval) {
                     getString(
                         R.string.camera_interval_remain,
                         com.motohud.ble.navi.SpeechScript.span(cam.intervalRemainM)
                     )
                 } else {
-                    // 一串探头并成一句（"违章拍照（3 处）"）：屏幕上是唯一的"数量"出口，
-                    // 语音只按串念一次，不说 N —— "3 处"在内置语音包里没有片段
-                    cameraText(cam) + when {
-                        cam.clusterCount == com.motohud.ble.navi.CameraAlert.MULTI ->
-                            getString(R.string.camera_cluster_multi)
-                        cam.clusterCount > 1 ->
-                            getString(R.string.camera_cluster_suffix, cam.clusterCount)
-                        else -> ""
-                    }
+                    getString(
+                        R.string.camera_card_ahead,
+                        com.motohud.ble.navi.SpeechScript.span(cam.distanceM)
+                    )
+                }
+                // 第二行（大字）：只有类型 + 数量。
+                // 不能复用 cameraText() —— 它拼的是整句（「前方 100 米有闯红灯拍照，限速 60」），
+                // 那是给单行版和语音用的，放到卡片里会和第一行重复、还会撑破侧栏被截断。
+                tvCameraWarn.text = getString(com.motohud.ble.navi.CameraKind.labelRes(cam.type)) + when {
+                    cam.clusterCount == com.motohud.ble.navi.CameraAlert.MULTI ->
+                        getString(R.string.camera_cluster_multi)
+                    cam.clusterCount > 1 ->
+                        getString(R.string.camera_cluster_suffix, cam.clusterCount)
+                    else -> ""
                 }
                 // 色标：红=测速 / 橙=闯红灯 / 黄=占道 / 灰=通用违章（只上屏不念的那类）
                 bindCameraTone(cam.type)
                 // 徽章优先用该电子眼的限速，没有就退回路段限速
                 val limit = cam.speedKmh.takeIf { it > 0 } ?: s.limitSpeedKmh
                 bindLimitBadge(limit)
+                // 有数字就不放剪影：一件东西只讲一件事
+                bindCameraGlyph(limit <= 0, cam.type)
             }
             // 没有电子眼但路段有限速：只显示限速，别空着
             showLimit -> {
-                llCameraWarn.visibility = View.VISIBLE
-                tvCameraWarn.text = getString(R.string.navi_limit_only, s.limitSpeedKmh)
+                if (llCameraWarn.visibility != View.VISIBLE) llCameraWarn.visibility = View.VISIBLE
+                tvCameraAhead.text = getString(R.string.navi_limit_only, s.limitSpeedKmh)
+                tvCameraWarn.text = getString(R.string.camera_card_limit_label)
                 bindCameraTone(com.motohud.ble.navi.CameraKind.SPEED)
                 bindLimitBadge(s.limitSpeedKmh)
+                bindCameraGlyph(false, com.motohud.ble.navi.CameraKind.SPEED)
             }
             else -> {
                 if (llCameraWarn.visibility != View.GONE) llCameraWarn.visibility = View.GONE
@@ -3196,6 +3331,7 @@ class GuidanceActivity : AppCompatActivity() {
         engine.onRerouteRequest = null
         betterRouteHandler.removeCallbacks(betterRouteTask)
         betterRouteHandler.removeCallbacks(resumeFollowRunnable)
+        stopCameraGlide()
         hideBetterRouteCard()
         engine.stop()
         // 停导航就停气压计：传感器回调一直在跑会白白耗电，而且离开导航后
@@ -3802,6 +3938,7 @@ class GuidanceActivity : AppCompatActivity() {
         // 车标补间还在跑的话先停：marker 随地图一起销毁，动画回调再 setPosition 会抛
         markerAnim?.cancel()
         markerAnim = null
+        stopCameraGlide()
         // 必须在 mapView.onDestroy 之前：CrossOverlay 挂在 aMap 上，地图先销毁会抛
         runCatching { vectorCrossRenderer?.release() }
         vectorCrossRenderer = null

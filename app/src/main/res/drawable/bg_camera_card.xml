@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  电子眼提示卡底板：比普通玻璃面板更"实"一点（圆角更小、描边更明显），
+  因为它是限速/拍照提醒，需要在整屏地图里一眼跳出来，而不是融进信息栏。
+  色值全部走主题属性，日夜两套主题自动跟随。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="?attr/nvPanelColor" />
+    <stroke
+        android:width="1.5dp"
+        android:color="?attr/nvPanelStroke" />
+    <corners android:radius="14dp" />
+</shape>

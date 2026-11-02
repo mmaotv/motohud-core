@@ -840,6 +840,10 @@
     -->
     <string name="camera_ahead">前方 %1$s有%2$s</string>
     <string name="camera_ahead_limit">前方 %1$s有%2$s，限速 %3$d</string>
+    <!-- 电子眼卡片第一行（小字）：只放距离，类型放到下面的大字行 -->
+    <string name="camera_card_ahead">前方 %1$s</string>
+    <!-- 没有电子眼、只有路段限速时卡片的大字文案，数字由左侧限速徽章给出 -->
+    <string name="camera_card_limit_label">本段限速</string>
     <string name="camera_ahead_interval">前方 %1$s进入区间测速，限速 %2$d，区间还剩 %3$s</string>
     <string name="camera_interval_remain">区间还剩 %1$s</string>
 
