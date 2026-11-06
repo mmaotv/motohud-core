@@ -47,7 +47,7 @@ class TipAdapter(
         if (tip.district.isNotBlank()) parts += tip.district
         if (tip.address.isNotBlank()) parts += tip.address
         holder.address.text = parts.joinToString(" · ")
-            .ifEmpty { String.format(java.util.Locale.US, "%.4f, %.4f", tip.latitude, tip.longitude) }
+            .ifEmpty { holder.itemView.context.getString(R.string.tip_unnamed) }
         holder.itemView.setOnClickListener { onClick(tip) }
     }
 

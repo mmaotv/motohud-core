@@ -1,18 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  顶部渐变：让状态栏与顶栏在地图 / 卫星图上始终可读。
+  顶部渐变：让状态栏与目的地卡在地图 / 卫星图上始终可读。
 
-  **前 45% 是实色**（centerY=0.45），后面才渐隐到透明。
-  纯线性渐变（0% → 100%）的问题：标题在 60dp 处只有约 67% 不透明度，
-  白天压不住饱和的地图绿地 —— 真机表现为"标题栏被地染成绿色"，
-  再叠加 scrim 也没用（叠完是淡绿）。留一段实色区最直接。
+  高度**不再写死**：`GuidanceActivity.updateScrimHeight()` 每次布局后按
+  「状态栏 + 目的地卡下沿 + 10dp」实测设置，横竖屏、侧栏在左在右都是同一套规则。
+  所以这里的比例只需要保证「实色区够用、尾巴够短」。
+
+  前 76% 实色（centerY=0.76），后面 24% 快速渐隐到透明。
+  原来 centerY=0.6 是配合 170dp 的：实色区 102dp、渐隐段 68dp。
+  现在整体高度降到约 100dp（竖屏）/ 30~40dp（横屏），
+  0.76 让实色区仍然完整压住状态栏和目的地卡，尾巴只有二十来 dp，
+  地图上方不会再糊一层灰 —— 这就是用户反复说的"雾遮罩太厚"。
 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <gradient
         android:angle="270"
         android:centerColor="?attr/nvScrimFrom"
-        android:centerY="0.45"
+        android:centerY="0.76"
         android:endColor="?attr/nvScrimTo"
         android:startColor="?attr/nvScrimFrom" />
 </shape>

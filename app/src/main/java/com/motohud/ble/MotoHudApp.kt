@@ -11,6 +11,8 @@ import com.motohud.ble.data.SearchEngine
 import com.motohud.ble.data.bike.BikePrefs
 import com.motohud.ble.navi.AmapNaviEngine
 import com.motohud.ble.navi.NaviForwarder
+import com.motohud.ble.obd.ObdClient
+import com.motohud.ble.obd.ObdPrefs
 
 class MotoHudApp : Application() {
 
@@ -21,6 +23,16 @@ class MotoHudApp : Application() {
     val naviTrackPointDao by lazy { db.naviTrackPointDao() }
     val bleManager by lazy { BleConnectionManager(this) }
     val faultRepository get() = FaultRepository
+
+    /**
+     * OBD 诊断头客户端（ELM327 over BLE）。
+     *
+     * 和 [bleManager] 是两条独立的 BLE 链路：车机那条给仪表/投屏，这条给
+     * 转速/水温/电压/故障码 —— 车机上行帧恒为 0，这些数据只能从 OBD 拿。
+     * 不自动连接（[ObdPrefs.enabled] 默认关），由用户先连一次车机再按需开，
+     * 免得一开机就抢 BLE 带宽、也免得没插诊断头时反复扫描耗电。
+     */
+    val obdClient by lazy { ObdClient(this) }
 
     /**
      * 全局单例导航引擎（手机导航页与车机投屏 HUD 共享同一实例）。
@@ -46,6 +58,8 @@ class MotoHudApp : Application() {
         BikePrefs.init(this)
         // 车机存档（上次连接的设备，用于自动连接）
         com.motohud.ble.data.device.DevicePrefs.init(this)
+        // OBD 诊断头存档（与车机存档分开存，见 ObdPrefs 注释）
+        ObdPrefs.init(this)
         // 导航偏好（路线偏好 / 语音开关 / 息屏导航）
         com.motohud.ble.data.NaviPrefs.init(this)
         // 坐标纠偏走高德官方 CoordinateConverter，需要 Context 先喂一次

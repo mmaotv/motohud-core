@@ -150,7 +150,11 @@ class PresetPackSpeaker(context: Context) : Speaker {
             var hit: String? = null
             while (len >= 1) {
                 val cand = text.substring(i, i + len)
-                if (index.containsKey(cand) && !isNumberTail(text, i, cand)) {
+                // 不允许只匹配到一串数字的**前缀**：「限速 45」里库中有单字 "4"，
+                // 贪心会先咬走 "4"，剩下的 "5" 又被 isNumberTail 拦掉 → 漏字。
+                val partialNumber = cand[0].isDigit() && cand.all { it.isDigit() } &&
+                    i + len < n && text[i + len].isDigit()
+                if (index.containsKey(cand) && !isNumberTail(text, i, cand) && !partialNumber) {
                     hit = cand
                     break
                 }
@@ -159,6 +163,18 @@ class PresetPackSpeaker(context: Context) : Speaker {
             if (hit != null) {
                 i += hit.length
                 continue
+            }
+            // 数字串整体没录过 → 逐位念（语音包里已补 0~9 单字片段）。
+            // 「限速 45」「限速 130」这类非整十/超出表的值也能完整念出来，
+            // 不会像以前那样静默跳过、变成一句没有限速数值的话。
+            if (text[i].isDigit()) {
+                var j = i
+                while (j < n && text[j].isDigit()) j++
+                if (text.substring(i, j).all { index.containsKey(it.toString()) }) {
+                    i = j
+                    continue
+                }
+                return false
             }
             // 跳过的必须是标点/空白；真正的字被跳过 = 念不全
             val ch = text[i]
@@ -200,7 +216,9 @@ class PresetPackSpeaker(context: Context) : Speaker {
             var hit: String? = null
             while (len >= 1) {
                 val cand = text.substring(i, i + len)
-                if (index.containsKey(cand) && !isNumberTail(text, i, cand)) {
+                val partialNumber = cand[0].isDigit() && cand.all { it.isDigit() } &&
+                    i + len < n && text[i + len].isDigit()
+                if (index.containsKey(cand) && !isNumberTail(text, i, cand) && !partialNumber) {
                     hit = cand
                     break
                 }
@@ -209,6 +227,17 @@ class PresetPackSpeaker(context: Context) : Speaker {
             if (hit != null) {
                 index[hit]?.let { out.add(it) }
                 i += hit.length
+            } else if (text[i].isDigit()) {
+                // 与 canSpeak 的逐位兜底保持一致：整体没录过就一位一位拼
+                var j = i
+                while (j < n && text[j].isDigit()) j++
+                val digits = text.substring(i, j)
+                if (digits.all { index.containsKey(it.toString()) }) {
+                    digits.forEach { index[it.toString()]?.let { f -> out.add(f) } }
+                    i = j
+                } else {
+                    i++
+                }
             } else {
                 i++
             }

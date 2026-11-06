@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  超速态的大限速牌：圈更粗、底微微泛红，配合屏幕四周的红光脉冲。
+  数字由代码同步改成红色，一眼看出"这个限速你已经超了"。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#FFFFF1F1" />
+    <stroke
+        android:width="8dp"
+        android:color="?attr/mtRed" />
+</shape>

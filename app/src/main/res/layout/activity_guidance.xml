@@ -49,12 +49,13 @@
         android:layout_height="match_parent" />
 
 
-    <!-- 顶部渐变（保证状态栏、顶栏在任意底图上可读）
-         高度运行时按横竖屏调整：横屏屏矮，220dp 会盖掉大半张地图 -->
+    <!-- 顶部渐变（保证状态栏、目的地行在任意底图上可读）
+         高度运行时实测（见 updateScrimHeight）：只盖到目的地卡下沿 + 10dp。
+         这里的 96dp 只是首帧兜底值，真正高度在第一次布局后按实际测量值覆盖。 -->
     <View
         android:id="@+id/top_scrim"
         android:layout_width="match_parent"
-        android:layout_height="220dp"
+        android:layout_height="96dp"
         android:layout_gravity="top"
         android:background="@drawable/scrim_navi_top" />
 
@@ -380,24 +381,11 @@
             android:textSize="12sp"
             android:visibility="gone" />
 
-        <!-- 信号弱提示 -->
-        <TextView
-            android:id="@+id/tv_signal_warn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/bg_navi_panel"
-            android:fontFamily="@font/inter"
-            android:paddingStart="12dp"
-            android:paddingTop="6dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="6dp"
-            android:text="@string/navi_signal_weak"
-            android:textColor="?attr/nvWarn"
-            android:textSize="12sp"
-            android:visibility="gone" />
-
+        <!--
+          信号弱提示已移到根 FrameLayout（见文件末尾）。
+          横屏时 top_bar 与 bottom_info 在垂直方向有重叠区，卡片一多，
+          排在最末的这行提示会被底部信息卡压住半截。
+        -->
     </LinearLayout>
 
     <!--
@@ -1221,4 +1209,63 @@
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
+
+    <!--
+      大号限速牌（76dp 红圈白底）。从电子眼卡片里**独立**出来放到地图半屏顶部：
+      电子眼卡片 ll_camera_warn 保持原样（其它电子眼提示一行都没动），
+      但「限速多少」这件事值得一个余光就能扫到的大标识。
+      位置在 applyOrientationLayout() 里按横竖屏重算：
+        竖屏 —— 顶栏下方、地图左上角；
+        横屏 —— 排除 300dp 侧栏后，在地图那半屏的顶部居中。
+    -->
+    <TextView
+        android:id="@+id/tv_limit_sign"
+        android:layout_width="76dp"
+        android:layout_height="76dp"
+        android:layout_gravity="top|start"
+        android:layout_marginTop="178dp"
+        android:background="@drawable/bg_limit_sign"
+        android:fontFamily="@font/inter"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:textColor="#FF161616"
+        android:textSize="30sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <!--
+      信号弱提示：从 top_bar 里独立出来，避免横屏时与底部信息卡抢同一块区域。
+      位置在 applyOrientationLayout() 里按横竖屏 + 侧栏方向重算：
+        竖屏 —— 顶栏下方、整屏居中（保持原样）；
+        横屏 —— 地图那半屏的底部居中（车标下方是已走路段，不挡前方橙线），
+                 左右镜像时用 translationX 把整屏中心平移到地图半屏中心。
+    -->
+    <TextView
+        android:id="@+id/tv_signal_warn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_navi_panel"
+        android:fontFamily="@font/inter"
+        android:paddingStart="12dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="6dp"
+        android:text="@string/navi_signal_weak"
+        android:textColor="?attr/nvWarn"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <!--
+      超速红光（参考高德）：屏幕四周一圈红色渐变 + 呼吸脉冲，中心完全透明。
+      必须放最上层才看得出"整圈"，但 clickable/focusable 全关，不拦地图手势和按钮；
+      中心透明也不会像中央红框那样挡住转向箭头。
+    -->
+    <com.motohud.ble.ui.navi.OverspeedVignette
+        android:id="@+id/overspeed_vignette"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clickable="false"
+        android:focusable="false"
+        android:importantForAccessibility="no"
+        android:visibility="gone" />
 </FrameLayout>

@@ -20,6 +20,26 @@
             android:exported="true"
             android:targetActivity="com.motohud.ble.ui.navi.GuidanceActivity" />
 
+        <!--
+          路线选择页 exported="false"，真机验证时没法用 adb 直达，只能手动搜地点。
+          这里给 debug 包留一个别名，配合 extra name/lat/lng/from_lat/from_lng
+          直接把选路页拉起来（并显式给出起点，绕开无 GPS 的测试机）。
+        -->
+        <activity-alias
+            android:name=".ui.navi.DebugRouteSelectAlias"
+            android:exported="true"
+            android:targetActivity="com.motohud.ble.ui.navi.RouteSelectActivity" />
+
+        <!--
+          车况页同样是 exported="false"，而测试机 168 不允许 input 注入（adb shell input tap
+          会报 INJECT_EVENTS），没法点"连接"。这里给 debug 包留一个别名，配合
+          extra obd_scan / obd_addr 直接触发扫描与握手，只为真机验证协议用。
+        -->
+        <activity-alias
+            android:name=".ui.vehicle.DebugVehicleAlias"
+            android:exported="true"
+            android:targetActivity="com.motohud.ble.ui.vehicle.VehicleActivity" />
+
     </application>
 
 </manifest>

@@ -102,6 +102,17 @@ ROAD_FEATURES = [
     "前方人行天桥，注意行人",
 ]
 
+# 隧道出口方向（与 navi/RoadFeatureNarrator.kt 的 tunnelExitTexts() 逐字一致）。
+# 播报句是「前方进入隧道，请开灯，出隧道后左转」，clipsFor 会把前半句和这半句
+# 切成两段顺序播；没有这几条，整句的后半段会被静默跳过，等于没说出口往哪走。
+TUNNEL_EXITS = [
+    "出隧道后直行",
+    "出隧道后左转",
+    "出隧道后右转",
+    "出隧道后靠左",
+    "出隧道后靠右",
+]
+
 # 弯道预警（与 navi/RoadShape.kt 的 CurveNarrator.fixedText 逐字一致）。
 # 弯道是纯几何自算的结果（polyline 曲率），内置包只需要三种固定说法。
 CURVES = [
@@ -150,13 +161,22 @@ CAMERA_NOTICES = [
     "进入区间测速",
 ]
 
-# 限速数值（2026-11-01 加）。
+# 限速数值（2026-11-01 加，2026-11-05 补齐）。
 # 播报句「前方 200 米有测速摄像头，限速 100」得由
 #   前方 200 米 + 有测速摄像头 + 限速 + 100
 # 四段拼出来，所以「限速」和常见限速值必须单独录。
-# 只录整十档（40~120）：高德下发的限速值实际都是整十，录 41 这种没意义。
-# 念不全时 GuidanceActivity 会 `canSpeak` 判一下退回固定句式，不会漏字。
-LIMIT_WORDS = ["限速", "区间还剩"] + [str(v) for v in range(40, 121, 10)]
+# 2026-11-05：原表只有 40~120，遇到「限速 20/30/130」就念不全、静默降级成
+# 不带限速的固定句 —— 正是实车反馈的「没听到限速多少」。现在做三件事：
+#   1) 整十档扩到 20~130；
+#   2) 录「限速 N」整句，一句一个 mp3，比拼四段连贯得多；
+#   3) 录单字数字 0~9，配合 PresetPackSpeaker 的逐位兜底，任意限速值都能念。
+LIMIT_SPEEDS = list(range(20, 131, 10))
+LIMIT_WORDS = (
+    ["限速", "区间还剩"]
+    + [str(v) for v in LIMIT_SPEEDS]
+    + [str(v) for v in range(10)]
+    + [f"限速 {v}" for v in LIMIT_SPEEDS]
+)
 
 # 服务区 / 沿途交通事件（onServiceAreaUpdate / onNaviRouteNotify）。
 # 事件正文是自由文本（"XX路施工封闭"），内置包一律念固定句，模型链路才读原文。
@@ -196,6 +216,8 @@ def build_phrases():
     for n in NOTICES:
         add(n)
     for n in ROAD_FEATURES:
+        add(n)
+    for n in TUNNEL_EXITS:
         add(n)
     for n in CURVES:
         add(n)

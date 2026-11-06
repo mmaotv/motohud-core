@@ -87,6 +87,44 @@ object RoadFeatureNarrator {
         RoadFeatureType.ROUNDABOUT -> ""
     }
 
+    /**
+     * 出了隧道往哪走 —— 接在「进入隧道，请开灯」后面说。
+     *
+     * 为什么必须在**进洞前**说：洞内没有卫星、也没有指示牌，出洞那两三秒又要
+     * 同时处理明暗适应、车流和分岔。等出了洞再听「前方 50 米左转」，人已经
+     * 站在岔口上了。实测用户两次经过嘉华隧道都没得到方向信息，就是缺这一句。
+     *
+     * @param nextAction 隧道那一段**之后**那一步的动作文本（两套引擎给的说法不同，
+     *   这里统一按词根判，见下）
+     * @return 空串表示没法给出可靠方向（掉头/环岛/到达），索性不说，免得说错
+     */
+    fun afterTunnelText(nextAction: String): String {
+        val a = nextAction.trim()
+        if (a.isEmpty()) return ""
+        // 顺序要紧：先排掉说不出方向的，再认「靠左/靠右」，最后才轮到笼统的左右
+        if (a.contains("掉头") || a.contains("环岛") || a.contains("到达")) return ""
+        val dir = when {
+            a.contains("靠左") || a.contains("向左并") -> "靠左"
+            a.contains("靠右") || a.contains("向右并") -> "靠右"
+            // 左前方/左后方一律并成「左转」：隧道口只要分清往左还是往右，
+            // 细分到"左前"反而要再录一整批语料，收益不值
+            a.contains("左") -> "左转"
+            a.contains("右") -> "右转"
+            a.contains("直行") || a.contains("向前") -> "直行"
+            else -> return ""
+        }
+        return "出隧道后$dir"
+    }
+
+    /** 隧道出口方向的内置语音包固定句，与 gen_voice_pack.py 的 TUNNEL_EXITS 逐字一致 */
+    fun tunnelExitTexts(): List<String> = listOf(
+        "出隧道后直行",
+        "出隧道后左转",
+        "出隧道后右转",
+        "出隧道后靠左",
+        "出隧道后靠右"
+    )
+
     /** 预合成清单：固定句式全部预合成一次，整程复用 */
     fun prewarmTexts(): List<String> = RoadFeatureType.values()
         .map { fixedText(it) }

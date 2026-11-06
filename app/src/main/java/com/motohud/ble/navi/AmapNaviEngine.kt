@@ -103,6 +103,54 @@ class AmapNaviEngine(
     private var lastInfo: NaviInfo? = null
     private var arrived = false
 
+    /**
+     * 当前路线在 SDK 里的 pathid。偏航重算、换策略、过途经点后 SDK 会换一条 path，
+     * 这个值随之变化 —— 它是判断"路线被换掉了"的唯一可靠信号。
+     */
+    private var lastPathId = -1L
+
+    /**
+     * 路线几何变更代数（只增不减，跨会话也不重置）。
+     *
+     * 界面拿 `NaviState.routeGeneration` 与它比较：变了就必须重建折线。
+     * 不能用一个"正在重算"的布尔，因为它在下一帧就被 `applyNaviInfo()` 抹掉了。
+     */
+    private var routeGen = 0
+
+    /** 本趟导航累计已行驶里程（跨重算累加，见 `NaviState.traveledTotal`） */
+    private var traveledBase = 0
+
+    /**
+     * 本趟导航是否已经收到过导航帧（`onNaviInfoUpdate`）。
+     *
+     * 用来区分「首帧建线」和「真的换路」：`start()` 之后 SDK 先按算路结果给一条
+     * path，`startNavi()` 再换成实际导航用的另一条，pathid 在**还没开始播报之前**
+     * 就变了一次。以前这会被当成偏航重算，于是刚点开始导航就播
+     * 「您已偏离原路线，已为您重新规划」（实车 11-04 18:18:48 就是这么响的）。
+     */
+    private var hasNaviInfo = false
+
+    /** 当前这条路线（当前 pathid）上已行驶的里程 */
+    private var pathTraveled = 0
+
+    /**
+     * SDK 已经通知过重算（偏航 / 拥堵），下一次 [refreshPath] 无条件按"换了新路线"处理。
+     *
+     * 为什么要这个标志：`onReCalculateRouteForYaw` 只代表"开始重算"，重算结果多半
+     * 走 `onCalculateRouteSuccess`，但也可能只悄悄更新 `naviPath`。有了它，
+     * 只要 SDK 说了重算，几何就一定会被重建一次，不会出现"数据换了、线没换"。
+     */
+    private var reroutePending = false
+
+    /** 这次换路线是什么原因（[NaviEngine.REROUTE_YAW] 等），用来决定播报措辞 */
+    private var pendingReason = NaviEngine.REROUTE_OTHER
+
+    /** 最近一次换路线的原因，随 `routeGeneration` 一起发布给界面 */
+    private var lastReason = NaviEngine.REROUTE_OTHER
+
+    /** 从 SDK 的 `AMapNaviPath` 还原出来的路线（画线 / 统计用），见 [currentRoute] */
+    private var rebuiltRoute: RouteData? = null
+
     /** 已播报过的电子眼（key = 类型+坐标），避免同一点反复念 */
     private val spokenCameras = HashSet<String>()
 
@@ -144,6 +192,8 @@ class AmapNaviEngine(
      */
     private var camBase: CameraAlert? = null
     private var camBaseAt: Long = 0L
+    /** 上一条「电子眼回调」trace 的时刻：普通探头每秒一次，节流到 5 秒一条 */
+    private var lastCamTraceAt: Long = 0L
     /** 电子眼坐标（用于判断"还是不是同一个点位"；SDK 不带坐标时留 0） */
     private var camLat = 0.0
     private var camLng = 0.0
@@ -405,6 +455,15 @@ class AmapNaviEngine(
         lastInfo = null
         spokenCameras.clear()
         limitPoints = emptyList()
+        // 换了一趟导航：路线标识与里程累计全部从头算。
+        // routeGen 故意**不**清零 —— 界面拿它跟自己记的值比，清零会让"代数倒退"，
+        // 下一次真重算时反而对不上。
+        lastPathId = -1L
+        traveledBase = 0
+        pathTraveled = 0
+        reroutePending = false
+        hasNaviInfo = false
+        rebuiltRoute = null
         runCatching { navi?.stopNavi() }
     }
 
@@ -438,10 +497,43 @@ class AmapNaviEngine(
         fallback.start(name, lat, lng, from, route)
     }
 
-    /** 算路完成 / 重算完成后刷新路线数据（限速点、步骤几何） */
+    /**
+     * 算路完成 / **SDK 重算完成** / 过途经点后刷新路线数据（限速点、步骤几何）。
+     *
+     * 这里是"橙线不跟着走"的修复点：以前它只刷新了 `currentPath`（限速点、引导点），
+     * 画折线用的几何却没人重建 —— 于是车标、播报、剩余距离都按新路线走，
+     * 橙色线还钉在出发时那条旧路上，全程不动。
+     *
+     * 现在会比对 `pathid`：换了路线就重建几何、把代数 +1（界面据此重画），
+     * 并把已走的里程并进累计基准（否则到达卡片的"实际里程"会缩水）。
+     */
     private fun refreshPath(n: AMapNavi) {
         val p = runCatching { n.naviPath }.getOrNull() ?: return
+        val pid = runCatching { p.pathid }.getOrDefault(-1L)
+        val prevId = lastPathId
+        // 首次进入（currentPath 为空）不算换路线；其余情况 pathid 变了、或 SDK 明确
+        // 通知过重算，都当成换了一条新路线
+        val swapped = currentPath != null && (pid != prevId || reroutePending)
+        if (swapped) {
+            traveledBase += pathTraveled.coerceAtLeast(0)
+            pathTraveled = 0
+            routeGen++
+            // 还没收到过导航帧 = 起步阶段 SDK 把算路那条 path 换成了导航用的那条。
+            // 几何照重建、界面照重画（不然后面会画在算路线上），但原因记成 INITIAL，
+            // 界面据此跳过播报 —— 刚点开始就说"您已偏离"是最伤信任的一句。
+            lastReason = if (hasNaviInfo) pendingReason else NaviEngine.REROUTE_INITIAL
+            android.util.Log.i(
+                "NaviReroute",
+                "路线已更换 pathid=$prevId→$pid gen=$routeGen 原因=$lastReason 累计已走=${traveledBase}m 新全长=${p.allLength}m"
+            )
+            com.motohud.ble.data.BleDiagnostic.trace(
+                "重算：路线已更换 pathid=$prevId→$pid gen=$routeGen 原因=$lastReason 累计已走=${traveledBase}m 新全长=${p.allLength}m"
+            )
+        }
+        reroutePending = false
+        pendingReason = NaviEngine.REROUTE_OTHER
         currentPath = p
+        lastPathId = pid
         guides = runCatching { n.naviGuideList.orEmpty() }.getOrDefault(emptyList())
         waypoints = runCatching {
             p.wayPoint.orEmpty().map { it.latitude to it.longitude }
@@ -451,13 +543,122 @@ class AmapNaviEngine(
                 Triple(it.latitude, it.longitude, it.type.toInt())
             }
         }.getOrDefault(emptyList())
+        // 几何同步重建：界面画线、弯道/要素提示都读它
+        routeSteps = buildSteps(p)
+        rebuiltRoute = buildRouteData(p)
         _state.update {
             it.copy(
                 onRoute = true,
                 pathRemain = if (it.pathRemain > 0) it.pathRemain else p.allLength,
-                etaSeconds = if (it.etaSeconds > 0) it.etaSeconds else p.allTime
+                etaSeconds = if (it.etaSeconds > 0) it.etaSeconds else p.allTime,
+                routeGeneration = routeGen,
+                routeChangeReason = lastReason,
+                traveledTotal = traveledBase
             )
         }
+    }
+
+    /**
+     * 每秒廉价地看一眼 SDK 的 pathid 有没有变。
+     *
+     * 不是所有换路线都会走 `onCalculateRouteSuccess`（途经点到达、局部重算都可能
+     * 只更新 `naviPath`），只靠那个回调仍会漏。这里读的是一个字段，成本可以忽略。
+     */
+    private fun syncPathIfSwapped() {
+        if (!running) return
+        val n = navi ?: return
+        if (currentPath == null) return
+        if (!reroutePending) {
+            val pid = runCatching { n.naviPath?.pathid }.getOrNull() ?: return
+            if (pid == lastPathId) return
+        }
+        refreshPath(n)
+    }
+
+    /** SDK 路线 → 我们自己的步骤列表（几何取 `path.steps`，路名等取 `naviGuideList`） */
+    private fun buildSteps(p: AMapNaviPath): List<RouteStep> {
+        val sdkSteps = runCatching { p.steps.orEmpty() }.getOrDefault(emptyList())
+        val list = sdkSteps.mapIndexed { i, s ->
+            val icon = runCatching { s.iconType }.getOrDefault(IconType.NONE)
+            // 引导点与 path.steps 一般等长且一一对应，路名/长度优先取引导点那份
+            val gd = guides.getOrNull(i)
+            val road = runCatching { gd?.name.orEmpty().trim() }.getOrDefault("")
+            val len = runCatching { s.length }.getOrDefault(0).toFloat()
+            RouteStep(
+                instruction = "",
+                action = SpeechScript.action(icon),
+                orientation = "",
+                road = road,
+                distanceM = if (len > 0f) len else runCatching { gd?.length ?: 0 }.getOrDefault(0).toFloat(),
+                polyline = runCatching { s.coords.orEmpty() }
+                    .getOrDefault(emptyList())
+                    .map { it.latitude to it.longitude },
+                // link 级几何 + 路况：导航中折线按这个逐段上色（SDK 官方做法）
+                links = runCatching { s.links.orEmpty() }.getOrDefault(emptyList())
+                    .mapNotNull { l ->
+                        val pts = runCatching { l.coords }.getOrNull().orEmpty()
+                            .map { it.latitude to it.longitude }
+                        if (pts.size < 2) null else RouteLink(
+                            polyline = pts,
+                            trafficStatus = runCatching { l.trafficStatus }.getOrDefault(0)
+                        )
+                    }
+            )
+        }
+        // 拿不到足够的点就不再往下走：`drawRoute` 少于 2 个点会直接 return，
+        // 旧线会原样留在图上 —— 那正是这次要修的观感，不能让它在别的分支里复活
+        if (list.sumOf { it.polyline.size } >= 2) return list
+        // 兜底：整条线用一个步骤铺出来，至少画得出线（播报不依赖步骤切分）
+        val all = runCatching { p.coordList.orEmpty() }.getOrDefault(emptyList())
+            .map { it.latitude to it.longitude }
+        if (all.size < 2) return emptyList()
+        return listOf(
+            RouteStep(
+                instruction = "",
+                action = "",
+                orientation = "",
+                road = "",
+                distanceM = p.allLength.toFloat(),
+                polyline = all
+            )
+        )
+    }
+
+    /** SDK 路线 → RouteData（界面画折线 / 摘要卡片 / 统计都用它） */
+    private fun buildRouteData(p: AMapNaviPath): RouteData? {
+        val steps = routeSteps.ifEmpty { buildSteps(p) }
+        if (steps.isEmpty()) return null
+        val lights = runCatching {
+            p.steps.orEmpty().sumOf { it.trafficLightCount }
+        }.getOrDefault(0)
+        return RouteData(
+            distanceM = runCatching { p.allLength }.getOrDefault(0).toFloat(),
+            durationS = runCatching { p.allTime }.getOrDefault(0).toFloat(),
+            steps = steps,
+            trafficLights = lights,
+            sdkRouteId = runCatching { p.pathid.toInt() }.getOrDefault(-1),
+            // SDK 实际采用的途经点：导航中据它画 1..5 号途经点标记
+            waypoints = runCatching { p.wayPoint.orEmpty() }.getOrDefault(emptyList())
+                .map { it.latitude to it.longitude },
+            // 全线路况分段（按里程）：折线着色用，官方导航就是按它切
+            trafficRuns = runCatching { p.trafficStatuses.orEmpty() }.getOrDefault(emptyList())
+                .map { TrafficRun(it.length, it.status) }
+        )
+    }
+
+    override fun currentRoute(): RouteData? = rebuiltRoute
+
+    override fun forceRecalcForTest(reason: Int): Boolean {
+        val n = navi ?: return false
+        if (!running) return false
+        // 先标记：就算 SDK 这次没回调 onCalculateRouteSuccess，下一次
+        // refreshPath 也会按"换了新路线"处理，几何一定会重建
+        reroutePending = true
+        pendingReason = NaviEngine.REROUTE_YAW
+        val ok = runCatching { n.reCalculateRoute(reason) }.getOrDefault(false)
+        android.util.Log.i("NaviReroute", "测试：手动触发重算 reason=$reason ok=$ok")
+        com.motohud.ble.data.BleDiagnostic.trace("重算：测试手动触发 reason=$reason ok=$ok")
+        return ok
     }
 
     // ---------------------------------------------------------------- 内部：状态映射
@@ -470,6 +671,9 @@ class AmapNaviEngine(
      * 高德官方导航界面就是拿这两个字段渲染转向图标与倒计数的。
      */
     private fun applyNaviInfo(info: NaviInfo) {
+        // SDK 换没换路线，先看一眼 —— 换了就得先重建几何，不然后面算的里程
+        // 会拿新路线的剩余去配旧路线的全长
+        syncPathIfSwapped()
         val icon = info.iconType
         val remain = info.curStepRetainDistance
         val pathRemain = info.pathRetainDistance
@@ -483,6 +687,10 @@ class AmapNaviEngine(
         } else {
             -1
         }
+        // 当前这条路线走了多少（给折线切分用）与整趟累计走了多少（给统计用）分开记：
+        // 重算后前者归零，后者必须接着涨，否则"实际里程/平均速度"全废
+        if (traveled >= 0) pathTraveled = traveled
+        val traveledTotal = (traveledBase + pathTraveled).coerceAtLeast(0)
 
         // 电子眼距离按车速往前推（回调不是每秒一次，见 camBase 注释）
         val camNow = decayCamera(info.currentSpeed)
@@ -515,9 +723,13 @@ class AmapNaviEngine(
                 // 上一个电子眼和它的限速。
                 camera = camNow,
                 traveled = if (traveled >= 0) traveled else s.traveled,
+                traveledTotal = traveledTotal,
                 rerouting = false
             )
         }
+        // 这一帧之后路线就"已经在跑了"：SDK 再换 path（偏航/拥堵/过途经点）
+        // 就是真的重算，该播报就播报
+        hasNaviInfo = true
     }
 
     /**
@@ -736,11 +948,18 @@ class AmapNaviEngine(
             val dup = prev != null && prev.type == parsed.type &&
                 Math.abs(prev.distanceM - parsed.distanceM) <= 80 &&
                 now - camBaseAt < 8_000
+            // 官方文本不带限速。旧代码要求 `prev.type == parsed.type` 才沿用限速，
+            // 但粗回调给的是 SPEED(0)、官方文本解析出的是 F_SPEED(105)，
+            // 两者永远不相等 → 限速被清零 → 「限速多少」这句永远说不出口。
+            // 改为：同一处点位（距离相近）的限速优先，否则退回路段限速。
+            val nearLimit = prev?.takeIf {
+                it.speedKmh > 0 && Math.abs(it.distanceM - parsed.distanceM) <= 150
+            }?.speedKmh ?: 0
+            val limit = if (nearLimit > 0) nearLimit else _state.value.limitSpeedKmh
             val alert = CameraAlert(
                 type = parsed.type,
                 distanceM = parsed.distanceM,
-                // 官方文本不带限速；沿用当前点位/路段的限速值，别把徽章清空
-                speedKmh = prev?.takeIf { it.type == parsed.type }?.speedKmh ?: 0,
+                speedKmh = limit,
                 id = if (dup) prev!!.id else ++camSeq,
                 // -1 = 官方说"多个"（连排探头），界面显示"（多处）"
                 clusterCount = when {
@@ -754,7 +973,16 @@ class AmapNaviEngine(
             // 坐标未知 → 下一个点位一定拿新流水号（不要拿上一个点的坐标去比距离）
             camLat = 0.0
             camLng = 0.0
-            _state.update { it.copy(camera = alert) }
+            _state.update {
+                it.copy(
+                    camera = alert,
+                    // 官方文本解析出的细化类型不该把已有的路段限速灭掉
+                    limitSpeedKmh = if (limit > 0) limit else it.limitSpeedKmh
+                )
+            }
+            com.motohud.ble.data.BleDiagnostic.trace(
+                "官方电子眼「$text」→ type=${parsed.type} ${parsed.distanceM}m 限速=$limit"
+            )
             return true
         }
 
@@ -844,6 +1072,24 @@ class AmapNaviEngine(
             }
             val id = if (same) camBase?.id ?: ++camSeq else ++camSeq
             val withId = merged.copy(id = id)
+            // 只在「新点位」或「首次拿到限速」时留痕：这个回调每秒可能来好几次，
+            // 全写会把 navi_trace.log 刷爆。明天靠这几行就能判断 SDK 到底有没有下发限速。
+            val prevLimit = camBase?.speedKmh ?: 0
+            val firstLimit = prevLimit == 0 && withId.speedKmh > 0
+            // 只比坐标的 same 判定在模拟导航里几乎恒为 false（SDK 每帧给的是
+            // 「当前位置→探头」的不同点），结果一趟能写 700 多条同质地日志，
+            // 把换路 / 播报这些真正用来排障的记录全挤掉。
+            // 拿到限速值的关键点位照常全记；普通探头至少隔 5 秒才记一条。
+            val traceAt = System.currentTimeMillis()
+            if ((!same || firstLimit) &&
+                (withId.speedKmh > 0 || traceAt - lastCamTraceAt >= 5_000L)
+            ) {
+                lastCamTraceAt = traceAt
+                com.motohud.ble.data.BleDiagnostic.trace(
+                    "电子眼回调 type=${withId.type} ${withId.distanceM}m " +
+                        "限速=${withId.speedKmh} 串=${withId.clusterCount} id=$id 新点位=${!same}"
+                )
+            }
             camBase = withId
             camLat = raw.y
             camLng = raw.x
@@ -962,13 +1208,43 @@ class AmapNaviEngine(
             _state.update { it.copy(serviceArea = near) }
         }
 
-        /** 偏航重算：SDK 自己算，我们只把状态标出来（界面可以提示"已重新规划"） */
+        /**
+         * 偏航重算：SDK 自己算，但**必须让我们知道几何换了**。
+         *
+         * 以前这里只置了个 `rerouting = true`，而 `applyNaviInfo()` 下一帧就把它写回
+         * false，全项目又没有任何地方读它 —— 等于什么都没发生。结果就是
+         * 「车标按新路走、橙线钉在旧路上、还没有一句提示」。
+         *
+         * 现在：先记 `reroutePending`，等 SDK 把新 path 填好，由 [syncPathIfSwapped]
+         * 或 `onCalculateRouteSuccess` 统一走 [refreshPath] 重建几何、代数 +1。
+         */
         override fun onReCalculateRouteForYaw() {
+            reroutePending = true
+            pendingReason = NaviEngine.REROUTE_YAW
             _state.update { it.copy(rerouting = true) }
+            com.motohud.ble.data.BleDiagnostic.trace("重算：SDK 通知偏航重算（reroutePending）")
+            android.util.Log.i("NaviReroute", "onReCalculateRouteForYaw")
         }
 
         override fun onReCalculateRouteForTrafficJam() {
+            reroutePending = true
+            pendingReason = NaviEngine.REROUTE_TRAFFIC
             _state.update { it.copy(rerouting = true) }
+            com.motohud.ble.data.BleDiagnostic.trace("重算：SDK 通知拥堵重算（reroutePending）")
+            android.util.Log.i("NaviReroute", "onReCalculateRouteForTrafficJam")
+        }
+
+        /**
+         * 到达途经点：路线前缀被砍掉，几何与里程都变了。
+         *
+         * 这个回调以前完全没实现 —— 加了途经点的路线，过第一个途经点之后
+         * 折线依旧从起点画起，剩余距离也还是整条路线的。
+         */
+        override fun onArrivedWayPoint(wayPointIndex: Int) {
+            reroutePending = true
+            pendingReason = NaviEngine.REROUTE_WAYPOINT
+            com.motohud.ble.data.BleDiagnostic.trace("重算：到达途经点 #$wayPointIndex，路线前缀已截断")
+            android.util.Log.i("NaviReroute", "onArrivedWayPoint $wayPointIndex")
         }
 
         override fun onArriveDestination() {

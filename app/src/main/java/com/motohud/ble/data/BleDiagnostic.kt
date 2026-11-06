@@ -63,10 +63,23 @@ object BleDiagnostic {
     private val writerBusy = AtomicBoolean(false)
     private const val MAX_FILE_BYTES = 1024 * 1024L // 1MB 后轮转
 
+    /**
+     * 导航关键事件单独一个文件（`navi_trace.log`），**不跟着 BLE 帧一起轮转**。
+     *
+     * 为什么要分开：`diag.log` 满 1MB 就轮转，而导航中 BLE 每秒写几十帧，
+     * 实车八九分钟就把整个文件推掉一遍。偏航重算这种事一次骑行只出现一两次，
+     * 写在 diag.log 里，等骑完回来看早就被帧日志挤没了 —— 现场根本没法查。
+     * 这里一次骑行也就几十行，128KB 够存几十趟。
+     */
+    private var traceFile: File? = null
+    private var traceWriter: BufferedWriter? = null
+    private const val TRACE_MAX_BYTES = 128 * 1024L
+
     fun attach(context: Context) {
         val dir = File(context.getExternalFilesDir(null), "ble_diagnostic")
         if (!dir.exists()) dir.mkdirs()
         logFile = File(dir, "diag.log")
+        traceFile = File(dir, "navi_trace.log")
         openWriter()
     }
 
@@ -157,7 +170,38 @@ object BleDiagnostic {
     fun log(msg: String) {
         val t = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         _log.value = (_log.value + LogLine(t, msg)).takeLast(300)
-        appendToFile("[$t] $msg")
+        // 落盘带**日期**：diag.log 是 1MB 轮转的循环历史，只写 HH:mm:ss 时
+        // 跨天的新旧内容混在一起根本分不清（实车排障时反复踩到）。
+        // 内存快照仍用 HH:mm:ss，诊断页展示不受影响。
+        val stamp = SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+        appendToFile("[$stamp] $msg")
+    }
+
+    /**
+     * 记录导航关键事件（重算、路线切换、播报决策等），落到不会被 BLE 帧挤掉的
+     * `navi_trace.log`。实车抓不到 logcat 时就靠它复盘。
+     */
+    fun trace(msg: String) {
+        val t = SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+        _log.value = (_log.value + LogLine(t, msg)).takeLast(300)
+        val line = "[$t] $msg"
+        ioExecutor.execute {
+            try {
+                var f = traceFile ?: return@execute
+                if (f.exists() && f.length() > TRACE_MAX_BYTES) {
+                    traceWriter?.close()
+                    val rotated = File(f.parent, "navi_trace.log.1")
+                    if (rotated.exists()) rotated.delete()
+                    f.renameTo(rotated)
+                    traceWriter = BufferedWriter(FileWriter(f, true))
+                }
+                if (traceWriter == null) traceWriter = BufferedWriter(FileWriter(f, true))
+                traceWriter?.appendLine(line)
+                traceWriter?.flush()
+            } catch (_: Exception) {
+                traceWriter = null
+            }
+        }
     }
 
     private fun appendToFile(line: String) {
@@ -206,7 +250,17 @@ object BleDiagnostic {
         if (!dir.exists()) dir.mkdirs()
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val out = File(dir, "ble_diagnostic_$stamp.txt")
-        out.writeText(loadPersisted().ifEmpty { exportText() })
+        // 导航事件单独一段带上：它才是"偏航有没有重算、线有没有重画"的证据，
+        // 而 diag.log 早就被 BLE 帧轮转光了
+        val body = buildString {
+            append(loadPersisted().ifEmpty { exportText() })
+            val tr = traceFile
+            if (tr != null && tr.exists() && tr.length() > 0) {
+                append("\n\n===== 导航事件（navi_trace.log） =====\n")
+                append(tr.readText())
+            }
+        }
+        out.writeText(body)
         out
     }
 

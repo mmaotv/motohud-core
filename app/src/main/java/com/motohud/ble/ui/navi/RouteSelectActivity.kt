@@ -192,7 +192,6 @@ class RouteSelectActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.rs_dest_name).text = destName
-        findViewById<TextView>(R.id.rs_dest_sub).text = CoordConverter.formatLatLng(destLat, destLng)
 
         prefValue = findViewById(R.id.rs_pref_row)
         renderPref()
@@ -354,7 +353,11 @@ class RouteSelectActivity : AppCompatActivity() {
         val map = aMap ?: return
         drawnLines.forEach { runCatching { it.remove() } }
         drawnLines.clear()
-        if (drawnMarkers.isEmpty()) drawEndpoints(map)
+        // 起终点 + 途经点一起重画：途经点会随用户增删而变，
+        // 只在"第一次空着"时画一次的话，新加的途经点在图上根本看不见
+        drawnMarkers.forEach { runCatching { it.remove() } }
+        drawnMarkers.clear()
+        drawEndpoints(map)
         // 有多套方案才提示"颜色对应下方列表"，单方案时说了反而是噪音
         findViewById<TextView>(R.id.rs_map_hint).visibility =
             if (routes.size > 1) View.VISIBLE else View.GONE
@@ -389,19 +392,114 @@ class RouteSelectActivity : AppCompatActivity() {
             runCatching {
                 val builder = com.amap.api.maps.model.LatLngBounds.Builder()
                 target.forEach { builder.include(it) }
-                /*
-                 * 四边给足内边距，让整条路线缩进顶部卡与底部面板之间的空档。
-                 *
-                 * 试过 `newLatLngBounds(bounds, w, h, padding)` 按可视区适配再 scrollBy
-                 * 微调，结果相机直接飞到北京 —— 两次 animateCamera 连发会互相打断，
-                 * 后一次把前一次的动画取消在中间态。宁可多留白，也不要用这种时序技巧。
-                 */
-                map.animateCamera(
-                    com.amap.api.maps.CameraUpdateFactory
-                        .newLatLngBounds(builder.build(), dp(110))
-                )
+                fitRoutesInBand(map, builder.build())
             }
         }
+    }
+
+    /**
+     * 把整条路线缩放进「顶部卡 ↔ 底部面板」之间的可视带。
+     *
+     * **直接用 SDK 的 `calculateZoomToSpanLevel(矩形, 两点)`**：它按给定的
+     * 屏幕像素矩形反算 zoom 与相机中心，上下左右留白可以完全不对称 ——
+     * 这正是"路线完整落在可视带里、又尽量大"需要的接口。
+     *
+     * 以前自己按 256·2^z 推墨卡托缩放，看似能算，实际有两处系统性偏差：
+     * 一是 AMap 的 zoom→像素比例并不等于裸的 256·2^z，二是纬度方向要用
+     * cos(lat) 修正。两者叠加的结果就是"缩得不对、中心也偏"——
+     * 真机表现为路线左右都被切掉。SDK 自己的投影才是唯一权威。
+     *
+     * 横屏面板在右下角：把右边界也让出来，路线就不会钻到面板底下。
+     */
+    private fun fitRoutesInBand(
+        map: com.amap.api.maps.AMap,
+        bounds: com.amap.api.maps.model.LatLngBounds
+    ) {
+        val mv = mapView ?: return
+        val mapW = mv.width
+        val mapH = mv.height
+        if (mapW <= 0 || mapH <= 0) return
+
+        val land = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val topBar = findViewById<View>(R.id.rs_top_bar)
+        val panel = findViewById<View>(R.id.rs_panel)
+
+        // 可视带 = 顶部卡下沿 ↔ 面板上沿（横屏再让出面板宽度）
+        val topInset = (if (topBar.bottom > 0) topBar.bottom else dp(72)) + dp(12)
+        val bottomInset = if (land) dp(12)
+        else (if (panel.top > 0) (mapH - panel.top) else dp(240)) + dp(12)
+        val leftInset = dp(18)
+        val rightInset = if (land && panel.width > 0) panel.width + dp(20) else dp(18)
+
+        val l = leftInset.coerceIn(0, mapW - 1)
+        val t = topInset.coerceIn(0, mapH - 1)
+        val r = (mapW - rightInset).coerceIn(l + 1, mapW)
+        val b = (mapH - bottomInset).coerceIn(t + 1, mapH)
+
+        val sw = bounds.southwest
+        val ne = bounds.northeast
+
+        /*
+         * 把「非对称可视带」换算成一个**虚拟包围盒**，再交给 SDK 的
+         * `newLatLngBounds` 去算缩放与中心。
+         *
+         * 为什么不自己算 zoom：AMap 的 zoom→像素比例并不是裸的 256·2^z
+         * （试过，同一段路算出来差近一倍），只有 SDK 自己的投影是权威。
+         * 虚拟盒的做法是：把路线包围盒按「整屏 / 可视带」的比例放大，
+         * 并让盒子的中心偏离路线中心 —— 这样 SDK 按整屏适配虚拟盒时，
+         * 真正的路线正好落在可视带里，且四边留白按需不对称。
+         *
+         * 注意 `calculateZoomToSpanLevel` 不能用于这个目的：它那四个 int
+         * 既不是可视矩形也不是 padding，实测给出的 zoom 偏小 5~10 级。
+         */
+        val bandW = (r - l).toDouble().coerceAtLeast(1.0)
+        val bandH = (b - t).toDouble().coerceAtLeast(1.0)
+        val fx = mapW / bandW
+        val fy = mapH / bandH
+
+        // 墨卡托归一化 y（0=北、1=南），用于按比例放大纬度方向
+        val yN = mercY(ne.latitude)
+        val yS = mercY(sw.latitude)
+        val routeYC = (yN + yS) / 2.0
+        val routeYSpan = (yS - yN).coerceAtLeast(1e-9)
+        val lngC = (sw.longitude + ne.longitude) / 2.0
+        val lngSpan = (ne.longitude - sw.longitude).coerceAtLeast(1e-9)
+
+        val vSpanY = routeYSpan * fy
+        val vSpanX = lngSpan * fx
+        // 可视带中心相对屏幕中心的偏移（像素）→ 换算成虚拟盒的经纬度偏移
+        val dxNorm = ((l + r) / 2.0 - mapW / 2.0) / mapW * vSpanX
+        val dyNorm = ((t + b) / 2.0 - mapH / 2.0) / mapH * vSpanY
+        val camLng = lngC - dxNorm
+        val camY = routeYC - dyNorm
+
+        val virtual = runCatching {
+            com.amap.api.maps.model.LatLngBounds(
+                com.amap.api.maps.model.LatLng(mercLat(camY + vSpanY / 2), camLng - vSpanX / 2),
+                com.amap.api.maps.model.LatLng(mercLat(camY - vSpanY / 2), camLng + vSpanX / 2)
+            )
+        }.getOrNull()
+        if (virtual != null) {
+            map.animateCamera(
+                com.amap.api.maps.CameraUpdateFactory.newLatLngBounds(virtual, 0)
+            )
+        } else {
+            map.animateCamera(
+                com.amap.api.maps.CameraUpdateFactory.newLatLngBounds(bounds, dp(72))
+            )
+        }
+    }
+
+    /** 纬度 → 归一化墨卡托 y（0=北、1=南） */
+    private fun mercY(lat: Double): Double {
+        val rad = Math.toRadians(lat)
+        return (1.0 - kotlin.math.ln(kotlin.math.tan(Math.PI / 4 + rad / 2)) / Math.PI) / 2.0
+    }
+
+    /** 归一化墨卡托 y → 纬度（[mercY] 的逆运算） */
+    private fun mercLat(y: Double): Double {
+        val n = Math.PI * (1 - 2 * y)
+        return Math.toDegrees(2 * kotlin.math.atan(kotlin.math.exp(n)) - Math.PI / 2)
     }
 
     private fun drawEndpoints(map: com.amap.api.maps.AMap) {
@@ -417,6 +515,30 @@ class RouteSelectActivity : AppCompatActivity() {
                 com.amap.api.maps.model.MarkerOptions()
                     .position(com.amap.api.maps.model.LatLng(destLat, destLng))
                     .title(destName)
+            )
+        }
+        /*
+         * 途经点：优先画 SDK 本程实际会经过的那一串（`AMapNaviPath.getWayPoint()`）。
+         *
+         * SDK 会因为"就在路边/不可达"合并或忽略某些点，界面必须按它给的画 ——
+         * 否则用户看到一个编号 3 的点，实际导航根本不经过，会以为设错了。
+         * 还没算出路线时退回用户输入的那一串，保证编辑过程中点位不会消失。
+         */
+        val wps = routes.getOrNull(selected)?.waypoints?.takeIf { it.isNotEmpty() }
+            ?: waypoints.map { it.lat to it.lng }
+        wps.forEachIndexed { i, p ->
+            if (p.first == 0.0 && p.second == 0.0) return@forEachIndexed
+            val icon = runCatching {
+                com.amap.api.maps.model.BitmapDescriptorFactory
+                    .fromBitmap(com.motohud.ble.amap.WaypointMarker.badge(this, i + 1))
+            }.getOrNull() ?: return@forEachIndexed
+            drawnMarkers += map.addMarker(
+                com.amap.api.maps.model.MarkerOptions()
+                    .position(com.amap.api.maps.model.LatLng(p.first, p.second))
+                    .icon(icon)
+                    .anchor(0.5f, 0.5f)
+                    .title(getString(R.string.route_waypoint_n, i + 1))
+                    .zIndex(8f)
             )
         }
     }

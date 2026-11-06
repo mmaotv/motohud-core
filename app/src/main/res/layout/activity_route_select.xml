@@ -7,8 +7,8 @@
   滚两屏，地图小得看不出绕不绕路。
 
   现在地图铺满整屏，所有信息压成两层浮层：
-  · 顶部：返回 + 起点→终点（一眼看清"从哪到哪"）
-  · 底部：途经点胶囊 + 方案卡片（横向滑）+ 开始导航
+  · 顶部：返回 + 起点→终点→途经点（一眼看清"从哪到哪、途经哪"）
+  · 底部：方案卡片（横向滑）+ 开始导航
 
   「添加途经点」和「沿途搜索」合并成底部那一个 `rs_add_waypoint` 入口 ——
   两者本来就都是"往路线里塞一个点"，分两个按钮只会让人犹豫点哪个。
@@ -114,7 +114,7 @@
                 android:layout_marginBottom="8dp"
                 android:background="?attr/mtDivider" />
 
-            <!-- 终点 -->
+            <!-- 终点（不再展示经纬度，普通用户无需看到坐标） -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -126,36 +126,84 @@
                     android:layout_height="8dp"
                     android:background="@drawable/dot_orange" />
 
-                <LinearLayout
+                <TextView
+                    android:id="@+id/rs_dest_name"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="9dp"
                     android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:id="@+id/rs_dest_name"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:ellipsize="end"
-                        android:fontFamily="@font/inter"
-                        android:maxLines="1"
-                        android:textColor="?attr/mtTextPrimary"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/rs_dest_sub"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="1dp"
-                        android:ellipsize="end"
-                        android:fontFamily="@font/inter"
-                        android:maxLines="1"
-                        android:textColor="?attr/mtTextTertiary"
-                        android:textSize="11sp" />
-                </LinearLayout>
+                    android:ellipsize="end"
+                    android:fontFamily="@font/inter"
+                    android:maxLines="1"
+                    android:textColor="?attr/mtTextPrimary"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
             </LinearLayout>
+
+            <!-- 途经点：移到顶部起终点卡片内，点 + 加号即可追加必经点（不再占底部面板一整行） -->
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <LinearLayout
+                        android:id="@+id/rs_waypoint_box"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal" />
+
+                    <!--
+                      合并入口：单击 = 搜索 / 沿途搜（同一个搜索页，分类与自由输入都在里面），
+                      长按 = 直接在地图上点位置。
+                    -->
+                    <LinearLayout
+                        android:id="@+id/rs_add_waypoint"
+                        android:layout_width="wrap_content"
+                        android:layout_height="34dp"
+                        android:background="@drawable/bg_chip"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingStart="11dp"
+                        android:paddingEnd="12dp">
+
+                        <ImageView
+                            android:layout_width="14dp"
+                            android:layout_height="14dp"
+                            android:contentDescription="@string/route_waypoint_add_merged"
+                            android:src="@drawable/ic_add"
+                            app:tint="?attr/mtAccent" />
+
+                        <TextView
+                            android:id="@+id/rs_add_waypoint_label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:fontFamily="@font/inter"
+                            android:text="@string/route_waypoint_add_merged"
+                            android:textColor="?attr/mtAccent"
+                            android:textSize="13sp" />
+
+                        <TextView
+                            android:id="@+id/rs_waypoint_count"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="5dp"
+                            android:fontFamily="@font/inter"
+                            android:textColor="?attr/mtTextTertiary"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </HorizontalScrollView>
         </LinearLayout>
     </LinearLayout>
 
@@ -192,73 +240,6 @@
         android:orientation="vertical"
         android:paddingTop="12dp"
         android:paddingBottom="10dp">
-
-        <!-- 途经点胶囊行：左边是已加的点，右边是合并后的唯一入口 -->
-        <HorizontalScrollView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp"
-            android:scrollbars="none">
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <LinearLayout
-                    android:id="@+id/rs_waypoint_box"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal" />
-
-                <!--
-                  合并入口：单击 = 搜索 / 沿途搜（同一个搜索页，分类与自由输入都在里面），
-                  长按 = 直接在地图上点位置。原先「添加途经点」「沿途搜索」两个并排按钮
-                  谁点哪个全靠猜，现在只有一个。
-                -->
-                <LinearLayout
-                    android:id="@+id/rs_add_waypoint"
-                    android:layout_width="wrap_content"
-                    android:layout_height="34dp"
-                    android:background="@drawable/bg_chip"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:paddingStart="11dp"
-                    android:paddingEnd="12dp">
-
-                    <ImageView
-                        android:layout_width="14dp"
-                        android:layout_height="14dp"
-                        android:contentDescription="@string/route_waypoint_add_merged"
-                        android:src="@drawable/ic_add"
-                        app:tint="?attr/mtAccent" />
-
-                    <TextView
-                        android:id="@+id/rs_add_waypoint_label"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp"
-                        android:fontFamily="@font/inter"
-                        android:text="@string/route_waypoint_add_merged"
-                        android:textColor="?attr/mtAccent"
-                        android:textSize="13sp" />
-
-                    <TextView
-                        android:id="@+id/rs_waypoint_count"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="5dp"
-                        android:fontFamily="@font/inter"
-                        android:textColor="?attr/mtTextTertiary"
-                        android:textSize="11sp" />
-                </LinearLayout>
-            </LinearLayout>
-        </HorizontalScrollView>
 
         <!-- 方案卡片：横向滑，横向排才看得出"谁快谁慢" -->
         <androidx.recyclerview.widget.RecyclerView

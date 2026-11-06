@@ -68,6 +68,15 @@ class BleConnectionManager(private val context: Context) {
     private var scanning = false
     private var notifyReadyEmitted = false
 
+    /** 上次真正发起 connectGatt 的时刻（防重入用，见 [connect]） */
+    private var lastConnectAt = 0L
+
+    /** 待触发的重连目标 + 同一个任务实例：重复排程时先撤掉旧的，避免叠成多次连接 */
+    private var reconnectTarget: String? = null
+    private val reconnectTask = Runnable {
+        reconnectTarget?.let { connect(it, fromReconnect = true, autoConnect = true) }
+    }
+
     /**
      * 待写帧。[navKey] 非空表示这是导航帧（NA/RE/NE/REM/NEXT/NAVI），
      * 同类只保留最新一帧 —— 见 [sendNavCommand]。
@@ -421,6 +430,22 @@ class BleConnectionManager(private val context: Context) {
             _events.tryEmit(Event.Error("蓝牙未开启"))
             return
         }
+        /*
+         * 防重入：同一台设备正在连接时，1.5 秒内的重复请求直接丢弃。
+         *
+         * 出发重连会同时被三个来源触发 —— 掉线回调里的 scheduleReconnect、
+         * 页面回前台、以及连上后立刻又断的抖动。每进来一次都会先 disconnectInternal()
+         * 关掉上一次的 gatt 再重开，结果谁也等不到 CONNECTED：实车日志里
+         * 18:37:47 到 18:38:11 连发 6 次、24 秒黑屏，最后是某次恰好赶上才连上。
+         */
+        val nowMs = System.currentTimeMillis()
+        if (_state.value == State.CONNECTING &&
+            _connectedAddress == address &&
+            nowMs - lastConnectAt < CONNECT_REENTRY_GUARD_MS
+        ) {
+            return
+        }
+        lastConnectAt = nowMs
         stopScan()
         cancelAutoConnect()
         val attempts = reconnectAttempts
@@ -679,6 +704,8 @@ class BleConnectionManager(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun disconnect() {
         manualDisconnect = true
+        // 已经排上队的重连要撤掉，否则几百毫秒后它照样会把连接拉回来
+        mainHandler.removeCallbacks(reconnectTask)
         cancelAutoConnect()
         disconnectInternal()
     }
@@ -712,19 +739,31 @@ class BleConnectionManager(private val context: Context) {
         reconnectAttempts++
         _state.value = State.RECONNECTING
         _events.tryEmit(Event.ConnectionState(State.RECONNECTING))
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            connect(address, fromReconnect = true, autoConnect = true)
-        }, BleConstants.RECONNECT_DELAY_MS)
+        reconnectTarget = address
+        // 同一个 Runnable + 先撤旧的：掉线回调短时间连发几次时，只保留最后一次排程，
+        // 不会几个 500ms 后一起醒来各自 connectGatt（那正是重连风暴的直接来源）
+        mainHandler.removeCallbacks(reconnectTask)
+        mainHandler.postDelayed(reconnectTask, BleConstants.RECONNECT_DELAY_MS)
     }
 
     fun release() {
         reconnectAttempts = BleConstants.RECONNECT_COUNT + 1
+        mainHandler.removeCallbacks(reconnectTask)
         stopScan()
         disconnectInternal()
     }
 
     companion object {
         private const val TAG = "BleConnMgr"
+
+        /**
+         * 「正在连接」期间的重复请求抑制窗口。
+         *
+         * 取 1.5 秒：Android 建链正常 200ms~1s 就有结果，超过 1.5 秒还没动静基本是
+         * 卡住了，这时候允许重新发起；而窗口内挡掉的那些请求，本来也只会把
+         * 刚刚建立的连接关掉重来。
+         */
+        private const val CONNECT_REENTRY_GUARD_MS = 1500L
 
         /**
          * 写看门狗超时。原为 2000ms：若 [onCharacteristicWrite] 回调偶发不触发，

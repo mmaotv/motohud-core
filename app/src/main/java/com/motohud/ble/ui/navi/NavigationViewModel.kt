@@ -148,7 +148,7 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
             currentLocation = lat to lng
             _accuracy.value = location.accuracy
             _locationFlow.value = LocationFix(lat, lng, location.accuracy)
-            _locationLabel.value = "当前位置 · ${CoordConverter.formatLatLng(lat, lng)}"
+            _locationLabel.value = "当前位置"
         }
 
         @Deprecated("旧版回调保留兼容")
@@ -202,7 +202,7 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
         return if (addr.isNotEmpty()) {
             "当前位置 · $addr"
         } else {
-            "当前位置 · ${CoordConverter.formatLatLng(fix.lat, fix.lng)}"
+            "当前位置"
         }
     }
 
@@ -221,7 +221,7 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
             currentLocation = lat to lng
             _accuracy.value = best.accuracy
             _locationFlow.value = LocationFix(lat, lng, best.accuracy)
-            _locationLabel.value = "当前位置 · ${CoordConverter.formatLatLng(lat, lng)}"
+            _locationLabel.value = "当前位置"
         } catch (_: Exception) {
         }
     }

@@ -10,6 +10,8 @@ import com.motohud.ble.ble.BleConstants
 import com.motohud.ble.ble.BleProtocol
 import com.motohud.ble.data.FaultRepository
 import com.motohud.ble.data.SearchEngine
+import com.motohud.ble.obd.ObdClient
+import com.motohud.ble.obd.ObdPrefs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,6 +24,10 @@ class MainViewModel(app: MotoHudApp) : ViewModel() {
 
     val ble: BleConnectionManager = app.bleManager
     val searchEngine: SearchEngine = app.searchEngine
+
+    /** OBD 诊断头（第二条 BLE 链路，见 [ObdClient]） */
+    val obd: ObdClient = app.obdClient
+    private val appCtx: android.content.Context = app
 
     // ---------- 扫描 ----------
     private val _scanDevices = MutableStateFlow<List<BleConnectionManager.ScanItem>>(emptyList())
@@ -47,12 +53,16 @@ class MainViewModel(app: MotoHudApp) : ViewModel() {
     private val _telemetry = MutableStateFlow(Telemetry())
     val telemetry = _telemetry.asLiveData(timeoutInMs = 500L)
 
-    // ---------- 体检（CMD_A 开关 + CMD_E/F 故障） ----------
+    // ---------- 体检（CMD_A 开关 + CMD_E/F 故障 + OBD 实码） ----------
     data class SwitchItem(val name: String, val on: Boolean)
     data class Examination(
         val switches: List<SwitchItem> = emptyList(),
         val ecuFault: FaultRepository.FaultItem? = null,
-        val obdFault: FaultRepository.FaultItem? = null
+        val obdFault: FaultRepository.FaultItem? = null,
+        /** OBD 实读故障码（模式 03/07/0A）。车机侧 CMD_F 只有 49 个索引位，永远读不到真码。 */
+        val dtcs: List<FaultRepository.FaultItem> = emptyList(),
+        /** OBD 是否读到过（区分"没读"和"读了没故障"） */
+        val dtcScanned: Boolean = false
     )
 
     private val _examination = MutableStateFlow(Examination())
@@ -102,6 +112,28 @@ class MainViewModel(app: MotoHudApp) : ViewModel() {
                 }
             }
         }
+
+        // OBD 实时数据 → 并入同一份 Telemetry。
+        // 车机（BYQ）上行帧实测恒为 0，转速/水温/电压只有 OBD 这条链路才有源。
+        viewModelScope.launch {
+            obd.live.collect { live -> if (live.hasData) mergeObd(live) }
+        }
+        viewModelScope.launch {
+            obd.dtcs.collect { list ->
+                _examination.value = _examination.value.copy(
+                    dtcs = list.map { toFaultItem(it) },
+                    dtcScanned = _examination.value.dtcScanned || list.isNotEmpty()
+                )
+            }
+        }
+        viewModelScope.launch {
+            obd.message.collect { msg ->
+                if (msg != null) {
+                    _toast.value = msg
+                    obd.consumeMessage()
+                }
+            }
+        }
     }
 
     private fun handleFrame(frame: BleProtocol.Frame?) {
@@ -114,22 +146,26 @@ class MainViewModel(app: MotoHudApp) : ViewModel() {
             }
 
             is BleProtocol.Frame.CmdB -> _telemetry.value = _telemetry.value.copy(
-                speed = frame.speed,
-                rpm = frame.rotatingSpeed,
+                speed = if (obdFresh()) _telemetry.value.speed else frame.speed,
+                rpm = if (obdFresh()) _telemetry.value.rpm else frame.rotatingSpeed,
                 fuel = frame.instantaneousFuel
             )
 
             is BleProtocol.Frame.CmdC -> {
+                // 水温/电压同理：OBD 有新鲜数据时不让车机的 0 覆盖掉
+                val fresh = obdFresh()
                 _telemetry.value = _telemetry.value.copy(
-                    waterTemp = frame.waterTemperature,
+                    waterTemp = if (fresh) _telemetry.value.waterTemp else frame.waterTemperature,
                     roomTemp = frame.roomTemperature,
-                    oil = frame.oilQuantity,
-                    battery = frame.batteryVoltage
+                    oil = if (fresh) _telemetry.value.oil else frame.oilQuantity,
+                    battery = if (fresh) _telemetry.value.battery else frame.batteryVoltage
                 )
                 // 同步给全局快照，导航历史结束时才能记下"当时的车况"
-                com.motohud.ble.data.BikeSnapshot.waterTemp = frame.waterTemperature
-                com.motohud.ble.data.BikeSnapshot.oil = frame.oilQuantity
-                com.motohud.ble.data.BikeSnapshot.battery = frame.batteryVoltage
+                if (!fresh) {
+                    com.motohud.ble.data.BikeSnapshot.waterTemp = frame.waterTemperature
+                    com.motohud.ble.data.BikeSnapshot.oil = frame.oilQuantity
+                    com.motohud.ble.data.BikeSnapshot.battery = frame.batteryVoltage
+                }
             }
 
             is BleProtocol.Frame.CmdD -> {
@@ -200,6 +236,77 @@ class MainViewModel(app: MotoHudApp) : ViewModel() {
 
     fun consumeToast() {
         _toast.value = null
+    }
+
+    // ---------- OBD ----------
+
+    /** OBD 最近 6 秒内有数据 → 认为它是当前有效数据源，车机的 0 不再覆盖它 */
+    private fun obdFresh(): Boolean {
+        val l = obd.live.value
+        return l.hasData && System.currentTimeMillis() - l.updatedAt < 6_000L
+    }
+
+    private fun mergeObd(l: ObdClient.Live) {
+        val t = _telemetry.value
+        _telemetry.value = t.copy(
+            speed = l.speed ?: t.speed,
+            rpm = l.rpm ?: t.rpm,
+            waterTemp = l.coolant ?: t.waterTemp,
+            battery = l.voltage ?: t.battery,
+            oil = l.fuelLevel?.toInt() ?: t.oil
+        )
+        l.coolant?.let { com.motohud.ble.data.BikeSnapshot.waterTemp = it }
+        l.fuelLevel?.let { com.motohud.ble.data.BikeSnapshot.oil = it.toInt() }
+        l.voltage?.let { com.motohud.ble.data.BikeSnapshot.battery = it }
+    }
+
+    /**
+     * OBD 码 → 本地知识库。
+     *
+     * 命中 [FaultRepository] 的 49 个标准码就用现成中文说明；
+     * 没命中（摩托车 ECU 的厂商自定义码很常见，P1xxx 尤其多）也照原样显示码值，
+     * 不能因为"不认识"就吞掉 —— 用户拿去 4S 店就是要这串字符。
+     */
+    private fun toFaultItem(d: ObdClient.Dtc): FaultRepository.FaultItem {
+        val known = FaultRepository.byCode(d.code)
+        val table = "OBD·${d.kind.label}"
+        return known?.copy(table = table) ?: FaultRepository.FaultItem(
+            code = d.code,
+            table = table,
+            name = "标准 OBD 故障码（未收录具体说明）",
+            cause = "该码不在本地 49 条常用码表内，多为车型自定义或子系统专用码",
+            suggestion = "记录码值后按车型查询维修手册"
+        )
+    }
+
+    fun connectObd(address: String, name: String?) {
+        obd.connect(address, name)
+        ObdPrefs.setEnabled(appCtx, true)
+    }
+
+    fun disconnectObd() {
+        obd.disconnect()
+        ObdPrefs.setEnabled(appCtx, false)
+    }
+
+    /** 读码：三条模式（03/07/0A）一起读，读完标记 dtcScanned，界面才能区分"没故障"和"没读过" */
+    fun readObdDtcs() {
+        viewModelScope.launch {
+            val list = obd.readDtcs()
+            _examination.value = _examination.value.copy(
+                dtcs = list.map { toFaultItem(it) },
+                dtcScanned = true
+            )
+            _toast.value = if (list.isEmpty()) "读取完成：没有故障码" else "读取到 ${list.size} 个故障码"
+        }
+    }
+
+    fun clearObdDtcs() {
+        viewModelScope.launch {
+            val ok = obd.clearDtcs()
+            _toast.value = if (ok) "故障码已清除" else "清除失败"
+            if (ok) _examination.value = _examination.value.copy(dtcs = emptyList(), dtcScanned = true)
+        }
     }
 
     // ---------- 生命周期 ----------

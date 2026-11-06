@@ -130,6 +130,32 @@ interface NaviEngine {
         val parallelRoad: Int = 0,
         /** SDK 正在重新规划（偏航 / 拥堵触发） */
         val rerouting: Boolean = false,
+        /**
+         * 路线几何变更代数：每换一条路线（偏航重算 / 换策略 / 过途经点）+1。
+         *
+         * 为什么不用 [rerouting]：那是个布尔，`applyNaviInfo()` 下一帧就把它写回 false，
+         * 而重算完成恰恰发生在下一帧之后 —— 拿它做"该重画了"的信号必然漏。
+         * 代数单调递增，界面比一次就知道"几何变了"。
+         *
+         * 界面收到变化后必须重建折线：`routePoints`/`routeCum` 是出发时缓存的几何，
+         * 不重建就会出现「车标按新路线走、橙线还钉在旧路上」。
+         */
+        val routeGeneration: Int = 0,
+        /**
+         * 最近一次换路线的原因（与 [routeGeneration] 同步更新）。
+         *
+         * 用 [REROUTE_*] 常量。为什么要区分：偏航重算是"你走错了"，
+         * 拥堵重算是"路堵了我给你换一条" —— 两者都用同一句话播报会误导人。
+         */
+        val routeChangeReason: Int = 0,
+        /**
+         * 本趟导航**累计**已行驶里程（米，跨重算累加，单调不减）。
+         *
+         * 与 [traveled] 的区别：`traveled` 是「当前这条路线走了多少」，重算后会归零，
+         * 它是给折线切分用的；到达卡片、导航历史、坡度/行为的里程增量必须用这个，
+         * 否则偏航一次，"实际里程"就只剩最后一小段（实测出现过 4.9 公里显示成 1.6）。
+         */
+        val traveledTotal: Int = 0,
         /** 数据源是否为高德导航 SDK（false = 演示/兜底模式） */
         val sdkDriven: Boolean = false
     )
@@ -193,6 +219,24 @@ interface NaviEngine {
     /** 偏航回调：开错路、持续偏离路线时触发，携带当前坐标供上层重新规划 */
     var onRerouteRequest: ((Double, Double) -> Unit)?
 
+    /**
+     * 当前生效路线的几何（SDK 自己重算后这里会跟着变，见 [NaviState.routeGeneration]）。
+     *
+     * 界面画折线用它 —— 不能再用"出发时传进来的那条 RouteData"：SDK 偏航重算是
+     * SDK 内部完成的，上层那份数据永远不会变，画出来的线自然也不会变。
+     * 自研兜底引擎没有这个概念，返回 null，界面就继续用自己手里的路线。
+     */
+    fun currentRoute(): RouteData? = null
+
+    /**
+     * 仅调试用：请求导航 SDK 立刻重算一次（模拟偏航 / 拥堵）。
+     *
+     * 偏航重算只能在真的走错路时触发，室内没法复现 —— 用它就能把
+     * "SDK 重算 → 几何重建 → 折线重画 → 语音提示" 整条链路走一遍。
+     * 界面入口只在 DEBUG 包里注册；返回 false 表示当前不在导航中。
+     */
+    fun forceRecalcForTest(reason: Int = 0): Boolean = false
+
     companion object {
         const val DEFAULT_SPEED_KMH = 25f
         const val MIN_SPEED_KMH = 5f
@@ -215,8 +259,55 @@ interface NaviEngine {
 
         /** 默认起点（无定位权限时用于室内演示） */
         val DEFAULT_START = 39.9087 to 116.3975
+
+        /** 换了路线的原因：偏航（走错路） */
+        const val REROUTE_YAW = 0
+        /** 换了路线的原因：拥堵，SDK 主动避开 */
+        const val REROUTE_TRAFFIC = 1
+        /** 换了路线的原因：经过途经点，路线前缀被截断 */
+        const val REROUTE_WAYPOINT = 2
+        /** 换了路线的原因：其它（未知） */
+        const val REROUTE_OTHER = 3
+        /**
+         * 首帧建线：导航刚起步、还没收到过任何导航帧时，SDK 就把算路用的 path
+         * 换成了实际导航用的那条。
+         *
+         * 几何照样要重建、界面照样要重画（否则会画在算路那条线上），但它不是
+         * 「你走错了」——按偏航播报会让用户刚点开始就听到「您已偏离原路线」。
+         */
+        const val REROUTE_INITIAL = 4
     }
 }
+
+/**
+ * 路线 link：一段连续几何 + 高德给的路况状态。
+ *
+ * 为什么要单独存 link 而不是只用 step 的整段几何：**路线的颜色是 link 级的**。
+ * 高德导航 SDK（`AMapNaviStep.getLinks()`）给每个 link 一个
+ * `trafficStatus`（0 未知 / 1 畅通 / 2 缓行 / 3 拥堵 / 4 严重拥堵），
+ * 官方导航界面就是按这个逐段上色的。以前我们整条线只有一种颜色，
+ * 拥堵路段看不出来 —— 等于把 SDK 已经算好的信息丢了。
+ */
+data class RouteLink(
+    /** 本 link 几何（lat, lng，GCJ02） */
+    val polyline: List<Pair<Double, Double>>,
+    /** 高德路况状态（见类注释，0 = 未知/不参与着色） */
+    val trafficStatus: Int = 0
+)
+
+/**
+ * 一段路况：**从路线起点按顺序累计**的长度（米）+ 状态。
+ *
+ * 直接对应 `AMapNaviPath.getTrafficStatuses()` 的每一项（`length` + `status`）。
+ * 官方导航 overlay 就是拿这串"按里程排列的段"去切折线着色的 ——
+ * 比逐 link 更可靠：实测 `AMapNaviStep.getLinks()` 在部分会话里是空的。
+ */
+data class TrafficRun(
+    /** 本段长度（米） */
+    val lengthM: Int,
+    /** 1 畅通 / 2 缓行 / 3 拥堵 / 4 严重拥堵 / 0 未知 */
+    val status: Int
+)
 
 /** 路线单步骤（自高德搜索 SDK DriveStep 转换，GCJ02 坐标） */
 data class RouteStep(
@@ -240,7 +331,14 @@ data class RouteStep(
     /** 本步骤几何（lat, lng） */
     val polyline: List<Pair<Double, Double>>,
     /** 本步骤拥堵里程（米，TMC 状态≥3）；用于"前方拥堵"统计 */
-    val congestedM: Float = 0f
+    val congestedM: Float = 0f,
+    /**
+     * 本步骤按 link 切分后的几何 + 路况（来自 SDK `AMapNaviStep.getLinks()`）。
+     *
+     * 空 = 这条路线不是导航 SDK 算的（缓存老数据 / 搜索 SDK 兜底），
+     * 画线时退回 [polyline] 单色。
+     */
+    val links: List<RouteLink> = emptyList()
 )
 
 /** 规划路线（自高德搜索 SDK DrivePath 转换） */
@@ -274,7 +372,19 @@ data class RouteData(
      * 否则 SDK 会用默认方案 —— 表现为"选了避开拥堵，导航却走了原来那条"。
      * -1 = 不是导航 SDK 算出来的（例如缓存里的老数据），进导航时按起终点重算。
      */
-    val sdkRouteId: Int = -1
+    val sdkRouteId: Int = -1,
+    /**
+     * 本条路线实际经过的途经点（SDK `AMapNaviPath.getWayPoint()`，按经过顺序）。
+     *
+     * 用它而不是用上层传进来的那一串：SDK 可能因为不可达/就在路边而**合并或去掉**
+     * 某些点，界面要画的是"真的会经过哪几个"，多画一个会让人以为要绕到那个点。
+     */
+    val waypoints: List<Pair<Double, Double>> = emptyList(),
+    /**
+     * 全线的路况分段（SDK `AMapNaviPath.getTrafficStatuses()`，按里程顺序）。
+     * 空 = 这条路线没有实时路况（静态规划 / 缓存老数据），折线用主色单线。
+     */
+    val trafficRuns: List<TrafficRun> = emptyList()
 )
 
 /** 高德 IconType 常用值（com.amap.api.navi.enums.IconType） */
@@ -695,6 +805,9 @@ class RouteNaviEngine(
                 etaSeconds = if (arrived) 0 else etaSeconds(remaining),
                 gpsActive = gpsFresh,
                 traveled = traveled.toInt(),
+                // 兜底引擎的 `traveled` 本来就是全程累计（不换路线），
+                // 两个字段同值即可 —— 界面的统计口径统一读 traveledTotal
+                traveledTotal = traveled.toInt(),
                 speedKmh = s.speedKmh,
                 onRoute = true,
                 congestionAheadM = congestionAhead.toFloat()
@@ -738,7 +851,8 @@ class RouteNaviEngine(
                 bearing = curBearing,
                 etaSeconds = if (arrived) 0 else etaSeconds(dist2),
                 gpsActive = gpsFresh,
-                traveled = newTraveled
+                traveled = newTraveled,
+                traveledTotal = newTraveled
             )
             if (arrived) {
                 running = false

@@ -98,7 +98,10 @@ object CameraKind {
         // 细化类型来自官方文本，官方一次就给到"三百米内/一公里内"，只念一次就够：
         // 这类情报的价值在"提前知道有压线"，不在于到跟前再确认一遍。
         isFine(type) -> intArrayOf(300)
-        group(type) == G_SPEED -> intArrayOf(500, 200)
+        // 测速两档按城区口径给：300m 预警 + 100m 临门。
+        // 原来是 500/200 —— 用户实测"七八百米就开始念，没必要"，且 500m 在城区
+        // 常常隔着一条街。高德城区同样是 300m 左右起报（高速才放 500m~1km）。
+        group(type) == G_SPEED -> intArrayOf(300, 100)
         group(type) == G_SIGNAL -> intArrayOf(200)
         group(type) == G_LANE -> intArrayOf(100)
         else -> IntArray(0)

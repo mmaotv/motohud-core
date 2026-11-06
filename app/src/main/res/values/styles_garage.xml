@@ -108,6 +108,27 @@
         <item name="android:textSize">13sp</item>
     </style>
 
+    <!-- OBD 四格读数：大数字 + 小单位标签 -->
+    <style name="Vehicle.Obd.Value" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:fontFamily">@font/inter</item>
+        <item name="android:textColor">?attr/mtTextPrimary</item>
+        <item name="android:textSize">20sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+
+    <style name="Vehicle.Obd.Label" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">3dp</item>
+        <item name="android:fontFamily">@font/inter</item>
+        <item name="android:textColor">?attr/mtTextTertiary</item>
+        <item name="android:textSize">11sp</item>
+    </style>
+
+
     <!-- 爱车页：亮点标签 -->
     <style name="Garage.Highlight" parent="">
         <item name="android:layout_width">wrap_content</item>

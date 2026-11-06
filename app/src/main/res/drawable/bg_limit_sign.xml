@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  大号限速牌：白底 + 红圈 + 黑字，和真实交通标志 / 高德导航的限速标识一致。
+  比电子眼卡片里那个 44dp 徽章大一圈（76dp），单独放地图半屏顶部。
+  用固定色而不是主题 attr：交通标志本来就该在任何底图上都长这样，
+  白天/夜间都不该被改成深色底。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#FFFFFFFF" />
+    <stroke
+        android:width="6dp"
+        android:color="?attr/mtRed" />
+</shape>

@@ -96,7 +96,8 @@ class MapPickActivity : AppCompatActivity() {
     }
 
     private fun renderCoord(p: LatLng) {
-        coord.text = CoordConverter.formatLatLng(p.latitude, p.longitude)
+        // 普通用户选点不需要看原始经纬度，给一句中性提示即可（标记已在地图上）
+        coord.text = getString(R.string.pick_coord_hint)
     }
 
     private fun confirm() {

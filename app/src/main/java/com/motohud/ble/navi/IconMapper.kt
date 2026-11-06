@@ -83,7 +83,16 @@ object IconMapper {
         IconType.LEFT_FRONT, IconType.RIGHT_FRONT,
         IconType.LEFT_BACK, IconType.RIGHT_BACK,
         IconType.LEFT_TURN_AROUND, IconType.U_TURN_RIGHT,
-        IconType.ENTER_ROUNDABOUT, IconType.OUT_ROUNDABOUT -> true
+        IconType.ENTER_ROUNDABOUT, IconType.OUT_ROUNDABOUT,
+        /*
+         * 靠左 / 靠右（65/66）也是"要提前选道"的动作，不能当直行。
+         *
+         * 立交、跨江大桥的岔口，高德给的就是这两个图标 —— 以前漏在 isTurn 之外，
+         * 于是它们走「直行」那条只有 300 米一档的分支：一公里的预告没有、临门那句
+         * 也没有，密集立交上连着几个岔口就基本等于没提示（用户实测嘉华大桥
+         * "不是新手都容易走错"）。归进转弯类后与左右转共用 1 公里 / 300 / 临门三档。
+         */
+        IconType.MERGE_LEFT, IconType.MERGE_RIGHT -> true
         else -> false
     }
 

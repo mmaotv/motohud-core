@@ -9,7 +9,9 @@ import com.amap.api.navi.model.AMapNaviGuide
 import com.amap.api.navi.model.AMapNaviPath
 import com.amap.api.navi.model.NaviLatLng
 import com.motohud.ble.navi.RouteData
+import com.motohud.ble.navi.RouteLink
 import com.motohud.ble.navi.RouteStep
+import com.motohud.ble.navi.TrafficRun
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -205,6 +207,15 @@ object NaviPlanner {
                 if (st >= 3) len.toDouble() else 0.0
             }.toFloat()
             val guide = if (useGuides) guides.getOrNull(i) else null
+            // link 级路况：官方导航界面就是按 link 的 trafficStatus 逐段上色的
+            val linkGeoms = links.mapNotNull { l ->
+                val pts = runCatching { l.coords }.getOrNull().orEmpty()
+                    .map { it.latitude to it.longitude }
+                if (pts.size < 2) null else RouteLink(
+                    polyline = pts,
+                    trafficStatus = runCatching { l.trafficStatus }.getOrDefault(0)
+                )
+            }
             RouteStep(
                 instruction = guide?.let { runCatching { it.name }.getOrNull() }.orEmpty(),
                 action = "",
@@ -213,7 +224,8 @@ object NaviPlanner {
                 road = road,
                 distanceM = runCatching { s.length }.getOrDefault(0).toFloat(),
                 polyline = coords,
-                congestedM = congested
+                congestedM = congested,
+                links = linkGeoms
             )
         }
 
@@ -232,7 +244,13 @@ object NaviPlanner {
             trafficLights = lights,
             restriction = if (restricted) 1 else 0,
             tollDistanceM = steps.sumOf { it.distanceM.toDouble() }.toFloat() * 0f, // 导航 SDK 未单独给出收费里程
-            sdkRouteId = routeId
+            sdkRouteId = routeId,
+            // SDK 实际采用的途经点（可能被合并/忽略），界面按它画
+            waypoints = runCatching { wayPoint.orEmpty() }.getOrDefault(emptyList())
+                .map { it.latitude to it.longitude },
+            // 全线路况分段（按里程），导航中折线据此逐段着色
+            trafficRuns = runCatching { trafficStatuses.orEmpty() }.getOrDefault(emptyList())
+                .map { TrafficRun(it.length, it.status) }
         )
     }
 }

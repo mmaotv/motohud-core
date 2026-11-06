@@ -32,7 +32,8 @@ class PlaceAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val place = getItem(position)
         holder.name.text = place.name
-        holder.coord.text = CoordConverter.formatLatLng(place.latitude, place.longitude)
+        // 普通用户无需看到经纬度，地点卡上不再展示坐标（有备注时看备注）
+        holder.coord.visibility = View.GONE
         holder.icon.setImageResource(
             when (place.type) {
                 SavedPlaceEntity.TYPE_HOME -> R.drawable.ic_place_home

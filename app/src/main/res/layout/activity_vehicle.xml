@@ -288,8 +288,8 @@
                     android:orientation="horizontal">
 
                     <TextView
-                        style="@style/Vehicle.Ability.No"
-                        android:text="✕" />
+                        style="@style/Vehicle.Ability.Ok"
+                        android:text="✓" />
 
                     <TextView
                         style="@style/Vehicle.Row.Value"
@@ -306,6 +306,201 @@
                 android:text="@string/vehicle_ability_note"
                 android:textColor="?attr/mtTextTertiary"
                 android:textSize="11sp" />
+
+            <!-- ============ OBD 诊断头（第二条 BLE 链路） ============ -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingTop="14dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="14dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <View
+                        android:id="@+id/obd_dot"
+                        android:layout_width="10dp"
+                        android:layout_height="10dp"
+                        android:background="@drawable/dot_gray" />
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/obd_state"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:fontFamily="@font/inter"
+                            android:text="@string/obd_state_off"
+                            android:textColor="?attr/mtTextPrimary"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/obd_sub"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="3dp"
+                            android:ellipsize="end"
+                            android:fontFamily="@font/inter"
+                            android:maxLines="4"
+                            android:text="@string/obd_state_off_sub"
+                            android:textColor="?attr/mtTextTertiary"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/obd_action"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_chip"
+                        android:fontFamily="@font/inter"
+                        android:paddingStart="14dp"
+                        android:paddingTop="8dp"
+                        android:paddingEnd="14dp"
+                        android:paddingBottom="8dp"
+                        android:text="@string/obd_connect"
+                        android:textColor="?attr/mtAccent"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <!-- 四格实时数据 -->
+                <LinearLayout
+                    android:id="@+id/obd_grid"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/obd_rpm"
+                            style="@style/Vehicle.Obd.Value"
+                            android:text="@string/garage_value_empty" />
+
+                        <TextView
+                            style="@style/Vehicle.Obd.Label"
+                            android:text="@string/obd_rpm" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/obd_speed"
+                            style="@style/Vehicle.Obd.Value"
+                            android:text="@string/garage_value_empty" />
+
+                        <TextView
+                            style="@style/Vehicle.Obd.Label"
+                            android:text="@string/obd_speed" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/obd_coolant"
+                            style="@style/Vehicle.Obd.Value"
+                            android:text="@string/garage_value_empty" />
+
+                        <TextView
+                            style="@style/Vehicle.Obd.Label"
+                            android:text="@string/obd_coolant" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/obd_voltage"
+                            style="@style/Vehicle.Obd.Value"
+                            android:text="@string/garage_value_empty" />
+
+                        <TextView
+                            style="@style/Vehicle.Obd.Label"
+                            android:text="@string/obd_voltage" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 故障码 -->
+                <LinearLayout
+                    android:id="@+id/obd_dtc_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/obd_btn_read"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_chip"
+                        android:fontFamily="@font/inter"
+                        android:paddingStart="14dp"
+                        android:paddingTop="8dp"
+                        android:paddingEnd="14dp"
+                        android:paddingBottom="8dp"
+                        android:text="@string/obd_read_dtc"
+                        android:textColor="?attr/mtAccent"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/obd_btn_clear"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_chip"
+                        android:fontFamily="@font/inter"
+                        android:paddingStart="14dp"
+                        android:paddingTop="8dp"
+                        android:paddingEnd="14dp"
+                        android:paddingBottom="8dp"
+                        android:text="@string/obd_clear_dtc"
+                        android:textColor="?attr/mtTextSecondary"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/obd_dtc_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:fontFamily="@font/inter"
+                    android:lineSpacingExtra="3dp"
+                    android:textColor="?attr/mtTextSecondary"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+            </LinearLayout>
 
             <!-- ============ 入口 ============ -->
             <LinearLayout

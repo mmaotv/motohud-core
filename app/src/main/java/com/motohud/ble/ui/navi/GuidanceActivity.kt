@@ -157,20 +157,50 @@ class GuidanceActivity : AppCompatActivity() {
      */
     private var shadowNaviView: AMapNaviView? = null
 
-    /** 全程路线（未走部分）与已走路段，两条线叠出"走到哪了"的效果 */
-    private var aheadLine: Polyline? = null
-    private var doneLine: Polyline? = null
+    /**
+     * 路线折线：**一段一色**，按高德给的路况着色。
+     *
+     * 以前是 `aheadLine`（整条主色）+ `doneLine`（已走灰色）两条线。问题有两个：
+     * 一是整条只有一个颜色，SDK 明明逐 link 给了拥堵/缓行状态，却全被抹平；
+     * 二是"已走"要自己把车标投影到折线上再切分，立交/辅路一抖就切错。
+     *
+     * 现在按 SDK 的 `AMapNaviStep.links` 逐段建线，每段用自己的路况色；
+     * 已走段直接按 SDK 的已行驶里程（`allLength - pathRemain`）从段首裁掉。
+     */
+    private val trafficLines = mutableListOf<Polyline>()
+    /** 每一段折线在 [routePoints] 里的下标区间 + 路况（与 [trafficLines] 一一对应） */
+    private var trafficSegs: List<TrafficSeg> = emptyList()
     private var destMarker: Marker? = null
     private var meMarker: Marker? = null
+    /** 途经点标记（1..5 号），换路线时整组重画 */
+    private val waypointMarkers = mutableListOf<Marker>()
 
-    /** 路线展平后的点与累计距离，用于把折线按 traveled 切两段 */
+    private data class TrafficSeg(val from: Int, val to: Int, val status: Int)
+
+    /** 路线展平后的点与累计距离（用于按里程裁剪 + 最近投影） */
     private var routePoints: List<LatLng> = emptyList()
     private var routeCum: DoubleArray = DoubleArray(0)
+    /** 上次裁剪到的折线下标：没变就不动折线顶点（避免每帧重建几何） */
+    private var lastCutIdx = -1
+    /** 当前已行驶里程（SDK 口径，米）：换线卡片的"是否已过分岔点"要用 */
     private var lastProgressM = -1
-    /** 上次切分到的折线下标：下标没变就不必重设折线顶点（避免无谓的几何重建） */
-    private var lastProgressIdx = -1
+    /** 折线自愈重画的节流时间戳（防止地图异常时每帧重画） */
+    private var lastSelfHealAt = 0L
+
+    /** 全览（整条路线）的保持计时：用户不操作就 [OVERVIEW_HOLD_MS] 后回到导航视角 */
+    private val overviewHandler = Handler(Looper.getMainLooper())
+    private var overviewActive = false
+    private val exitOverviewRunnable = Runnable {
+        if (!overviewActive) return@Runnable
+        overviewActive = false
+        userPanned = false
+        lastCameraMs = 0L
+        followOnMap(engine.state.value, force = true)
+    }
 
     private lateinit var topBar: View
+    /** 目的地卡：顶部渐变只需要盖到它下沿，转向横幅有自己的面板背景 */
+    private lateinit var destCard: View
     private lateinit var bottomInfo: View
     private lateinit var bottomExtra: View
     private lateinit var tvDestName: TextView
@@ -202,6 +232,10 @@ class GuidanceActivity : AppCompatActivity() {
     private lateinit var tvCameraWarn: TextView
     /** 限速徽章（红圈数字）；0 = 无已知限速，隐藏 */
     private lateinit var tvLimitBadge: TextView
+    /** 地图半屏顶部的大号限速牌（独立于电子眼卡片，显隐单独控制） */
+    private lateinit var tvLimitSign: TextView
+    /** 超速时全屏四周的红色渐变光晕 */
+    private lateinit var overspeedVignette: OverspeedVignette
     /** 路口放大图（showCross） */
     private lateinit var ivCrossImage: ImageView
 
@@ -298,6 +332,10 @@ class GuidanceActivity : AppCompatActivity() {
     private var betterRouteDismissed = false
     private var pendingBetterRoute: RouteData? = null
     private var pendingBetterStart: Pair<Double, Double>? = null
+    /** 卡片出现时刻（超时自动移除用） */
+    private var betterRouteShownAt = 0L
+    /** 候选路线与本路线的分岔点里程（沿本路线累计；-1 = 未知/全线重合） */
+    private var betterRouteSwitchM = -1.0
     private val betterRouteTask = object : Runnable {
         override fun run() {
             val s = engine.state.value
@@ -371,6 +409,16 @@ class GuidanceActivity : AppCompatActivity() {
     private var lastAnnouncedStep = -1
 
     /**
+     * 上一次看到的路线代数（[NaviEngine.NaviState.routeGeneration]）。
+     *
+     * SDK 偏航重算 / 拥堵重算 / 过途经点都会换掉一条 path，但我们这边拿着的
+     * `route` 还是出发时那份 —— 折线、全览、底部剩余里程全都要跟着换，
+     * 所以代数一变就重建一次。初值 0 与引擎一致：引擎只在**真的换了路线**时才 +1，
+     * 首次导航不会误触发。
+     */
+    private var lastRouteGen = 0
+
+    /**
      * 电子眼播报去重：`"点位流水号|距离档"` 的集合。
      *
      * 以前按「类型 + 限速」+ 30 秒冷却去重，问题有两个：
@@ -381,6 +429,9 @@ class GuidanceActivity : AppCompatActivity() {
      * 不同点位互不影响。
      */
     private val cameraSpoken = HashSet<String>()
+
+    /** 被节流拦下、已经写过 trace 的档位（避免每帧刷一行日志） */
+    private val cameraBlockLogged = HashSet<String>()
 
     /** 上一条电子眼播报的时刻，用于 [CAMERA_MIN_GAP_MS] 跨串间隔 */
     private var lastCameraSpeakMs = 0L
@@ -402,6 +453,15 @@ class GuidanceActivity : AppCompatActivity() {
 
     /** 上一条电子眼提示的色标分组，避免每帧都 setTextColor（会触发重绘） */
     private var lastCameraTone = -1
+
+    /** 底部时速数字的默认色（超速时改红，恢复时还原） */
+    private var speedNormalColor = 0
+    /** 大限速牌数字的默认色 / 超速色 / 背景是否已换成超速态 */
+    private var limitSignNormalColor = 0
+    private var limitSignOverColor = 0
+    private var limitSignOverBg = false
+    /** 滞回：车速降回限速以内后红光再留一会儿，避免在阈值附近反复闪 */
+    private var overspeedHoldUntil = 0L
 
     /** 已经念过的交通事件（按标题去重）：同一条封路信息不该每帧重复播 */
     private val incidentSpoken = HashSet<String>()
@@ -570,7 +630,7 @@ class GuidanceActivity : AppCompatActivity() {
         waypoints = parseWaypoints(intent.getStringExtra(EXTRA_WAYPOINTS))
 
         tvDestName.text = destName
-        tvDestSub.text = CoordConverter.formatLatLng(destLat, destLng)
+        tvDestSub.text = ""
 
         ensureLocationPermission()
         setupMap(savedInstanceState)
@@ -613,6 +673,15 @@ class GuidanceActivity : AppCompatActivity() {
 
     private fun bindViews() {
         topBar = findViewById(R.id.top_bar)
+        destCard = findViewById(R.id.dest_card)
+        // 顶部渐变高度跟着"状态栏 + 目的地行"走（见 updateScrimHeight）：
+        // 目的地卡换行、横竖屏切换、转向横幅出现都会改顶栏高度，这里跟着重算。
+        topBar.addOnLayoutChangeListener { _, _, _, _, bottom, _, _, _, oldBottom ->
+            if (bottom != oldBottom) updateScrimHeight()
+        }
+        destCard.addOnLayoutChangeListener { _, _, _, _, bottom, _, _, _, oldBottom ->
+            if (bottom != oldBottom) updateScrimHeight()
+        }
         bottomInfo = findViewById(R.id.bottom_info)
         bottomExtra = findViewById(R.id.bottom_extra)
         tvDestName = findViewById(R.id.tv_dest_name)
@@ -628,6 +697,28 @@ class GuidanceActivity : AppCompatActivity() {
         tvEta = findViewById(R.id.tv_eta)
         tvRemain = findViewById(R.id.tv_remain)
         tvSpeed = findViewById(R.id.tv_speed_live)
+        /*
+         * 调试专用入口：长按速度数字 = 让导航 SDK 立刻重算一次（模拟偏航）。
+         *
+         * 为什么需要它：偏航重算只能在**真的走错路**时触发，而这个 Bug
+         * （"车标走新路、橙线钉旧路"）恰恰没法在室内复现 —— 之前两版都是
+         * 只能等实车结果。有了这个入口，用模拟导航 + 长按就能把
+         * "SDK 重算 → 几何重建 → 折线重画 → 语音提示"整条链路走一遍。
+         * 发布包（非 DEBUG）里这个监听器根本不注册，用户碰不到。
+         */
+        if (com.motohud.ble.BuildConfig.DEBUG) {
+            tvSpeed.setOnLongClickListener {
+                val ok = engine.forceRecalcForTest(
+                    com.amap.api.navi.enums.ReCalculateRouteType.ROUTE_TYPE_YAW
+                )
+                Toast.makeText(
+                    this,
+                    if (ok) "已触发 SDK 重算" else "重算触发失败（未在导航中）",
+                    Toast.LENGTH_SHORT
+                ).show()
+                true
+            }
+        }
         tvGpsMode = findViewById(R.id.tv_gps_mode)
         tvGpsQuality = findViewById(R.id.tv_gps_quality)
         statGps = findViewById(R.id.stat_gps)
@@ -638,6 +729,12 @@ class GuidanceActivity : AppCompatActivity() {
         ivCameraKind = findViewById(R.id.iv_camera_kind)
         tvCameraWarn = findViewById(R.id.tv_camera_warn)
         tvLimitBadge = findViewById(R.id.tv_limit_badge)
+        tvLimitSign = findViewById(R.id.tv_limit_sign)
+        overspeedVignette = findViewById(R.id.overspeed_vignette)
+        // 超速时把时速数字和大牌数字改成危险色，恢复时按这里记下的原色还原
+        speedNormalColor = tvSpeed.currentTextColor
+        limitSignNormalColor = tvLimitSign.currentTextColor
+        limitSignOverColor = themeColor(com.motohud.ble.R.attr.nvDanger)
         ivCrossImage = findViewById(R.id.iv_cross_image)
         crossPanel = findViewById(R.id.ll_cross_panel)
         ivCrossTurn = findViewById(R.id.iv_cross_turn)
@@ -665,6 +762,25 @@ class GuidanceActivity : AppCompatActivity() {
         tvArriveAvg = findViewById(R.id.tv_arrive_avg)
         betterRouteCard = findViewById(R.id.better_route_card)
         tvBetterRoute = findViewById(R.id.tv_better_route)
+        /*
+         * 底部 ETA 卡的高度随内容变化（转向语行数、路况估算、车机提示），
+         * 右侧「全览 / 回中」两枚圆钮必须跟着让位，否则卡片一高就把按钮盖住
+         * —— 表现成"点全览没反应"，实际点击落到了卡片上。
+         * 只监听高度变化，避免每次重绘都设一次 layoutParams。
+         */
+        bottomInfo.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (top != oldTop || bottom != oldBottom) {
+                positionMapActions()
+                positionSignalWarn()
+            }
+        }
+        // 更快路线卡出现/消失同样改变底部占位（它压在 ETA 卡上面）
+        betterRouteCard.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (top != oldTop || bottom != oldBottom) {
+                positionMapActions()
+                positionSignalWarn()
+            }
+        }
     }
 
     /**
@@ -912,7 +1028,20 @@ class GuidanceActivity : AppCompatActivity() {
             true
         }
         findViewById<View>(R.id.btn_overview).setOnClickListener {
-            route?.let { drawRoute(it, fitAll = true) }
+            val r = route ?: return@setOnClickListener
+            // 全览 = 缩放到整条路线，并且**暂时停掉相机跟随** —— 否则下一个状态帧
+            // （10Hz）立刻把镜头拉回车标，"全览"只闪一帧，等于没做。
+            // 用户不动手就保持 [OVERVIEW_HOLD_MS] 后自动回导航视角；
+            // 一动地图（[setOnMapTouchListener]）就立刻交还给正常的平移/回跟逻辑。
+            overviewActive = true
+            userPanned = false
+            betterRouteHandler.removeCallbacks(resumeFollowRunnable)
+            // 必须打断进行中的相机补间：补间每帧都 moveCamera，会把紧接着发起的
+            // 「缩放到全线」动画直接顶掉 —— 真机表现为点了全览画面纹丝不动。
+            cancelCamGlide()
+            drawRoute(r, fitAll = true)
+            overviewHandler.removeCallbacks(exitOverviewRunnable)
+            overviewHandler.postDelayed(exitOverviewRunnable, OVERVIEW_HOLD_MS)
         }
         findViewById<View>(R.id.btn_recenter).setOnClickListener {
             betterRouteHandler.removeCallbacks(resumeFollowRunnable)
@@ -1068,6 +1197,7 @@ class GuidanceActivity : AppCompatActivity() {
         prewarmedStep = -1
         featureAnnounced.clear()
         cameraSpoken.clear()
+        cameraBlockLogged.clear()
         lastCameraSpeakMs = 0L
         lastCross = null
         crossShownAt = 0L
@@ -1087,10 +1217,28 @@ class GuidanceActivity : AppCompatActivity() {
             say(buildStartText(r), SpeechPriority.INFO, cue = com.motohud.ble.navi.SpeechArbiter.START)
         }
         engine.start(destName, destLat, destLng, start, r)
+        // 代数基准要跟引擎对齐：它是只增不减的全局计数，上一次导航里重算过几次
+        // 就停在几。不同步的话，本次导航第一帧就会被当成"刚换了路线"，
+        // 白白播一句「已为您重新规划路线」。
+        lastRouteGen = engine.state.value.routeGeneration
+        // 转发去重的基准也跟着新一趟清空：上一趟结束时留下的 icon/距离若与新路线
+        // 首帧恰好相同，会被当成重复帧吞掉，车机就一直停在上一次的画面上
+        app.naviForwarder.reset()
+        // 会话分界线：实车回来拉 navi_trace.log，一眼能看出这趟导航开了多长的路
+        com.motohud.ble.data.BleDiagnostic.trace(
+            "导航开始：$destName 路线=${r?.distanceM?.toInt() ?: -1}m/${r?.steps?.size ?: 0}段 " +
+                "路线来源=${if ((r?.sdkRouteId ?: -1) >= 0) "选路页" else "直达入口"}"
+        )
         // 前两段引导语提前预合成：起步后第一句就已经是「前方 xx 右转」，
         // 等渲染循环走到那一步再合成必然慢半拍
         prewarmStep(0)
         prewarmStep(1)
+        // 偏航 / 拥堵重算那两句只在出事时用，但那一刻最忌现场合成（模型要 1s 以上，
+        // 说完人可能已经拐出去了）。现在先合成好，重算时立刻出声。
+        if (!presetPack) {
+            voice?.prewarm("您已偏离原路线，已为您重新规划")
+            voice?.prewarm("已为您重新规划路线，避开拥堵路段")
+        }
         // 前台服务：**每次导航都启动**，它承载通知栏导航条（息屏/兜里瞥一眼方向）；
         // 唤醒锁只由「息屏导航」开关决定，见 NaviForegroundService.updateWakeLock
         com.motohud.ble.service.NaviForegroundService.start(this)
@@ -1100,7 +1248,7 @@ class GuidanceActivity : AppCompatActivity() {
             destName = destName,
             destLat = destLat,
             destLng = destLng,
-            startName = start?.let { CoordConverter.formatLatLng(it.first, it.second) } ?: getString(R.string.common_unknown),
+            startName = start?.let { getString(R.string.origin_current) } ?: getString(R.string.common_unknown),
             startLat = start?.first ?: 0.0,
             startLng = start?.second ?: 0.0,
             distanceM = r?.distanceM?.toDouble() ?: 0.0
@@ -1207,6 +1355,70 @@ class GuidanceActivity : AppCompatActivity() {
     }
 
     // ---------- 偏航重算 / 更优换线 ----------
+
+    /**
+     * SDK 自己换了路线（偏航 / 拥堵 / 过途经点）后的界面收尾。
+     *
+     * 触发源是 `NaviState.routeGeneration` 变化 —— 几何已经由引擎从新的
+     * `AMapNaviPath` 还原好了（[NaviEngine.currentRoute]）。
+     *
+     * 要做四件事，缺一件用户都看得见：
+     *  1. **重画折线**：不做就是"车标走新路、橙线钉在旧路上"，也就是这次报的问题；
+     *  2. **复位按段号记录的所有状态**（本段播报/预合成/沿途提示）：新路线的路段号
+     *     全部重排，不复位会让新路线的第 N 段被当成"这条路的第 N 段已经播过"而整段沉默，
+     *     弯道提示更糟 —— 会拿旧路线的弯道位置去比新路线的里程；
+     *  3. **说一句「已为您重新规划路线」**：偏航是骑行中最该马上知道的事。
+     *     SDK 模式下以前这句是死代码（`onRerouteRequest` 从来没人调），
+     *     用户走错了完全没有任何提示；
+     *  4. 顶栏摘要 / 剩余里程换成新路线的，别让旧里程继续挂着。
+     */
+    private fun onRouteReplaced(s: NaviEngine.NaviState) {
+        val r = engine.currentRoute() ?: return
+        route = r
+        drawRoute(r, fitAll = false)
+        tvDestSub.text = routeSummary(r)
+        // 用 -2 强制下一帧重走一次"进入新路段"：-1 可能正好等于真实段号
+        // 首帧建线除外 —— 那一刻刚起步，当前段引导语往往刚播完，强制重走会把
+        // 同一句「前方 xx 米左转」立刻再说一遍（播报密度本来就怕这个）
+        if (s.routeChangeReason != NaviEngine.REROUTE_INITIAL) lastAnnouncedStep = -2
+        remindStepIndex = -1
+        remindMask = 0
+        spokenTiers.clear()
+        spokenIntersections.clear()
+        prewarmedStep = -1
+        featureAnnounced.clear()
+        curveAnnounced.clear()
+        curveCache.clear()
+        incidentSpoken.clear()
+        // 坡度靠"已行驶里程增量"喂，重算后当前路线里程归零，不重置会喂进一个负数
+        lastFeedTraveled = -1
+        // 「发现更优路线」卡片是按旧路线算的，路线都换了它就没有意义了
+        hideBetterRouteCard()
+        // 落盘留痕：实车时抓不到 logcat，回来拉 navi_trace.log 就能确认"确实重画了"
+        com.motohud.ble.data.BleDiagnostic.trace(
+            "重算：折线已重画 全长=${r.distanceM.toInt()}m/${r.steps.size}段 " +
+                "gen=${s.routeGeneration} 原因=${s.routeChangeReason} 当前剩余=${s.pathRemain}m"
+        )
+        /*
+         * 播报措辞必须按"为什么换路线"分开：
+         *  - 偏航 = 你走错了，说"已偏离原路线"；
+         *  - 拥堵 = 路堵了我给你换了一条，说"已偏离"会让人以为自己拐错了；
+         *  - 过途经点 = 正常推进，不用专门说一句。
+         * 内置语音包念不了任意长句，这几句都是库里现成的整句。
+         */
+        val said = when (s.routeChangeReason) {
+            // 首帧建线：起步时 SDK 把算路那条 path 换成导航用的那条，几何要重画，
+            // 但没有"你走错了"这回事 —— 出声反而让人以为自己一出发就拐错
+            NaviEngine.REROUTE_INITIAL,
+            NaviEngine.REROUTE_WAYPOINT -> null
+            NaviEngine.REROUTE_TRAFFIC -> "已为您重新规划路线，避开拥堵路段"
+            else -> if (presetPack) "已为您重新规划路线" else "您已偏离原路线，已为您重新规划"
+        }
+        if (said != null) {
+            Toast.makeText(this, R.string.guidance_rerouted_done, Toast.LENGTH_SHORT).show()
+            say(said, SpeechPriority.SAFETY, cue = com.motohud.ble.navi.SpeechArbiter.REROUTE)
+        }
+    }
 
     /**
      * 应用一条新路线（绘制 + 让引擎从当前位置接管），复用同一引擎实例与历史记录，
@@ -1440,6 +1652,9 @@ class GuidanceActivity : AppCompatActivity() {
     ) {
         pendingBetterRoute = candidate
         pendingBetterStart = start
+        betterRouteShownAt = System.currentTimeMillis()
+        // 分岔点里程：车过了这个节点，这条新路线就不再有意义，卡片必须撤掉
+        betterRouteSwitchM = switchMileageOf(candidate)
         val msg = if (isAvoid && saveCong >= BETTER_ROUTE_SAVE_CONG_M) {
             getString(R.string.guidance_better_route_cong, saveCong / 1000)
         } else {
@@ -1451,14 +1666,118 @@ class GuidanceActivity : AppCompatActivity() {
         // 显示时必须自己摆一次，且要在布局完成后再摆一次（要读 bottomInfo 高度）。
         positionBetterRouteCard()
         betterRouteCard.post { positionBetterRouteCard() }
+        // 卡片压上去之后，底部提示条与右侧圆钮都要重新让位（否则被它盖住）
+        positionSignalWarn()
+        mapActions.post { positionMapActions() }
+        betterRouteCard.post { positionSignalWarn() }
         // 卡片在顶栏，骑行中未必看得见；说一声才不会错过这次换线机会
         say("前方路况变化，发现更快路线", SpeechPriority.INFO, cue = com.motohud.ble.navi.SpeechArbiter.BETTER_ROUTE)
     }
 
     private fun hideBetterRouteCard() {
         betterRouteCard.visibility = View.GONE
+        // 卡片撤掉后底部空出来了，提示条与圆钮跟着落回原位
+        positionSignalWarn()
+        mapActions.post { positionMapActions() }
         pendingBetterRoute = null
         pendingBetterStart = null
+        betterRouteShownAt = 0L
+        betterRouteSwitchM = -1.0
+    }
+
+    /**
+     * 候选路线与本路线**开始分岔**的位置（按本路线的累计里程）。
+     *
+     * 做法：把候选线展平，从车标处的本线进度开始，逐点在本线前方少量点里找最近点；
+     * 一旦最近点也超过 [SWITCH_MATCH_M]，说明从这里开始两条线走的是不同的路，
+     * 返回当时的本线里程。返回 -1 表示整条候选线与本线重合（没有分岔点）。
+     */
+    private fun switchMileageOf(candidate: RouteData): Double {
+        val n = routePoints.size
+        if (n < 2 || routeCum.isEmpty()) return -1.0
+        val cand = ArrayList<LatLng>(256)
+        candidate.steps.forEach { st ->
+            st.polyline.forEach { (la, ln) ->
+                if (cand.isEmpty() ||
+                    cand[cand.size - 1].latitude != la || cand[cand.size - 1].longitude != ln
+                ) cand.add(LatLng(la, ln))
+            }
+        }
+        if (cand.size < 2) return -1.0
+        val startM = if (lastProgressM > 0) lastProgressM.toDouble() else 0.0
+        var k = splitIndexFor(startM).coerceIn(0, n - 2)
+        var miss = 0
+        for (p in cand) {
+            var bestK = k
+            var bestD = Double.MAX_VALUE
+            val to = (k + 30).coerceAtMost(n - 1)
+            for (j in k..to) {
+                val d = com.motohud.ble.navi.LocationFilter.distanceM(
+                    p.latitude, p.longitude, routePoints[j].latitude, routePoints[j].longitude
+                ).toDouble()
+                if (d < bestD) {
+                    bestD = d
+                    bestK = j
+                }
+            }
+            if (bestD > SWITCH_MATCH_M) {
+                // 单点不吻合可能只是顶点疏密不同，连续 3 个点都离本线远才算真分岔
+                if (++miss >= 3) return routeCum[k]
+            } else {
+                miss = 0
+                k = bestK
+            }
+        }
+        return -1.0
+    }
+
+    /**
+     * 更快路线卡片的自动移除：**任一条件满足即撤，且必须清干净状态**。
+     *
+     *  - 驻留超过 [BETTER_ROUTE_CARD_TTL_MS]（分钟级阈值）→ 情报过期；
+     *  - 车辆已驶过分岔/切换节点（+[SWITCH_PASS_BUFFER_M]）→ 新路线已经走不上了，
+     *    再留着就是误导（用户原话：「过了节点就该自动移除，不得一直残留」）；
+     *  - 导航结束 / 到达 / 已停止 → 卡片没有任何意义；
+     *  - 卡片被别处藏了（画中画、页面重建）但状态还在 → 一并清掉，防"幽灵候选"。
+     *
+     * 里程取 `max(车标投影里程, SDK 已行驶里程)`：投影在偏航/自交时可能不更新，
+     * SDK 里程是另一把尺子，两者取大保证"确实过了节点"这件事一定判得出来。
+     * 这个方法在 [observeState] 的独立收集里每帧都会跑，不受 render() 的界面早退影响，
+     * 所以持续行驶、路线刷新、节点经过三种场景行为一致。
+     */
+    private fun expireBetterRouteCard(s: NaviEngine.NaviState) {
+        // 状态和界面必须同进同退：任何一个"还剩一半"都算残留
+        if (pendingBetterRoute == null && betterRouteCard.visibility != View.VISIBLE) return
+        if (pendingBetterRoute == null || betterRouteCard.visibility != View.VISIBLE) {
+            hideBetterRouteCard()
+            return
+        }
+        if (stopped || s.arrived) {
+            hideBetterRouteCard()
+            return
+        }
+        if (betterRouteShownAt > 0 &&
+            System.currentTimeMillis() - betterRouteShownAt > BETTER_ROUTE_CARD_TTL_MS
+        ) {
+            com.motohud.ble.data.BleDiagnostic.trace(
+                "更快路线卡片：驻留超时自动移除（分岔点=${betterRouteSwitchM.toInt()}m " +
+                    "当前=${lastProgressM}m）"
+            )
+            hideBetterRouteCard()
+            return
+        }
+        if (betterRouteSwitchM > 0) {
+            val passed = kotlin.math.max(lastProgressM.toDouble(), s.traveled.toDouble()) >=
+                betterRouteSwitchM + SWITCH_PASS_BUFFER_M
+            if (passed) {
+                com.motohud.ble.data.BleDiagnostic.trace(
+                    "更快路线卡片：已驶过分岔点自动移除" +
+                        "（分岔=${betterRouteSwitchM.toInt()}m 当前=${lastProgressM}m " +
+                        "SDK=${s.traveled}m）"
+                )
+                hideBetterRouteCard()
+            }
+        }
     }
 
     // ---------- 地图 ----------
@@ -1626,11 +1945,18 @@ class GuidanceActivity : AppCompatActivity() {
                     runCatching { isMyLocationEnabled = false }
                     // 路况瓦片跟着设置走：开着爽但要付费（流量），默认关
                     runCatching { setTrafficEnabled(NaviPrefs.mapTraffic.value) }
+                    com.motohud.ble.data.BleDiagnostic.trace(
+                        "地图就绪 图=${hashCode()} 页面=${this@GuidanceActivity.hashCode()}"
+                    )
                     // 用户拖动地图 → 暂停自动跟随（专业导航软件的通行做法）。
                     // 但只是**暂停**：手离开后 [PANNED_RESUME_MS] 自动恢复跟随，
                     // 否则摸一下地图镜头就永久停在原地（老实现只置位不复位，
                     // 除了点「回中」没有别的出路，骑行中根本腾不出手去点）。
                     setOnMapTouchListener {
+                        // 一摸地图就退出全览：用户已经在自己看地图了，
+                        // 10 秒计时再把他拽回导航视角是"抢方向盘"。
+                        overviewActive = false
+                        overviewHandler.removeCallbacks(exitOverviewRunnable)
                         userPanned = true
                         betterRouteHandler.removeCallbacks(resumeFollowRunnable)
                         betterRouteHandler.postDelayed(resumeFollowRunnable, PANNED_RESUME_MS)
@@ -1666,15 +1992,29 @@ class GuidanceActivity : AppCompatActivity() {
         }
     }
 
-    /** 画出规划路线；fitAll=true 时缩放到全线 */
+    /**
+     * 画出规划路线。
+     *
+     * **按高德的路况状态逐段上色**（`AMapNaviStep.links[].trafficStatus`）：
+     * 畅通绿 / 缓行黄 / 拥堵红 / 严重拥堵深红 —— 这就是官方导航界面的上色规则。
+     * 同一状态且首尾相接的 link 会合并成一条折线，一条 10 公里的路通常只剩几条，
+     * 不会因为逐 link 建线把渲染拖垮。
+     *
+     * @param fitAll true = 缩放到全线（进入导航 / 点"全览"）
+     */
     private fun drawRoute(r: RouteData, fitAll: Boolean = true) {
         val map = aMap ?: return
         val points = ArrayList<LatLng>(1024)
         val cum = ArrayList<Double>(1024)
+        val segs = ArrayList<TrafficSeg>()
         var acc = 0.0
-        var prev: LatLng? = null
-        r.steps.forEach { step ->
-            step.polyline.forEach { (lat, lng) ->
+
+        fun appendChain(chain: List<Pair<Double, Double>>, status: Int) {
+            if (chain.size < 2) return
+            // 段首与上一段共享一个点：折线首尾相接才不会在 link 边界断开
+            val segStart = if (points.isEmpty()) 0 else points.size - 1
+            var prev = points.lastOrNull()
+            chain.forEach { (lat, lng) ->
                 val p = LatLng(lat, lng)
                 if (prev != null && prev!!.latitude == lat && prev!!.longitude == lng) return@forEach
                 prev?.let {
@@ -1686,42 +2026,91 @@ class GuidanceActivity : AppCompatActivity() {
                 cum.add(acc)
                 prev = p
             }
+            val segEnd = points.size - 1
+            if (segEnd <= segStart) return
+            val last = segs.lastOrNull()
+            if (last != null && last.status == status && last.to == segStart) {
+                segs[segs.size - 1] = last.copy(to = segEnd)
+            } else {
+                segs += TrafficSeg(segStart, segEnd, status)
+            }
+        }
+
+        r.steps.forEach { step ->
+            if (step.links.isNotEmpty()) {
+                step.links.forEach { appendChain(it.polyline, it.trafficStatus) }
+            } else {
+                // 非导航 SDK 算出来的路线（缓存老数据 / 搜索 SDK 兜底）：没有 link 路况，
+                // 退回主色单线，至少路线是完整的
+                appendChain(step.polyline, 0)
+            }
         }
         if (points.size < 2) return
+
+        /*
+         * 优先用 **SDK 的里程分段**（`AMapNaviPath.getTrafficStatuses()`）重切颜色。
+         *
+         * 官方导航 overlay 就是这么做的：那串段按顺序累计里程，每段带一个状态；
+         * 把几何按同样的里程切开上色即可。它比逐 link 更可靠 ——
+         * 实测 `AMapNaviStep.getLinks()` 在部分会话里直接返回空数组。
+         *
+         * 两边里程尺子长度略有差异（几何累加 vs SDK allLength），
+         * 按比例缩放后再切，避免最后几段整体偏移。
+         */
+        if (r.trafficRuns.isNotEmpty() && cum.isNotEmpty()) {
+            val sdkTotal = r.trafficRuns.sumOf { it.lengthM }.toDouble()
+            val geomTotal = cum.last()
+            if (sdkTotal > 0 && geomTotal > 0) {
+                val k = geomTotal / sdkTotal
+                segs.clear()
+                var m0 = 0.0
+                r.trafficRuns.forEach { run ->
+                    val m1 = m0 + run.lengthM * k
+                    val a = cumIndexAt(cum, m0)
+                    val b = cumIndexAt(cum, m1).coerceIn(a, points.size - 1)
+                    if (b > a) {
+                        val last = segs.lastOrNull()
+                        if (last != null && last.status == run.status && last.to == a) {
+                            segs[segs.size - 1] = last.copy(to = b)
+                        } else {
+                            segs += TrafficSeg(a, b, run.status)
+                        }
+                    }
+                    m0 = m1
+                }
+                // 尾差并进最后一段：SDK 的段长总和通常比几何略短
+                if (segs.isNotEmpty()) {
+                    segs[segs.size - 1] = segs.last().copy(to = points.size - 1)
+                }
+            }
+        }
+
         routePoints = points
         routeCum = cum.toDoubleArray()
+        lastCutIdx = -1
         lastProgressM = -1
-        lastProgressIdx = -1
+        com.motohud.ble.data.BleDiagnostic.trace(
+            "画线 ${points.size}点 总${acc.toInt()}m 段=${segs.size} fitAll=$fitAll"
+        )
         safeMap {
-            aheadLine?.remove()
-            doneLine?.remove()
-            // 底层：全程路线（主色，粗）；上层：已走路段（灰，细）——一眼看出走到哪
-            aheadLine = map.addPolyline(
-                PolylineOptions().apply {
-                    addAll(points)
-                    width(18f)
-                    color(themeColor(R.attr.mtTrackAhead, android.graphics.Color.WHITE))
-                    setDottedLine(false)
-                    // V11 新增：折线抽稀。一条长途路线动辄几千个点，全量提交给渲染引擎
-                    // 在中低端机上会拖慢每帧绘制；抽稀后顶点数大幅下降。
-                    // 误差由引擎按像素级别控制，肉眼看不出与道路的贴合差异；
-                    // 真要按原始点绘制可以在设置里关掉。
-                    if (com.motohud.ble.data.NaviPrefs.routeReduce.value) setReducePoint(true)
-                }
-            )
-            doneLine = map.addPolyline(
-                PolylineOptions()
-                    .add(points.first(), points.first())
-                    .width(11f)
-                    .color(themeColor(R.attr.mtTrackDone, android.graphics.Color.WHITE))
-                    .setDottedLine(false)
-                    // 已走路段同样抽稀：它每秒都要重设一次顶点，
-                    // 顶点越多重建越慢，卡顿就出在这里
-                    .apply {
+            trafficLines.forEach { runCatching { it.remove() } }
+            trafficLines.clear()
+            trafficSegs = segs
+            segs.forEach { seg ->
+                val pts = points.subList(seg.from, seg.to + 1)
+                trafficLines += map.addPolyline(
+                    PolylineOptions().apply {
+                        addAll(pts)
+                        width(18f)
+                        color(trafficColor(seg.status))
+                        setDottedLine(false)
+                        // 折线抽稀：长途路线动辄几千点，全量提交会拖慢每帧绘制
                         if (com.motohud.ble.data.NaviPrefs.routeReduce.value) setReducePoint(true)
+                        zIndex(3f)
                     }
-                    .zIndex(2f)
-            )
+                )
+            }
+            drawWaypointMarkers(map, r)
             destMarker?.remove()
             destMarker = map.addMarker(
                 MarkerOptions()
@@ -1739,31 +2128,119 @@ class GuidanceActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 按已行驶距离把折线切成「已走（灰）」与「未走（主色）」两段。
-     *
-     * 这里是整条橙色路线"抖一下"的源头：`Polyline.points = ...` 是**无条件**
-     * 重建几何缓冲的，一条长途路线动辄上千个顶点，1Hz 重建两次（灰+橙）就会
-     * 顶掉当帧绘制，肉眼就是一格一格的跳。两道闸：
-     *  1) 位移不足 [PROGRESS_STEP_M] 不动 —— 高频小幅重算没有视觉收益；
-     *  2) 切分下标没变就彻底不设点 —— 停车/等灯时 traveled 一直在微动，
-     *     但下标不动，此时重建纯属白烧。
-     */
-    private fun renderProgress(traveled: Int) {
-        if (routePoints.size < 2 || routeCum.isEmpty()) return
-        if (lastProgressM >= 0 && kotlin.math.abs(traveled - lastProgressM) < PROGRESS_STEP_M) return
-        val idx = splitIndexFor(traveled.toDouble())
-        if (idx == lastProgressIdx) {
-            lastProgressM = traveled
-            return
+    /** 累计里程 → 折线下标（[cum] 递增，二分） */
+    private fun cumIndexAt(cum: List<Double>, d: Double): Int {
+        if (cum.isEmpty()) return 0
+        var lo = 0
+        var hi = cum.size - 1
+        while (lo < hi) {
+            val mid = (lo + hi) / 2
+            if (cum[mid] < d) lo = mid + 1 else hi = mid
         }
-        lastProgressIdx = idx
-        lastProgressM = traveled
-        val done = routePoints.subList(0, (idx + 1).coerceIn(1, routePoints.size))
-        val ahead = routePoints.subList(idx.coerceIn(0, routePoints.size - 1), routePoints.size)
-        safeMap {
-            doneLine?.points = ArrayList(done)
-            aheadLine?.points = ArrayList(ahead)
+        return lo
+    }
+
+    /**
+     * 高德路况色。数值与官方导航一致：畅通绿、缓行黄、拥堵橙红、严重拥堵深红。
+     * 未知（0）退回主题主色 —— 静态规划路线本来就没有实时路况。
+     */
+    private fun trafficColor(status: Int): Int = when (status) {
+        1 -> 0xFF22C55E.toInt()   // 畅通
+        2 -> 0xFFF5A623.toInt()   // 缓行
+        3 -> 0xFFEF4444.toInt()   // 拥堵
+        4 -> 0xFF991B1B.toInt()   // 严重拥堵
+        else -> themeColor(R.attr.mtTrackAhead, android.graphics.Color.WHITE)
+    }
+
+    /**
+     * 途经点标记：按 SDK 实际经过的点（`AMapNaviPath.getWayPoint()`）画 1..5 号。
+     *
+     * 用 SDK 返回的那一串而不是上层传进来的：SDK 会因为"就在路边/不可达"合并或
+     * 去掉某些点，界面要画的是真的会经过的那几个。
+     */
+    private fun drawWaypointMarkers(map: com.amap.api.maps.AMap, r: RouteData) {
+        waypointMarkers.forEach { runCatching { it.remove() } }
+        waypointMarkers.clear()
+        r.waypoints.forEachIndexed { i, wp ->
+            if (wp.first == 0.0 && wp.second == 0.0) return@forEachIndexed
+            val icon = runCatching {
+                com.amap.api.maps.model.BitmapDescriptorFactory.fromBitmap(
+                    com.motohud.ble.amap.WaypointMarker.badge(this, i + 1)
+                )
+            }.getOrNull() ?: return@forEachIndexed
+            waypointMarkers += map.addMarker(
+                MarkerOptions()
+                    .position(LatLng(wp.first, wp.second))
+                    .icon(icon)
+                    .anchor(0.5f, 0.5f)
+                    .title(getString(R.string.route_waypoint_n, i + 1))
+                    .zIndex(8f)
+            )
+        }
+    }
+
+    /**
+     * 按**高德给的已行驶里程**裁掉已走路段。
+     *
+     * 以前是自己把车标投影到折线上算里程，再维护一个"按车速上涨的水位"来防投影
+     * 跳到高架另一层 —— 那套逻辑存在的唯一原因，是当时只有投影可用。现在
+     * `NaviState.traveled` 就是 SDK 的 `allLength - pathRemain`，是导航引擎自己的
+     * 那把尺子，直接用它切分：几何与里程同源，不需要水位、不需要偏移阈值，
+     * 也不会出现"投影跳飞 → 橙线永久缺失"。
+     *
+     * 已走段**直接不画**（与官方导航一致：走过的路从图上消失），不是变灰。
+     * 每帧只重建跨越切分点的那一段，其余段只切 visible，开销与段数同阶（通常 < 20）。
+     */
+    private fun renderProgress(s: NaviEngine.NaviState) {
+        if (routePoints.size < 2 || trafficSegs.isEmpty()) return
+        val total = routeCum.lastOrNull() ?: return
+        if (total <= 0.0) return
+        // 自愈：折线对象丢了或被 SDK 内部清空（地图重建 / 从后台回来 GL 上下文丢失）
+        // 就整条重画。两秒查一次：getPoints() 有分配开销，不跟 10Hz 状态帧跑。
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastSelfHealAt > 2000L) {
+            lastSelfHealAt = nowMs
+            val broken = trafficLines.size != trafficSegs.size ||
+                trafficLines.isEmpty() ||
+                trafficLines.any { (it.points?.size ?: 0) < 2 }
+            if (broken) {
+                val r = route ?: return
+                com.motohud.ble.data.BleDiagnostic.trace(
+                    "折线自愈：对象缺失或顶点被清空，重画整条路线（${routePoints.size}点）"
+                )
+                drawRoute(r, fitAll = false)
+                return
+            }
+        }
+        if (s.traveled < 0) return
+        // SDK 里程 → 几何里程。两条尺子一般只差 1%；差太多（几何缺段）就按原值用，
+        // 再 clamp 到总长即可 —— 不再需要"水位"那种兜底。
+        val sdkTraveled = s.traveled.toDouble()
+        val sdkTotal = sdkTraveled + s.pathRemain
+        val cutM = if (sdkTotal > 0 && sdkTotal in total * 0.8..total * 1.2) {
+            sdkTraveled * total / sdkTotal
+        } else {
+            sdkTraveled
+        }.coerceIn(0.0, total)
+        val idx = splitIndexFor(cutM).coerceIn(0, routePoints.size - 1)
+        // 只前进：SDK 重算时 traveled 偶尔回拨一点点，让线"长回来"很难看
+        if (idx <= lastCutIdx) return
+        lastCutIdx = idx
+        lastProgressM = cutM.toInt()
+        for (i in trafficSegs.indices) {
+            val seg = trafficSegs[i]
+            val line = trafficLines.getOrNull(i) ?: continue
+            when {
+                // 整段都在车后面 → 不画
+                seg.to <= idx -> if (line.isVisible) line.isVisible = false
+                // 切分点落在段内 → 只留车头以后的部分
+                seg.from < idx -> {
+                    val pts = ArrayList(routePoints.subList(idx, seg.to + 1))
+                    if (pts.size >= 2) line.points = pts
+                    if (!line.isVisible) line.isVisible = true
+                }
+                else -> if (!line.isVisible) line.isVisible = true
+            }
         }
     }
 
@@ -1865,6 +2342,9 @@ class GuidanceActivity : AppCompatActivity() {
     private fun followOnMap(s: NaviEngine.NaviState, force: Boolean = false) {
         val map = aMap ?: return
         if (s.latitude == 0.0 && s.longitude == 0.0) return
+        // 全览期间不跟随：否则全览刚缩出去就被拉回来。force=true 只由「回中」
+        // 和全览计时结束调用，那两处正是要主动回到导航视角的时刻。
+        if (overviewActive && !force) return
         if (userPanned && !force) return
         // 兜底：单帧位移超过 5km 时不跟随，避免定位错点时地图"飞走"变白屏。
         // **必须能自愈**：只有"连续两帧都待在远处"才算新的真实位置并重新锚定，
@@ -2026,6 +2506,18 @@ class GuidanceActivity : AppCompatActivity() {
     private var camGlide: CamGlide? = null
 
     /**
+     * 打断进行中的相机补间。
+     *
+     * 补间是「按帧 moveCamera」的自绘动画，它不认 SDK 的 animateCamera —— 全览
+     * 这类需要把镜头交给 SDK 一次性动画的操作必须先把它停掉，否则新动画刚开始
+     * 就被下一帧 moveCamera 覆盖，表现成"点了没反应"。
+     */
+    private fun cancelCamGlide() {
+        camGlide = null
+        mapView?.removeCallbacks(camGlideTick)
+    }
+
+    /**
      * 启动一次相机补间。
      *
      * 起点取**当前相机实际位置**而不是上一次的目标：定位帧之间用户可能拖过地图、
@@ -2122,6 +2614,10 @@ class GuidanceActivity : AppCompatActivity() {
         lifecycleScope.launch {
             engine.state.collect { s ->
                 if (started && !stopped) app.naviForwarder.forward(s)
+                // 「发现更快路线」卡片：超时 / 驶过分岔点 / 到达 三个条件每帧都判。
+                // 放独立收集器（不是 render）的原因同转发：render 有界面早退，
+                // 早退时卡片就没人管，会一直残留 —— 用户明确要求"不得一直残留"。
+                if (betterRouteShownAt > 0 || pendingBetterRoute != null) expireBetterRouteCard(s)
             }
         }
         lifecycleScope.launch {
@@ -2155,6 +2651,30 @@ class GuidanceActivity : AppCompatActivity() {
         // 路线规划尚未落地时不消费引擎里的历史状态（可能属于上一次导航）
         if (!started) return
         if (!s.running && !s.arrived) return
+
+        // 路线代数变了 = SDK 换了一条路（偏航/拥堵重算、过途经点）。
+        // 必须在画进度之前处理：折线几何要先换掉，后面的切分才切在新线上。
+        if (s.routeGeneration != lastRouteGen) {
+            lastRouteGen = s.routeGeneration
+            onRouteReplaced(s)
+        }
+
+        /*
+         * 路况补齐后重画一次着色。
+         *
+         * 算路阶段（选路页 `calculateDriveRoute` 回调里）高德往往还没把
+         * `trafficStatuses` 填上 —— 实测空数组；等 `startNavi` 之后就变成 10 段
+         * "畅通/拥堵/严重拥堵"。而 `routeGeneration` 在这种情况下并不会变
+         * （pathid 没换），所以不能只靠 onRouteReplaced。
+         * 这里在"当前路线还没有路况"时每帧问一次引擎，拿到就重画并停下。
+         */
+        if (route?.trafficRuns.isNullOrEmpty() && s.running) {
+            val rr = engine.currentRoute()
+            if (rr != null && rr.trafficRuns.isNotEmpty()) {
+                route = rr
+                drawRoute(rr, fitAll = false)
+            }
+        }
 
         updateMeMarker(s)
 
@@ -2205,15 +2725,13 @@ class GuidanceActivity : AppCompatActivity() {
             else -> accuracyLevel(s.accuracy) == 1
         }
         tvSignalWarn.visibility = if (weak && !inPip) View.VISIBLE else View.GONE
-        if (weak && !weakGpsToastShown) {
-            weakGpsToastShown = true
-            Toast.makeText(
-                this,
-                if (s.accuracy > 0f) getString(R.string.navi_gps_weak_message, s.accuracy.roundToInt())
-                else getString(R.string.navi_gps_weak_message, 0),
-                Toast.LENGTH_LONG
-            ).show()
-        }
+        /*
+         * 这里以前还会弹一次 Toast。Android 12+ 的 Toast 固定显示在屏幕上方，
+         * 正好压在转向横幅上 —— 用户反馈"GPS 提示把导航信息挡住了"就是它。
+         * 顶部横幅已经常驻同一条信息（还带精度米数），Toast 属于纯重复 + 纯干扰，
+         * 直接去掉；[weakGpsToastShown] 仍保留，避免以后有人再把它加回来时漏掉去重。
+         */
+        if (weak) weakGpsToastShown = true
 
         // 路口前自动放大状态切换：置零节流，让下一帧立刻动相机
         val wantBoost = !s.arrived && s.stepRemain in 1..AUTO_ZOOM_RANGE_M && TurnIcons.isTurn(s.iconType)
@@ -2229,7 +2747,10 @@ class GuidanceActivity : AppCompatActivity() {
             }
         }
 
-        renderProgress(s.traveled)
+        renderProgress(s)
+        // 「发现更快路线」卡片的下架判断在 observeState 的独立收集里跑（见那边注释），
+        // 不能放这里：render() 有 !started / 未在导航中的界面早退，
+        // 卡片会因为在后台/暂停态漏判而一直挂在顶栏。
 
         // 进入新路段 → 重置本段的阈值调度
         if (s.stepIndex != lastAnnouncedStep) {
@@ -2355,7 +2876,9 @@ class GuidanceActivity : AppCompatActivity() {
     private fun showArrivalCard(s: NaviEngine.NaviState) {
         arrivedOverlay.visibility = View.VISIBLE
         tvArriveSub.text = getString(R.string.guidance_arrive_sub, destName)
-        val traveledM = s.traveled.coerceAtLeast(0)
+        // 必须用累计里程：偏航过一次，`traveled` 就只剩最后那条小路线的一小段
+        // （实测 4.9 公里的行程，到达卡片显示 1.6 公里、均速 1km/h）
+        val traveledM = s.traveledTotal.coerceAtLeast(0)
         tvArriveDistance.text = CoordConverter.formatDistance(traveledM)
         val durationMs = (System.currentTimeMillis() - naviStartMs).coerceAtLeast(0L)
         tvArriveDuration.text = formatDuration(durationMs)
@@ -2519,15 +3042,30 @@ class GuidanceActivity : AppCompatActivity() {
         val remain = s.stepRemain
         if (remain <= 0 || remain > com.motohud.ble.navi.RoadFeatureNarrator.triggerDist(pick.type)) return
         featureAnnounced.add(nextIdx)
-        val text = com.motohud.ble.navi.RoadFeatureNarrator.text(pick, remain, presetPack)
-        if (text.isNotEmpty()) {
-            say(
-                text,
-                SpeechPriority.INFO,
-                interrupt = false,
-                cue = com.motohud.ble.navi.SpeechArbiter.ROAD_FEATURE
+        val base = com.motohud.ble.navi.RoadFeatureNarrator.text(pick, remain, presetPack)
+        if (base.isEmpty()) return
+        /*
+         * 隧道要把「出洞之后往哪走」并进同一句。
+         *
+         * 洞内没有卫星也没有指示牌，等出洞再听「前方 50 米左转」人已经站在岔口上了；
+         * 而分两次 say() 是不行的 —— 第二句 interrupt=false 时，仲裁器看到前一句
+         * 还在播就会整句丢掉，用户只会听到"请开灯"。拼成一句最稳，
+         * 内置语音包的 clipsFor 会把它切成「前方进入隧道，请开灯」+「出隧道后左转」两段顺序播。
+         */
+        val after = if (pick.type == com.motohud.ble.navi.RoadFeatureType.TUNNEL) {
+            com.motohud.ble.navi.RoadFeatureNarrator.afterTunnelText(
+                steps.getOrNull(nextIdx + 1)?.action.orEmpty()
             )
+        } else {
+            ""
         }
+        val text = if (after.isEmpty()) base else "$base，$after"
+        say(
+            text,
+            SpeechPriority.INFO,
+            interrupt = false,
+            cue = com.motohud.ble.navi.SpeechArbiter.ROAD_FEATURE
+        )
     }
 
     /**
@@ -2637,11 +3175,13 @@ class GuidanceActivity : AppCompatActivity() {
      */
     private fun feedDriveSenses(s: NaviEngine.NaviState) {
         // ---- 坡度：用路线上的**已行驶里程**增量，而不是 GPS 位移（后者会正负抵消不掉抖动）
+        // 用累计里程（traveledTotal）：重算后 `traveled` 会归零，喂进去的是个负数，
+        // 坡度窗口会当场算错，长下坡提示可能直接消失
         if (s.running && !s.arrived) {
-            if (lastFeedTraveled >= 0 && s.traveled > lastFeedTraveled) {
-                terrainSense?.addDistance((s.traveled - lastFeedTraveled).toFloat())
+            if (lastFeedTraveled >= 0 && s.traveledTotal > lastFeedTraveled) {
+                terrainSense?.addDistance((s.traveledTotal - lastFeedTraveled).toFloat())
             }
-            lastFeedTraveled = s.traveled
+            lastFeedTraveled = s.traveledTotal
         }
 
         // ---- 驾驶行为 ----
@@ -2696,7 +3236,9 @@ class GuidanceActivity : AppCompatActivity() {
         // 键一变，"已经说过"就失效 —— 真机日志里连续两次「左转」就是这么来的。
         // 换成**沿路线的绝对里程**（已走 + 到该路口还剩），这个数在接近路口的
         // 整个过程中是恒定的，与索引抖动、图标抖动都无关。按 50 米分桶消掉 GPS 噪声。
-        val absM = (s.traveled + rem).takeIf { s.traveled > 0 && it > 0 }?.toInt()
+        // 已走用累计里程：单条路线的 `traveled` 在重算后归零，键会突然跳回起点附近，
+        // 与旧路线同一位置的键撞上 → 该播的路口被当成"说过"直接吞掉。
+        val absM = (s.traveledTotal + rem).takeIf { s.traveledTotal > 0 && it > 0 }?.toInt()
         val place = if (absM != null) "A${absM / 50}" else "S${s.stepIndex}"
         val key = "$place|$chosen"
         if (!spokenTiers.add(key)) return
@@ -2841,29 +3383,58 @@ class GuidanceActivity : AppCompatActivity() {
         if (!com.motohud.ble.navi.CameraKind.worthSpeaking(cam.type)) return
         val cue = pickCameraTier(cam)
         if (cue.tier <= 0) return
-        // 同一个点位、同一档只说一次：远档给反应时间，近档做确认
-        if (!cameraSpoken.add(cam.speechKey(cue.tier, cue.exact))) return
-        if (cameraSpoken.size > 96) cameraSpoken.clear()
-        // 跨串间隔：两串探头挨得太近时，第二串只上屏不念。
-        // 15 秒是"念一句(~3s) + 留 12 秒清净"，比原来的 6 秒节拍器低一半噪音。
-        //
-        // **细化类型不受这条限制**：它们由官方逐条播报、整条路线也就三五条，
-        // 而且每条都是新情报（压线/逆行…）。实测第一版把「三百米内,有多个压线拍照」
-        // 拦在了一条闯红灯之后 7 秒的空档里，等于这条路线唯一一次压线提示被吞掉了。
+        val key = cam.speechKey(cue.tier, cue.exact)
+        // **只查不写**：下面任何一条节流 return 都不能把这个档位记成"播过了"。
+        // 旧代码先 add 再判断间隔，撞上 15 秒最小间隔 / 60 秒同组闸的点位会被
+        // 永久静音（下一帧同一个 key 直接 return，再也没机会补播）——
+        // 实车表现就是「上午听到两次、下午整趟一次都没有」。
+        if (cameraSpoken.contains(key)) return
         val now = System.currentTimeMillis()
         val fine = com.motohud.ble.navi.CameraKind.isFine(cam.type)
         val group = com.motohud.ble.navi.CameraKind.group(cam.type)
+        // 测速是唯一带限速数值的组：每个点限速可能不同，属于新情报，
+        // 不能被"同组 60 秒只说一次"跟违章/闯红灯一起压掉。
+        val isSpeed = group == com.motohud.ble.navi.CameraKind.G_SPEED
         if (!fine) {
-            if (now - lastCameraSpeakMs < CAMERA_MIN_GAP_MS) return
-            // 同一组 60 秒内只说一次。实测最典型的噪音就是这个：
-            // 一条商业街上连着四个路口，每组都是「闯红灯拍照」，逐组念四遍
-            // 等于把同一句建议重复四次。换个组（比如突然来测速）才值得再开口。
-            if (group == lastCameraGroup && now - lastCameraGroupMs < CAMERA_SAME_GROUP_MS) return
+            val gap = if (isSpeed) CAMERA_SPEED_GAP_MS else CAMERA_MIN_GAP_MS
+            if (now - lastCameraSpeakMs < gap) {
+                traceCameraBlocked(key, "间隔", cam, cue, "gap=${now - lastCameraSpeakMs}ms")
+                return
+            }
+            if (!isSpeed && group == lastCameraGroup &&
+                now - lastCameraGroupMs < CAMERA_SAME_GROUP_MS
+            ) {
+                traceCameraBlocked(key, "同组", cam, cue, "group=$group")
+                return
+            }
         }
+        // 全部放行之后才记账，保证被拦下的档位下一帧还能补播
+        if (!cameraSpoken.add(key)) return
+        if (cameraSpoken.size > 96) cameraSpoken.clear()
         lastCameraSpeakMs = now
         lastCameraGroup = group
         lastCameraGroupMs = now
-        say(cameraSpeech(cam, cue.tier, cue.exact), cue = com.motohud.ble.navi.SpeechArbiter.CAMERA)
+        val text = cameraSpeech(cam, cue.tier, cue.exact, s.limitSpeedKmh)
+        say(text, cue = com.motohud.ble.navi.SpeechArbiter.CAMERA)
+        com.motohud.ble.data.BleDiagnostic.trace(
+            "电子眼播报 id=${cam.id} type=${cam.type} ${cam.distanceM}m 档=${cue.tier}" +
+                " 点位限速=${cam.speedKmh} 路段限速=${s.limitSpeedKmh} 文案=「$text」"
+        )
+    }
+
+    /** 被节流拦下时留一行证据，但同一个档位只记一次，别把 trace 刷爆 */
+    private fun traceCameraBlocked(
+        key: String,
+        why: String,
+        cam: com.motohud.ble.navi.CameraAlert,
+        cue: CameraCue,
+        extra: String
+    ) {
+        if (!cameraBlockLogged.add("$key|$why")) return
+        if (cameraBlockLogged.size > 96) cameraBlockLogged.clear()
+        com.motohud.ble.data.BleDiagnostic.trace(
+            "电子眼拦下[$why] id=${cam.id} type=${cam.type} ${cam.distanceM}m 档=${cue.tier} $extra"
+        )
     }
 
     /** 命中的播报档位 */
@@ -2899,28 +3470,34 @@ class GuidanceActivity : AppCompatActivity() {
      *
      * @param tier 命中的档位值（用于距离词，保证说出口的距离是准的）
      * @param exact true = 点位出现太晚，按 `cam.distanceM` 的实际档位念
+     * @param segmentLimit 当前路段限速（SDK `OnUpdateTrafficFacility` / 电子眼回调给的）。
+     *   官方文本解析出的**细化类型不带点位限速**（见 `applyCameraText`），
+     *   只用 `cam.speedKmh` 会让"限速多少"这一句永远说不出口；这里退回路段值。
      */
     private fun cameraSpeech(
         cam: com.motohud.ble.navi.CameraAlert,
         tier: Int,
-        exact: Boolean
+        exact: Boolean,
+        segmentLimit: Int = 0
     ): String {
         // 用 span(档位值) 而不是 span(当前距离)：档位值就是 200/500 这种整数，
         // 念出来与屏幕上的数字一致，也不会出现 187 米被念成「200 米」的错位感。
         val d = com.motohud.ble.navi.SpeechScript
             .span(if (exact) cam.distanceM else tier)
         val name = getString(com.motohud.ble.navi.CameraKind.labelRes(cam.type))
+        // 点位限速优先，拿不到就用路段限速 —— 两者都是高德下发的真实值，不是猜的
+        val limit = if (cam.speedKmh > 0) cam.speedKmh else segmentLimit
 
         if (cam.interval) {
             // 区间测速：剩余里程是个变化的值，只有念得全的链路才说
             val rich = getString(
-                R.string.camera_ahead_interval, d, cam.speedKmh,
+                R.string.camera_ahead_interval, d, limit,
                 com.motohud.ble.navi.SpeechScript.span(cam.intervalRemainM)
             )
             return if (canSpeakAll(rich)) rich else getString(R.string.camera_ahead_interval_preset, d)
         }
-        if (cam.speedKmh > 0) {
-            val rich = getString(R.string.camera_ahead_limit, d, name, cam.speedKmh)
+        if (limit > 0) {
+            val rich = getString(R.string.camera_ahead_limit, d, name, limit)
             if (canSpeakAll(rich)) return rich
         }
         // 兜底固定句：类型名 + 「有」，句式与界面完全一致
@@ -2998,6 +3575,62 @@ class GuidanceActivity : AppCompatActivity() {
             if (tvLimitBadge.visibility != View.VISIBLE) tvLimitBadge.visibility = View.VISIBLE
         } else if (tvLimitBadge.visibility != View.GONE) {
             tvLimitBadge.visibility = View.GONE
+        }
+    }
+
+    /**
+     * 大限速牌 + 超速红光（参考高德导航）。
+     *
+     * 触发条件：**超过当前限速 5%**（用户指定；高德默认约 10%）。
+     * 限速取「电子眼点位限速」优先、「路段限速」兜底，两者都是高德下发的真实值。
+     * 高德的三件套 —— 时速数字变红 / 红圈限速牌 / 屏幕边缘红光闪动 —— 这里全做齐，
+     * 但**不加"屏幕中央半透明红框"**：用户刚要求把顶部遮罩收窄，中央再压一层
+     * 会挡住转向箭头和地图，跟"别挡主体内容"冲突。
+     */
+    private fun renderSpeedAlert(s: NaviEngine.NaviState) {
+        val camLimit = s.camera?.takeIf { it.distanceM in 1..CAMERA_SHOW_M }?.speedKmh ?: 0
+        val limit = if (camLimit > 0) camLimit else s.limitSpeedKmh
+        val active = s.running && !s.arrived
+
+        // 大限速牌：只在导航中、且确实拿到限速值时显示
+        if (limit > 0 && active) {
+            val text = limit.toString()
+            if (tvLimitSign.text?.toString() != text) tvLimitSign.text = text
+            if (tvLimitSign.visibility != View.VISIBLE) tvLimitSign.visibility = View.VISIBLE
+        } else if (tvLimitSign.visibility != View.GONE) {
+            tvLimitSign.visibility = View.GONE
+        }
+
+        val now = System.currentTimeMillis()
+        val over = limit > 0 && active && s.speedKmh > limit * OVERSPEED_RATIO
+        // 滞回：降回限速以内后红光再留 1.5 秒，避免车速在阈值上下抖动时疯狂闪烁
+        if (over) overspeedHoldUntil = now + OVERSPEED_HOLD_MS
+        val showOver = over || now < overspeedHoldUntil
+
+        // ① 底部时速数字变红
+        val speedColor = if (showOver) limitSignOverColor else speedNormalColor
+        if (tvSpeed.currentTextColor != speedColor) tvSpeed.setTextColor(speedColor)
+        // ② 大限速牌数字变红 + 红圈加粗
+        val signColor = if (showOver) limitSignOverColor else limitSignNormalColor
+        if (tvLimitSign.currentTextColor != signColor) tvLimitSign.setTextColor(signColor)
+        if (showOver != limitSignOverBg) {
+            tvLimitSign.setBackgroundResource(
+                if (showOver) R.drawable.bg_limit_sign_over else R.drawable.bg_limit_sign
+            )
+            // 路口放大图独占侧栏时，底部显示的是 tv_cross_speed 而不是 tvSpeed。
+            // 只改 tvSpeed 的话，这种形态下时速仍是黑字，超速提示少了一半。
+            tvCrossSpeed.setTextColor(
+                if (showOver) limitSignOverColor else themeColor(R.attr.nvTextPrimary)
+            )
+            limitSignOverBg = showOver
+        }
+        // ③ 屏幕四周红光 + 呼吸脉冲
+        if (showOver) {
+            if (overspeedVignette.visibility != View.VISIBLE) overspeedVignette.visibility = View.VISIBLE
+            overspeedVignette.startPulse()
+        } else {
+            overspeedVignette.stopPulse()
+            if (overspeedVignette.visibility != View.GONE) overspeedVignette.visibility = View.GONE
         }
     }
 
@@ -3106,6 +3739,9 @@ class GuidanceActivity : AppCompatActivity() {
             }
         }
 
+        // ---- 大限速牌 + 超速红光（与其它电子眼提示解耦，单独一档视觉层级）----
+        renderSpeedAlert(s)
+
         // ---- 路口放大图（画中画里不显示，小窗放不下）----
         // 三条显示规则：
         // ① SDK 说"要显示"（s.cross 非空）就一直显示 —— 高德真机复杂路口会挂 4~6 秒，
@@ -3197,6 +3833,81 @@ class GuidanceActivity : AppCompatActivity() {
      * 为什么要独占：骑行时这块图只活两三秒，叠在侧栏上方会让字和图糊成一片；
      * 而它的信息量（这个路口怎么过）本来就覆盖了侧栏那几行字。
      */
+    /**
+     * 摆放「GPS 信号弱」提示条。
+     *
+     * 贴地图底部：那里是已走路段，既不会盖住转向横幅（高度随内容变，写死 dp 必踩），
+     * 也不会盖住底部信息卡 / 路口放大图 —— 这两个高度都在运行时量。
+     * 横屏时地图只占一侧，底部同样安全，保持 14dp 边距即可。
+     */
+    /**
+     * 底部两块「会挡住东西」的面板里最高（屏幕 y 最小）的那条上沿：
+     * ETA 卡（[bottomInfo]）与更快路线卡（[betterRouteCard]，它压在 ETA 卡上面）。
+     *
+     * GPS 提示条和右侧圆钮列都要排在它们**上面**。以前各自写死高度，一遇到
+     * 更快路线卡冒出来就穿帮 —— 真机复现：提示条压在卡片的"接受"按钮上，
+     * 圆钮列被卡片整个盖住，点全览没反应。
+     *
+     * @return 相对父容器（根 FrameLayout）的上沿 y；一块都没有时返回 0
+     */
+    private fun bottomPanelTop(): Int {
+        var top = Int.MAX_VALUE
+        listOf(bottomInfo, betterRouteCard).forEach { v ->
+            if (v.visibility == View.VISIBLE && v.height > 0 && v.top > 0) {
+                top = minOf(top, v.top)
+            }
+        }
+        return if (top == Int.MAX_VALUE) 0 else top
+    }
+
+    private fun positionSignalWarn() {
+        val dm = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * dm).toInt()
+        val lp = tvSignalWarn.layoutParams as? FrameLayout.LayoutParams ?: return
+        lp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        lp.topMargin = 0
+        val parentH = (mapActions.parent as? View)?.height ?: 0
+        /*
+         * 横屏只让过"更快路线卡"：横屏的 ETA 卡是靠边的竖条，提示条居中摆，
+         * 两者本来就不冲突；把提示条抬到整条侧栏之上反而会跑到屏幕中间。
+         */
+        val top = if (landscapeNow) {
+            val card = betterRouteCard
+            if (card.visibility == View.VISIBLE && card.height > 0) card.top else 0
+        } else {
+            bottomPanelTop()
+        }
+        val want = if (parentH > 0 && top > 0) (parentH - top) + dp(10) else dp(14)
+        if (lp.bottomMargin != want) {
+            lp.bottomMargin = want
+            tvSignalWarn.layoutParams = lp
+        }
+    }
+
+    /**
+     * 把右侧「全览 / 回中」两颗圆钮抬到底部卡片之上。
+     *
+     * 以前写死 `marginBottom = 212dp`：只有"底部卡片恰好 212dp 高"时才贴着卡片上沿。
+     * 卡片是 wrap_content，转向语换行、路况估算、车机提示都能让它变高，一旦超过
+     * 212dp 两颗圆钮就被压在卡片底下 —— 用户看到的是"按钮少了一半"，点全览没反应。
+     * 这里按底部面板的实测上沿反算，横屏不参与（按钮已搬进左侧竖列）。
+     */
+    private fun positionMapActions() {
+        if (landscapeNow) return
+        val dm = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * dm).toInt()
+        val parent = mapActions.parent as? View ?: return
+        val lp = mapActions.layoutParams as? FrameLayout.LayoutParams ?: return
+        if (parent.height <= 0) return
+        val top = bottomPanelTop()
+        if (top <= 0) return
+        val want = (parent.height - top) + dp(10)
+        if (lp.bottomMargin != want) {
+            lp.bottomMargin = want
+            mapActions.layoutParams = lp
+        }
+    }
+
     private fun setCrossMode(on: Boolean) {
         if (crossMode == on) return
         crossMode = on
@@ -3212,6 +3923,9 @@ class GuidanceActivity : AppCompatActivity() {
         }
         ivCrossImage.visibility = if (on) View.VISIBLE else View.GONE
         crossPanel.visibility = if (on) View.VISIBLE else View.GONE
+        // 放大图出现/消失会改变底部占位高度，提示条与右侧圆钮都要跟着挪
+        tvSignalWarn.post { positionSignalWarn() }
+        mapActions.post { positionMapActions() }
         if (on) {
             // 顶部让开状态栏（见 onCreate 末尾的说明）
             val d = resources.displayMetrics.density
@@ -3343,7 +4057,9 @@ class GuidanceActivity : AppCompatActivity() {
             if (isInPictureInPictureMode || landscapeNow) View.GONE else View.VISIBLE
         findViewById<View>(R.id.btn_overview).visibility = vis
         findViewById<View>(R.id.btn_recenter).visibility = vis
-        betterRouteCard.visibility = View.GONE
+        // 小窗里卡片没地方摆；顺手把候选状态一起清掉（只设 GONE 会留一个"幽灵候选"，
+        // 退出画中画后 expire 认为卡片不可见就不再管它）
+        hideBetterRouteCard()
         tvSignalWarn.visibility = View.GONE
         // 小窗里只留转向横幅 + 距离：地图在 16:9 里看不清还费电
         bottomInfo.visibility = vis
@@ -3371,6 +4087,8 @@ class GuidanceActivity : AppCompatActivity() {
         engine.onRerouteRequest = null
         betterRouteHandler.removeCallbacks(betterRouteTask)
         betterRouteHandler.removeCallbacks(resumeFollowRunnable)
+        overviewActive = false
+        overviewHandler.removeCallbacks(exitOverviewRunnable)
         stopCameraGlide()
         hideBetterRouteCard()
         engine.stop()
@@ -3477,7 +4195,8 @@ class GuidanceActivity : AppCompatActivity() {
     private fun buildArrivedText(s: NaviEngine.NaviState): String {
         // 内置包念不了"全程约 10.1 公里，用时 32min"，只说到达
         if (presetPack) return "已到达目的地"
-        val traveled = s.traveled.coerceAtLeast(0)
+        // 累计里程：偏航重算后单条路线的里程会清零，用它会把这趟行程说短
+        val traveled = s.traveledTotal.coerceAtLeast(0)
         val dist = CoordConverter.formatDistance(traveled)
         val durMs = (System.currentTimeMillis() - naviStartMs).coerceAtLeast(0L)
         val dur = formatDuration(durMs)
@@ -3582,6 +4301,13 @@ class GuidanceActivity : AppCompatActivity() {
         if (!inPip) {
             mapView?.onResume()
             shadowNaviView?.onResume()
+            // 切后台再回来时地图的 GL 上下文可能已经丢了：折线会整段不见、只剩车标。
+            // 重画一次并让车标重建（meMarker 置空，下一帧 updateMeMarker 会重新 add）。
+            route?.let { r ->
+                runCatching { meMarker?.remove() }
+                meMarker = null
+                drawRoute(r, fitAll = false)
+            }
         }
         // 画中画切换会把窗口属性重置，亮度与常亮要重新施加一次
         applyScreenPrefs()
@@ -3659,6 +4385,31 @@ class GuidanceActivity : AppCompatActivity() {
         lastCameraMs = 0L
     }
 
+    /**
+     * 顶部渐变（`top_scrim`）只盖「状态栏 + 目的地行」，不再铺一大片。
+     *
+     * 这块渐变的唯一职责是让状态栏图标和目的地卡在任何底图（含白天饱和绿地）上可读。
+     * 转向横幅/车道行/电子眼行各自有不透明面板背景，**不需要**底下再垫一层雾，
+     * 所以基准取 [destCard] 下沿，而不是整条 `top_bar`。
+     *
+     * 原来按横竖屏写死 170dp / 88dp：竖屏多糊了约 70dp 纯渐变、横屏（屏高只有 360dp）
+     * 糊掉四分之一张地图 —— 白天晚上、侧栏在左在右都是同一块，用户看到的就是"雾太厚"。
+     */
+    private fun updateScrimHeight() {
+        if (!::topScrim.isInitialized || !::topBar.isInitialized || !::destCard.isInitialized) return
+        val dm = resources.displayMetrics
+        fun px(v: Int): Int = (v * dm.density).toInt()
+        // 目的地卡在 top_bar 内，换算到 root 坐标
+        val destBottom = if (destCard.visibility == View.VISIBLE) topBar.top + destCard.bottom else 0
+        // 横屏收掉目的地卡后只剩状态栏那一条；车机全屏没有状态栏时给个极薄下限做过渡，
+        // 免得顶栏 panel 上沿直接压在地图绿地/楼块上显脏
+        val base = kotlin.math.max(destBottom, statusBarPx)
+        val minH = px(if (landscapeNow) 16 else 66)
+        val h = kotlin.math.max(base + px(10), minH)
+        if (topScrim.layoutParams.height == h) return
+        topScrim.layoutParams = topScrim.layoutParams.apply { height = h }
+    }
+
     private fun applyOrientationLayout(landscape: Boolean) {
         landscapeNow = landscape
         // 横屏侧栏方向：读设置，关=靠右（默认），开=靠左（整条侧栏与按钮镜像到另一侧）
@@ -3668,10 +4419,48 @@ class GuidanceActivity : AppCompatActivity() {
         val dm = resources.displayMetrics
         fun dp(v: Int): Int = (v * dm.density).toInt()
 
-        // 顶部渐变：横屏收窄，否则盖掉大半张图
-        topScrim.layoutParams = topScrim.layoutParams.apply {
-            height = if (landscape) dp(96) else dp(220)
+        // 顶部渐变：高度按「状态栏 + 目的地行」实测，不再写死 170/88dp。
+        // 写死的两档都比真正需要的区域高一倍多（竖屏 170dp 在 360dp 高的横屏上
+        // 更是半张地图），多出来那段纯渐变糊在地图上就是用户说的"雾太厚"。
+        updateScrimHeight()
+
+        // 大限速牌位置：
+        //   竖屏 —— 地图左上角、顶栏（170dp 遮罩）下方，避开居中的电子眼卡片；
+        //   横屏 —— 贴「靠信息栏」那一侧的顶部。v0.0.34 放在地图半屏正中央，
+        //           但导航视角下车标居中、前方橙线正好沿屏幕中央往上走，
+        //           76dp 的牌子会压住最需要看的那段路线（真机两趟都复现）。
+        //           靠侧栏放既明显又不挡线；左右镜像时用 base 对称处理，
+        //           两种侧栏方向都不会落进侧栏、也不会撞上外侧那列圆钮。
+        (tvLimitSign.layoutParams as FrameLayout.LayoutParams).apply {
+            gravity = Gravity.TOP or Gravity.START
+            if (landscape) {
+                val mapW = (resources.configuration.screenWidthDp - DP_PANEL_LAND).coerceAtLeast(160)
+                val base = if (sideLeft) DP_PANEL_LAND else 0
+                leftMargin = dp(if (sideLeft) base + 12 else mapW - 76 - 12)
+                topMargin = dp(96)      // 横屏遮罩 88dp 下沿
+            } else {
+                leftMargin = dp(12)
+                topMargin = dp(178)     // 竖屏遮罩 170dp 下沿
+            }
+            rightMargin = 0
+            tvLimitSign.layoutParams = this
         }
+        /*
+         * 信号弱提示：**贴地图底部**，不再压在转向横幅上。
+         *
+         * 以前竖屏写死 topMargin=178dp，可转向横幅的高度是随内容变的
+         * （大图标 + 指令 + 路名 + 然后…，有车道行还会更高），178dp 正好落进
+         * 卡片里面 —— 真机上就是"GPS 信号弱"那行字盖住"然后 右转，进入…"。
+         * 现在两种方向都放底部：那里是已走路段，不挡前方路线，也不会跟顶栏打架。
+         */
+        positionSignalWarn()
+        // 首帧还没量到卡片高度，等布局落定再摆一次
+        tvSignalWarn.post { positionSignalWarn() }
+        mapActions.post { positionMapActions() }
+        tvSignalWarn.translationX =
+            if (landscape) (if (sideLeft) 1f else -1f) * dp(DP_PANEL_LAND) / 2f else 0f
+        // 横屏屏矮，红光带收窄，别把地图吃掉
+        overspeedVignette.setBandDp(if (landscape) 34f else 56f)
 
         // ---- 顶栏 + 信息卡：横屏统一收成「右侧一条侧栏」，地图拿回左侧全部空间 ----
         // 竖屏恢复顶部通栏 + 底部通栏。横屏就是为「看清前方路口」而生的，
@@ -3734,10 +4523,33 @@ class GuidanceActivity : AppCompatActivity() {
         // 侧栏方向变了（onResume 无旋转时 insets 不会自动重发），让贴边的容器按新方向重算 padding
         topBar.requestApplyInsets()
         bottomInfo.requestApplyInsets()
-        (findViewById<View>(R.id.dest_card).layoutParams as ViewGroup.MarginLayoutParams).apply {
-            // 竖屏：给右侧悬浮的语音/投屏让位（102dp = 两个 44dp 圆钮 + 间距 + 8dp 空隙）
+        val destCardView = findViewById<View>(R.id.dest_card)
+        (destCardView.layoutParams as ViewGroup.MarginLayoutParams).apply {
+            // 竖屏：给右侧悬浮的语音/投屏让位（初值，随后按实测校正）
             marginEnd = if (landscape) 0 else dp(8 + 44 + 6 + 44)
-            findViewById<View>(R.id.dest_card).layoutParams = this
+            destCardView.layoutParams = this
+        }
+        if (!landscape) {
+            /*
+             * 用**实测屏幕坐标**校正让位距离。
+             *
+             * 写死 102dp 只对"系统栏宽度为 0、屏幕恰好 360dp 宽"成立；
+             * 带手势条/挖孔的机器上圆钮整列会往里挪，而卡片的 marginEnd 不动，
+             * 于是目的地卡的右边缘压住语音按钮 —— 用户说的"右上角按钮被遮住"。
+             * 这里量一次两者在屏幕上的位置，把差值补进去，任何机型都对齐。
+             */
+            quickActions.post {
+                if (quickActions.width <= 0 || destCardView.width <= 0) return@post
+                val qa = IntArray(2).also { quickActions.getLocationOnScreen(it) }
+                val dc = IntArray(2).also { destCardView.getLocationOnScreen(it) }
+                val delta = (dc[0] + destCardView.width) - (qa[0] - dp(6))
+                if (delta != 0) {
+                    val lp = destCardView.layoutParams as? ViewGroup.MarginLayoutParams
+                        ?: return@post
+                    lp.marginEnd = (lp.marginEnd + delta).coerceAtLeast(0)
+                    destCardView.layoutParams = lp
+                }
+            }
         }
 
         // 目的地卡横屏整卡收掉：横屏空间只有 300dp 宽，
@@ -3795,14 +4607,14 @@ class GuidanceActivity : AppCompatActivity() {
 
         // ---- 横屏极度精简：只留导航相关 ----
         // 隐藏：画中画入口（小窗场景另走通知条）、底部投屏钮（顶栏已有同功能钮）、
-        //       GPS 质量列（诊断项非导航必看）、全览（横屏只留「回中」）。
+        //       GPS 质量列（诊断项非导航必看）。
+        // 全览横屏不再隐藏 —— 它和定位一起排进左上竖列（见 applyQuickActions）。
         btnPip.visibility = if (landscape) View.GONE else
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) View.VISIBLE else View.GONE
         findViewById<View>(R.id.btn_cast_navi).visibility =
             if (landscape) View.GONE else View.VISIBLE
         statGps.visibility = if (landscape) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.btn_overview).visibility =
-            if (landscape) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.btn_overview).visibility = View.VISIBLE
 
         // 折叠手柄 / 路况估算：横屏本就隐藏
         findViewById<View>(R.id.btn_expand).visibility = if (landscape) View.GONE else View.VISIBLE
@@ -3834,10 +4646,16 @@ class GuidanceActivity : AppCompatActivity() {
             acts.gravity = Gravity.END or Gravity.BOTTOM
             acts.marginStart = 0
             acts.marginEnd = dp(14)
+            // 初值：底部 ETA 卡典型高度。真实值由 positionMapActions() 按实测校正 ——
+            // 卡片会随内容（转向文字行数 / 路况 / 车机提示）变高，写死 212dp 会
+            // 在放大图模式下把两颗圆钮压到卡片底下（真机复现：全览点了没反应，
+            // 因为按钮其实被卡片盖住了，点击落在地图上）。
             acts.bottomMargin = dp(212)
         }
         bottomInfo.layoutParams = card
         mapActions.layoutParams = acts
+        // 上面给的是初值，等这一帧量完卡片真实高度再校正（rotate 后卡片会重排）
+        mapActions.post { positionMapActions() }
 
         // 横屏空间窄，转向引导语收成单行，避免双行把横幅顶高与侧栏相撞
         tvTurnInstruction.maxLines = if (landscape) 1 else 2
@@ -3918,11 +4736,21 @@ class GuidanceActivity : AppCompatActivity() {
         quickActions.orientation =
             if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
 
-        // 定位键换容器：横屏 → 左上竖列；竖屏 → 右下 map_actions
+        val overviewBtn = findViewById<View>(R.id.btn_overview)
+
+        /*
+         * 横屏把「定位 + 全览」一起搬进左上竖列，凑成
+         * [返回 / 语音 / 投屏 / 定位 / 全览]。竖屏再搬回右下角 map_actions。
+         *
+         * 用户明确要求：横屏也要有全览，并且跟返回键那一列排在一起 ——
+         * 以前横屏直接把全览 GONE 掉，车机上看不到整条路线。
+         */
         val target: ViewGroup = if (landscape) quickActions else (mapActions as ViewGroup)
-        if ((btnRecenter.parent as? ViewGroup) !== target) {
-            (btnRecenter.parent as? ViewGroup)?.removeView(btnRecenter)
-            target.addView(btnRecenter)
+        listOf(btnRecenter, overviewBtn).forEach { v ->
+            if ((v.parent as? ViewGroup) !== target) {
+                (v.parent as? ViewGroup)?.removeView(v)
+                target.addView(v)
+            }
         }
 
         // 竖排看 topMargin、横排看 marginStart：语音永远第一个（顶/左），投屏第二个
@@ -3944,15 +4772,28 @@ class GuidanceActivity : AppCompatActivity() {
 
         if (landscape) {
             place(btnRecenter, 2)
+            place(overviewBtn, 3)
         } else {
-            // 竖屏放回 map_actions：与全览同宽、10dp 间距（与 XML 原值一致）
-            val lp = (btnRecenter.layoutParams as? LinearLayout.LayoutParams) ?: lp44()
-            lp.width = px(44)
-            lp.height = px(44)
-            lp.marginStart = 0
-            lp.topMargin = px(10)
-            btnRecenter.layoutParams = lp
+            // 竖屏放回 map_actions：全览在上、回中在下（与 XML 原顺序一致），间距 10dp
+            target.removeView(overviewBtn)
+            target.removeView(btnRecenter)
+            target.addView(overviewBtn)
+            target.addView(btnRecenter)
+            styleMapActionButton(overviewBtn, topMargin = 0)
+            styleMapActionButton(btnRecenter, topMargin = px(10))
         }
+    }
+
+    /** 竖屏 map_actions 里两枚方钮的统一尺寸/间距 */
+    private fun styleMapActionButton(v: View, topMargin: Int) {
+        val d = resources.displayMetrics.density
+        val lp = (v.layoutParams as? LinearLayout.LayoutParams)
+            ?: LinearLayout.LayoutParams((44 * d).toInt(), (44 * d).toInt())
+        lp.width = (44 * d).toInt()
+        lp.height = (44 * d).toInt()
+        lp.marginStart = 0
+        lp.topMargin = topMargin
+        v.layoutParams = lp
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -4037,11 +4878,24 @@ class GuidanceActivity : AppCompatActivity() {
         /** 路口前自动放大的触发距离 */
         private const val AUTO_ZOOM_RANGE_M = 200
 
-        /** 电子眼进入该距离内才播报（再远念了没意义，还盖住转向提示） */
-        private const val CAMERA_SPEAK_M = 800
+        /**
+         * 电子眼进入该距离内才播报。
+         *
+         * 原来是 800m —— 用户实测"七八百米、快一公里就开始念"，太早：
+         * 城区里 800m 往往隔着一个路口甚至一条街，念完人早忘了。
+         * 高德城区测速一般 300m 起（高速才给 500m/1km，见 [CameraKind.tiersOf] 的档位）。
+         * 这里只是硬上限兜底，真正决定起点的是档位。
+         */
+        private const val CAMERA_SPEAK_M = 400
 
-        /** 电子眼进入该距离内才显示在界面上 */
-        private const val CAMERA_SHOW_M = 1200
+        /** 电子眼进入该距离内才显示在界面上（原来 1200m，卡片一公里外就挂着） */
+        private const val CAMERA_SHOW_M = 600
+
+        /** 超速判定阈值：超过限速 5%（用户指定；高德默认约 10%） */
+        private const val OVERSPEED_RATIO = 1.05f
+
+        /** 降回限速以内后红光保留时长，避免车速在阈值附近抖动导致频闪 */
+        private const val OVERSPEED_HOLD_MS = 1_500L
 
         /**
          * 两条电子眼播报之间的最小间隔（跨串）。
@@ -4053,6 +4907,13 @@ class GuidanceActivity : AppCompatActivity() {
          * 这个间隔只负责拦"两串挨得太近"的情况。
          */
         private const val CAMERA_MIN_GAP_MS = 15_000L
+
+        /**
+         * **测速专用**最小间隔。测速是唯一带限速数值的组，两个相邻测速点的限速
+         * 可能不同，属于新情报；用 15 秒通用间隔会把第二个点压掉，用 60 秒同组闸
+         * 更是一整段路只念一次。8 秒 ≈ 一句播报(~3s) + 5 秒清净，既不吵也不漏。
+         */
+        private const val CAMERA_SPEED_GAP_MS = 8_000L
 
         /**
          * 同一**分组**电子眼的再次播报间隔。
@@ -4139,11 +5000,19 @@ class GuidanceActivity : AppCompatActivity() {
         /** 用户触碰地图后，手离开多久自动恢复跟随图标 */
         private const val PANNED_RESUME_MS = 4000L
         /**
-         * 已走/未走折线的最小重切步长（米）。
-         * 设折线顶点会让渲染引擎重建几何缓冲，是「橙色路线一格一格跳」的主因；
-         * 40m 在 100km/h 下也才 1.4 秒一次，视觉上完全跟得上。
+         * 「全览」保持时长：用户点了全览之后，不操作就等这么久自动回到导航视角。
+         *
+         * 以前全览只闪一下就没了 —— 因为相机跟随每秒都在拉回去，全览等于没做。
+         * 10 秒够看清整条路线，又不会让导航视角长期缺席（转弯时说"看不清路口"）。
          */
-        private const val PROGRESS_STEP_M = 40
+        private const val OVERVIEW_HOLD_MS = 10_000L
+
+        /** 更快路线卡片的最长驻留时间（2 分钟）：超时自动撤掉，不再吊在顶栏 */
+        private const val BETTER_ROUTE_CARD_TTL_MS = 2 * 60_000L
+        /** 候选路线与本路线开始分岔的位置认定半径（米） */
+        private const val SWITCH_MATCH_M = 35.0
+        /** 驶过分岔点后再留多少米才撤卡片（避免正好在岔口上撤掉，来不及看） */
+        private const val SWITCH_PASS_BUFFER_M = 20.0
 
         /** 更优路线检查间隔（4 分钟，兼顾体验与流量节省） */
         private const val BETTER_ROUTE_INTERVAL_MS = 4 * 60_000L

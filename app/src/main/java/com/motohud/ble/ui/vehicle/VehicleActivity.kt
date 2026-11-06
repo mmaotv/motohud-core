@@ -8,6 +8,7 @@ import android.os.Looper
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -20,8 +21,12 @@ import com.motohud.ble.MotoHudApp
 import com.motohud.ble.R
 import com.motohud.ble.ble.BleConnectionManager
 import com.motohud.ble.data.device.DevicePrefs
+import com.motohud.ble.obd.ObdClient
+import com.motohud.ble.obd.ObdPrefs
+import com.motohud.ble.ui.common.MotoDialog
 import com.motohud.ble.ui.scan.ScanActivity
 import com.motohud.ble.ui.theme.AppTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -40,6 +45,7 @@ import kotlinx.coroutines.launch
 class VehicleActivity : AppCompatActivity() {
 
     private val ble get() = (application as MotoHudApp).bleManager
+    private val obd get() = (application as MotoHudApp).obdClient
 
     private lateinit var dot: View
     private lateinit var stateText: TextView
@@ -50,6 +56,22 @@ class VehicleActivity : AppCompatActivity() {
     private lateinit var fieldMac: TextView
     private lateinit var fieldSession: TextView
     private lateinit var fieldLast: TextView
+
+    // OBD 卡片
+    private lateinit var obdDot: View
+    private lateinit var obdState: TextView
+    private lateinit var obdSub: TextView
+    private lateinit var obdAction: TextView
+    private lateinit var obdGrid: View
+    private lateinit var obdRpm: TextView
+    private lateinit var obdSpeed: TextView
+    private lateinit var obdCoolant: TextView
+    private lateinit var obdVoltage: TextView
+    private lateinit var obdDtcRow: View
+    private lateinit var obdDtcList: TextView
+
+    /** 用户点过"读故障码"才算扫过，否则空列表分不清是"没故障"还是"没读过" */
+    private var dtcScanned = false
 
     /** 连接成功后开始计时，用于「本次连接」 */
     private var connectedAt = 0L
@@ -89,7 +111,62 @@ class VehicleActivity : AppCompatActivity() {
         // 「更换车机」与连接页是同一件事：重新扫描 + 选另一台
         findViewById<View>(R.id.veh_change).setOnClickListener { ScanActivity.start(this) }
 
+        bindObd()
         observeState()
+        handleDebugIntent()
+    }
+
+    /**
+     * debug 包专用：`DebugVehicleAlias` 带 extra 直接触发扫描/连接。
+     *
+     * 测试机 168 不接受 `adb shell input tap`（INJECT_EVENTS 被拒），
+     * 想验证 ELM327 握手只能靠这层入口；release 包里没人会传这些 extra，
+     * 传了也只是走正常的 connect 路径，没有额外权限。
+     */
+    private fun handleDebugIntent() {
+        val i = intent ?: return
+        when {
+            !i.getStringExtra("obd_addr").isNullOrBlank() -> {
+                obd.connect(i.getStringExtra("obd_addr")!!, i.getStringExtra("obd_name"))
+            }
+            i.getBooleanExtra("obd_scan", false) -> obd.startScan()
+        }
+    }
+
+    private fun bindObd() {
+        obdDot = findViewById(R.id.obd_dot)
+        obdState = findViewById(R.id.obd_state)
+        obdSub = findViewById(R.id.obd_sub)
+        obdAction = findViewById(R.id.obd_action)
+        obdGrid = findViewById(R.id.obd_grid)
+        obdRpm = findViewById(R.id.obd_rpm)
+        obdSpeed = findViewById(R.id.obd_speed)
+        obdCoolant = findViewById(R.id.obd_coolant)
+        obdVoltage = findViewById(R.id.obd_voltage)
+        obdDtcRow = findViewById(R.id.obd_dtc_row)
+        obdDtcList = findViewById(R.id.obd_dtc_list)
+
+        obdAction.setOnClickListener { onObdAction() }
+        findViewById<View>(R.id.obd_btn_read).setOnClickListener { readDtcs() }
+        findViewById<View>(R.id.obd_btn_clear).setOnClickListener { confirmClearDtcs() }
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    obd.phase.collect { renderObd(it) }
+                }
+                launch {
+                    obd.live.collect { renderObdLive(it) }
+                }
+                launch {
+                    obd.dtcs.collect { renderDtcs() }
+                }
+                launch {
+                    obd.connectedName.collect { obdSub.text = it ?: obdSub.text }
+                }
+            }
+        }
+        renderObd(obd.phase.value)
     }
 
     private fun observeState() {
@@ -195,6 +272,174 @@ class VehicleActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    // ---------- OBD ----------
+
+    private fun renderObd(p: ObdClient.Phase) {
+        val ready = p == ObdClient.Phase.READY
+        when (p) {
+            ObdClient.Phase.IDLE, ObdClient.Phase.ERROR -> {
+                obdDot.setBackgroundResource(R.drawable.dot_gray)
+                obdState.setText(
+                    if (p == ObdClient.Phase.ERROR) R.string.obd_state_error else R.string.obd_state_off
+                )
+                // 失败原因要留在页面上：Toast 一闪而过，用户没法照着排查
+                if (p == ObdClient.Phase.ERROR) {
+                    obdSub.text = obd.detail.value ?: getString(R.string.obd_state_error)
+                } else if (!obd.live.value.hasData) {
+                    obdSub.setText(R.string.obd_state_off_sub)
+                }
+                obdAction.setText(R.string.obd_connect)
+            }
+            ObdClient.Phase.SCANNING -> {
+                obdDot.setBackgroundResource(R.drawable.dot_orange)
+                obdState.setText(R.string.obd_state_scanning)
+                obdSub.setText(R.string.obd_state_scanning_sub)
+                obdAction.setText(R.string.obd_cancel)
+            }
+            ObdClient.Phase.CONNECTING -> {
+                obdDot.setBackgroundResource(R.drawable.dot_orange)
+                obdState.setText(R.string.obd_state_connecting)
+                obdAction.setText(R.string.obd_cancel)
+            }
+            ObdClient.Phase.INITIALIZING -> {
+                obdDot.setBackgroundResource(R.drawable.dot_orange)
+                obdState.setText(R.string.obd_state_init)
+                obdSub.setText(R.string.obd_state_init_sub)
+                obdAction.setText(R.string.obd_cancel)
+            }
+            ObdClient.Phase.READY -> {
+                obdDot.setBackgroundResource(R.drawable.dot_green)
+                obdState.setText(R.string.obd_state_ready)
+                val name = obd.connectedName.value ?: getString(R.string.vehicle_unknown_device)
+                val ver = obd.adapterId.value
+                obdSub.text = if (ver.isNullOrBlank()) name else "$name · $ver"
+                obdAction.setText(R.string.obd_disconnect)
+                // 连上并初始化成功才记存档，点错设备不会被当成"我的诊断头"
+                val addr = obd.connectedAddress.value
+                if (!addr.isNullOrBlank()) ObdPrefs.save(this, addr, obd.connectedName.value)
+            }
+        }
+        obdGrid.visibility = if (ready) View.VISIBLE else View.GONE
+        obdDtcRow.visibility = if (ready) View.VISIBLE else View.GONE
+        obdDtcList.visibility = if (ready && dtcScanned) View.VISIBLE else View.GONE
+    }
+
+    private fun renderObdLive(l: ObdClient.Live) {
+        obdRpm.text = l.rpm?.toString() ?: getString(R.string.garage_value_empty)
+        obdSpeed.text = l.speed?.toString() ?: getString(R.string.garage_value_empty)
+        obdCoolant.text = l.coolant?.toString() ?: getString(R.string.garage_value_empty)
+        obdVoltage.text = l.voltage?.let { String.format("%.1f", it) }
+            ?: getString(R.string.garage_value_empty)
+    }
+
+    private fun renderDtcs() {
+        val list = obd.dtcs.value
+        if (!dtcScanned) return
+        obdDtcList.visibility = View.VISIBLE
+        obdDtcList.text = if (list.isEmpty()) {
+            getString(R.string.obd_dtc_none)
+        } else {
+            list.joinToString("\n") { "${it.code}  ${it.kind.label}" }
+        }
+    }
+
+    private fun onObdAction() {
+        when (obd.phase.value) {
+            ObdClient.Phase.READY,
+            ObdClient.Phase.CONNECTING,
+            ObdClient.Phase.INITIALIZING,
+            ObdClient.Phase.SCANNING -> {
+                obd.stopScan()
+                obd.disconnect()
+                dtcScanned = false
+                renderObd(ObdClient.Phase.IDLE)
+                renderObdLive(ObdClient.Live())
+            }
+            else -> showDevicePicker()
+        }
+    }
+
+    /**
+     * 先扫再选。
+     *
+     * 为什么不是"扫到就自动连"：手机上同时存在车机、耳机、手环好几个 BLE 设备，
+     * 自动连错一次要等十几秒超时才恢复；让用户点一下，代价小得多。
+     * 原 App 也是扫到后弹「是否连接该设备」。
+     */
+    private fun showDevicePicker() {
+        obd.startScan()
+        lifecycleScope.launch {
+            val saved = ObdPrefs.saved.value
+            // 有存档就只扫 2.5s（用户多半就是连它）；没有才等满 9s 找新设备。
+            // 无限等会让「诊断头没插」变成一次十秒的干等。
+            val deadline = System.currentTimeMillis() + if (saved == null) 9_000L else 2_500L
+            var list: List<ObdClient.Device> = emptyList()
+            while (System.currentTimeMillis() < deadline) {
+                delay(500)
+                list = obd.devices.value
+                if (saved == null && list.isNotEmpty()) break
+            }
+            // 存档置顶：点火没开时诊断头不广播，但用户就是要连它
+            val merged = ArrayList<ObdClient.Device>(list.size + 1)
+            if (saved != null && list.none { it.address.equals(saved.first, true) }) {
+                merged += ObdClient.Device(
+                    saved.second.ifBlank { saved.first },
+                    saved.first,
+                    Int.MIN_VALUE
+                )
+            }
+            merged += list
+            if (merged.isEmpty()) {
+                obd.stopScan()
+                Toast.makeText(this@VehicleActivity, R.string.obd_no_device, Toast.LENGTH_SHORT).show()
+                renderObd(ObdClient.Phase.IDLE)
+                return@launch
+            }
+            val labels = merged.map { d ->
+                val tag = if (d.rssi == Int.MIN_VALUE) " · ${getString(R.string.obd_last_used)}" else ""
+                "${d.name}$tag\n${d.address}"
+            }.toTypedArray()
+            MotoDialog.builder(this@VehicleActivity)
+                .setTitle(R.string.obd_pick_title)
+                .setItems(labels) { _, i ->
+                    obd.stopScan()
+                    obd.connect(merged[i].address, merged[i].name)
+                }
+                .setNegativeButton(R.string.obd_cancel, null)
+                .setOnDismissListener { obd.stopScan() }
+                .show()
+        }
+    }
+
+    private fun readDtcs() {
+        lifecycleScope.launch {
+            Toast.makeText(this@VehicleActivity, R.string.obd_reading, Toast.LENGTH_SHORT).show()
+            obd.readDtcs()
+            dtcScanned = true
+            renderDtcs()
+            renderObd(obd.phase.value)
+        }
+    }
+
+    private fun confirmClearDtcs() {
+        MotoDialog.builder(this)
+            .setTitle(R.string.obd_clear_confirm_title)
+            .setMessage(R.string.obd_clear_confirm_msg)
+            .setPositiveButton(R.string.obd_clear_dtc) { _, _ ->
+                lifecycleScope.launch {
+                    val ok = obd.clearDtcs()
+                    Toast.makeText(
+                        this@VehicleActivity,
+                        if (ok) R.string.obd_cleared else R.string.obd_clear_failed,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    renderDtcs()
+                }
+            }
+            .setNegativeButton(R.string.obd_cancel, null)
+            .show()
     }
 
     private fun relativeTime(ts: Long): String {
