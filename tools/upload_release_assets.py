@@ -19,10 +19,10 @@ import urllib.parse
 import urllib.request
 
 REPO = "mmaotv/motohud-core"
-TAG = "v0.0.27"
+TAG = "v0.0.36"
 ASSETS = [
-    ("release-v0.0.27/motohud-v0.0.27-arm64.apk", "motohud-v0.0.27-arm64.apk"),
-    ("release-v0.0.27/motohud-v0.0.27-armv7.apk", "motohud-v0.0.27-armv7.apk"),
+    ("release-v0.0.36/motohud-v0.0.36-arm64.apk", "motohud-v0.0.36-arm64.apk"),
+    ("release-v0.0.36/motohud-v0.0.36-armv7.apk", "motohud-v0.0.36-armv7.apk"),
 ]
 RETRIES = 4
 
